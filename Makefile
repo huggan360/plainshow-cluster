@@ -10,7 +10,7 @@ LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build check test vet fmt web clean install dist run smoke
+.PHONY: all build check test vet fmt web clean install dist release run smoke
 
 all: build
 
@@ -57,12 +57,33 @@ smoke: build
 		status=$$?; kill $$(cat .smokepid) 2>/dev/null; \
 		rm -rf .smokenode .smokepid; exit $$status
 
-## dist: cross-compile for the machines a cluster is actually made of
+## dist: build the release assets, named as the updater expects to find them
+##
+## Asset names are a contract: internal/updater looks for pscluster-<os>-<arch>
+## and reads checksums.txt in sha256sum format. Renaming either breaks every
+## node's ability to update itself, silently, because a release with nothing for
+## a platform simply looks like no release at all.
 dist: web
-	@mkdir -p dist
+	@rm -rf dist && mkdir -p dist
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-amd64 $(PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
+	@cd dist && sha256sum $(BINARY)-* > checksums.txt
+	@echo
 	@ls -lh dist/
+	@echo
+	@cat dist/checksums.txt
+
+## release: check, build the assets, and print the commands to publish them
+release: check dist
+	@echo
+	@echo "  Assets are in dist/ for version $(VERSION)."
+	@echo
+	@echo "  Publish them:"
+	@echo "    git tag -a v<version> -m 'v<version>' && git push origin v<version>"
+	@echo
+	@echo "  Pushing the tag runs .github/workflows/release.yml, which rebuilds"
+	@echo "  and attaches these assets. Nodes with update.enabled find it within"
+	@echo "  update.check_every."
 
 ## install: copy the binary into the install root's bin directory
 install: build

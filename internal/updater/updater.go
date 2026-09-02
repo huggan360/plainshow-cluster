@@ -377,18 +377,34 @@ func (u *Updater) expectedChecksum(ctx context.Context, release *Release) (strin
 		return "", err
 	}
 
-	// Either a bare hash, or "<hash>  <filename>" lines as sha256sum writes.
-	text := strings.TrimSpace(string(body))
-	if !strings.ContainsAny(text, " \n") && len(text) == 64 {
-		return text, nil
+	if sum := parseChecksums(string(body), release.AssetName); sum != "" {
+		return sum, nil
+	}
+	return "", errors.New("the checksum file does not contain this platform's asset")
+}
+
+// parseChecksums finds one asset's SHA-256 in a published checksum file.
+//
+// It accepts a bare hash or sha256sum's "<hash>  <name>" lines, with or without
+// the binary-mode asterisk, and returns "" when the asset is not listed. The
+// caller turns that into a refusal to install, so this is the piece that
+// decides whether a release is verifiable — which is why it is tested against
+// real sha256sum output rather than a hand-written sample.
+func parseChecksums(body, asset string) string {
+	text := strings.TrimSpace(body)
+	if text == "" {
+		return ""
+	}
+	if !strings.ContainsAny(text, " \n\t") && len(text) == 64 {
+		return text
 	}
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == release.AssetName {
-			return fields[0], nil
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == asset {
+			return fields[0]
 		}
 	}
-	return "", errors.New("the checksum file does not contain this platform's asset")
+	return ""
 }
 
 // verifyRuns checks that a downloaded binary executes on this machine.

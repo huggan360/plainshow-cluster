@@ -1,0 +1,66 @@
+# Publish a release when a version tag is pushed.
+#
+# The asset names here are a contract with internal/updater: it looks for
+# pscluster-<os>-<arch> and reads checksums.txt in sha256sum format. A release
+# that does not carry an asset for a platform is invisible to nodes on it, so
+# renaming these silently stops those machines updating.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # so `git describe` can see the tag
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The same gate that guards a commit guards a release. A build nobody can
+      # roll back is the wrong place to discover a broken test.
+      - name: Check
+        run: make check
+
+      - name: Build release assets
+        run: make dist
+
+      - name: Verify the assets are what a node will look for
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          for asset in pscluster-linux-amd64 pscluster-linux-arm64 checksums.txt; do
+            test -s "dist/$asset" || { echo "missing dist/$asset"; exit 1; }
+          done
+          # The binary must report the tag it was built from, or a node will
+          # download this release forever and never consider itself current.
+          reported="$(./dist/pscluster-linux-amd64 version || true)"
+          echo "reported: $reported"
+          case "$reported" in
+            *"$version"*) ;;
+            *) echo "binary reports '$reported', which does not contain '$version'"; exit 1 ;;
+          esac
+          cd dist && sha256sum -c checksums.txt
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/pscluster-linux-amd64
+            dist/pscluster-linux-arm64
+            dist/checksums.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true

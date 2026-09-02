@@ -1,0 +1,32 @@
+# Run the same gate on every push and pull request that runs before a commit.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check
+        run: make check
+
+      # The race detector needs a 48-bit VMA. It refuses to start on some arm64
+      # boards, including the Raspberry Pi 5, which is why it is not part of
+      # `make check` — but CI is x86, so this is where it gets to run.
+      - name: Race
+        run: make race
+
+      - name: End to end
+        run: make smoke

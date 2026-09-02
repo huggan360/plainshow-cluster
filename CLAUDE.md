@@ -141,8 +141,12 @@ Phases 0–5 are landed. What remains, in order:
 3. **Phase 7 — real-machine validation.** A genuine multi-GPU `torchrun` across
    two CUDA machines. The launcher is implemented and unit-tested; it has never
    run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
-4. **Phase 8 — release engineering.** Tagged releases with per-platform assets
-   and checksums so the updater has something to update from; signed builds.
+4. **Phase 8 — release engineering.** Landed: `make dist` writes the assets the
+   updater looks for plus `checksums.txt`, and pushing a `v*` tag runs
+   `.github/workflows/release.yml`, which re-runs the gate, verifies the binary
+   reports the tag, and publishes. **No release has been cut yet**, so every
+   node's update check currently answers "no releases found" — correctly.
+   Signed builds are still open.
 
 ## How the command line reaches the daemon
 
@@ -189,6 +193,11 @@ There is no browser on a GPU box to sign in with.
 - **The peer port only opens when a peer exists or a join code is outstanding**,
   and it is polled every two seconds rather than checked once, because an
   invite created on a running node has to open it.
+- **Release asset names are a contract with the updater.** It looks for
+  `pscluster-<os>-<arch>` and reads `checksums.txt`. A release missing an asset
+  for a platform is invisible to nodes on it — it looks like no release at all,
+  and nothing reports an error. `internal/updater/release_test.go` reads the
+  Makefile to keep the two ends agreeing.
 
 ## Picking this up
 
