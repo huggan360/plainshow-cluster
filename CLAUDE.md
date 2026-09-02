@@ -103,9 +103,10 @@ These are **not** approved designs. They are drift, recorded so they get paid
 down rather than copied. Each replaced something the original plan had already
 chosen correctly.
 
-1. **`internal/mesh` + `internal/tunnel` instead of Tailscale.** *Being paid
-   down now.* `internal/tailnet` drives the daemon and this machine already
-   advertises its tailnet address when it has one. See the migration below.
+1. **`internal/mesh` instead of Tailscale.** *Mostly paid down.*
+   `internal/tunnel` is gone; `internal/tailnet` drives the daemon and this
+   machine advertises its tailnet address. `internal/mesh` still carries mTLS
+   and request signing, which are worth keeping — see the migration below.
 2. **`internal/notebook` instead of `jupyter_server`.** A hand-written Python
    kernel. Files are real `.ipynb`, but there are no ipywidgets, no rich MIME
    output, no completion or inspection, and every one of those is free from the
@@ -163,6 +164,30 @@ internal/
 web/               interface, embedded via embed.FS, no build step
 scripts/           checks a compiler cannot do
 ```
+
+## Where this actually is — roughly 70%
+
+Assessed by running it, not by reading commit messages.
+
+| Area | State |
+|---|---|
+| Single-machine workspace: files, editor, run, live logs, jobs | done |
+| GitHub: repos, push/pull, two-way team sync | done |
+| Auth, permissions, CLI parity | done |
+| Datasets | ~80% — content-addressed and syncing; no sharding |
+| Collaborative editing | ~85% — no offline mode; overlapping edits lose intention |
+| Notebooks | ~70% — real `.ipynb`; no widgets, rich output or completions |
+| Updates and releases | ~70% — built end to end, never exercised, no release cut |
+| Multi-machine networking | ~55% — mid-migration to tailscale |
+| Distributed training | ~50% — launcher complete and guarded, **never run on a real GPU** |
+| **Terminal** | **0% — not built.** `allow_terminal` guards a feature that does not exist |
+| Install hardening and docs | ~60% |
+
+Remaining is about two and a half weeks, but it holds most of the risk.
+Everything above could be verified on the development Pi; a multi-GPU
+`torchrun` across two CUDA machines never has been, and that is where this kind
+of estimate usually breaks. Expect the driver and CUDA mismatch handling to be
+wrong in some specific way that only appears on real hardware.
 
 ## Roadmap
 
@@ -251,14 +276,14 @@ and nothing else, which was never the traffic that was stuck.
 **Next, in order**
 
 3. **Carry an auth key in the join code.** `mesh.Invite` gains an optional
-   tailscale auth key; `pscluster join` calls `tailnet.Up` before enrolling.
-   Joining a Plainshow network and joining its tailnet become one step.
-4. **Delete `internal/tunnel`.** It exists only to reach machines that cannot be
-   dialled. Once every machine has a tailnet address that stops being true, and
-   `clientForNode` goes back to simply dialling the peer. Remove the registry,
-   the dialer, the trusted-marker path in `mesh.Authenticate`, and `StartTunnels`.
-   **Do not delete it before step 3 ships** — until then it is the only way a
-   NATed worker is reachable at all.
+   tailscale auth key; `pscluster join` calls `tailnet.Up` before enrolling, so
+   joining a Plainshow network and joining its tailnet are one step. This is
+   convenience, not correctness — `tailscale up` by hand works today — which is
+   why step 4 did not wait for it.
+4. ~~**Delete `internal/tunnel`.**~~ Done. The registry, dialer, trusted-marker
+   path and `StartTunnels` are gone, and `clientForNode` simply dials the peer.
+   Cross-network now requires tailscale, which is the honest requirement rather
+   than a second half-working networking stack.
 5. **Simplify `internal/mesh`.** Keep mTLS and request signing: they are cheap
    and mean a stolen tailnet position still proves nothing. Drop everything that
    exists to work around unreachability.
@@ -268,25 +293,19 @@ and nothing else, which was never the traffic that was stuck.
 
 Steps 3–6 are roughly a week. The codebase gets smaller at every step.
 
-## How a machine behind NAT is reached
+## How a machine on another network is reached
 
-`internal/tunnel`. Dialling a peer needs it to be reachable, which a home
-desktop is not. So a worker connects out to its coordinator and keeps the
-connection open; the coordinator sends mesh requests down it and reads the
-replies. Outbound is the only direction that reliably works, so it is the only
-direction used.
+Through **tailscale**, which Plainshow drives rather than implements. Install it
+on both machines, sign them in, and the address tailscale hands out is the
+address Plainshow records and dials — and the same address torch and NCCL use,
+so a link the cluster proves reachable is the link training runs over.
 
-What crosses the tunnel is exactly what would have crossed the peer port — same
-paths, same JSON, same handler. `peerTransport` in `internal/api` is the seam:
-a direct `mesh.Client` and an open tunnel are interchangeable, so nothing above
-the transport knows which it got.
-
-The connection is signature-checked once, at the upgrade, and every frame after
-it inherits that proof rather than signing itself. That is what
-`mesh.TrustedTunnelHeader` marks — and it is why `mesh.StripTunnelMarker` wraps
-the network-facing handler. **Without that strip, anybody who could reach the
-peer port could impersonate an enrolled machine with one header.** There is a
-test for exactly this; do not remove it.
+There is no fallback and that is deliberate. A reverse tunnel used to carry
+control traffic to unreachable machines; it worked, and it could never carry
+training, because NCCL is a separate process needing a real interface. Keeping
+it would have meant maintaining a second networking stack that solved half the
+problem. `clientForNode` now says plainly that a machine has no reachable
+address and that tailscale is how to fix it, which is more use than a timeout.
 
 ## Traps found the hard way
 

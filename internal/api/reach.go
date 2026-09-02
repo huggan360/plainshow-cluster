@@ -25,9 +25,9 @@ type reachResult struct {
 // acceptReachCheck answers whether this machine can reach an address.
 //
 // This exists because distributed training does not use the mesh. Ranks talk to
-// each other over raw TCP that torch and NCCL open themselves, so a tunnel
-// cannot carry it: rank 1 must genuinely be able to connect to rank 0's
-// rendezvous port. Whether it can is a fact only rank 1 can establish, so it is
+// each other over raw TCP that torch and NCCL open themselves, in their own
+// processes: rank 1 must genuinely be able to connect to rank 0's rendezvous
+// port, on a real network interface. Whether it can is a fact only rank 1 can establish, so it is
 // asked.
 func (s *Server) acceptReachCheck(w http.ResponseWriter, r *http.Request) {
 	var body reachRequest

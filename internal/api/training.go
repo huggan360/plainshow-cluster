@@ -110,7 +110,7 @@ func (s *Server) trainingPreflight(w http.ResponseWriter, r *http.Request) {
 //
 // This is the check whose absence produces the worst failure this product can
 // have. Distributed training does not use the mesh: ranks connect to each other
-// over raw TCP that torch opens itself, so a tunnel cannot carry it. Without
+// over raw TCP that torch opens itself, on a real interface. Without
 // this, launching across two home networks starts normally, hangs in NCCL
 // rendezvous for ten minutes, and dies with an error about a socket. The run
 // looks like it is training the whole time.

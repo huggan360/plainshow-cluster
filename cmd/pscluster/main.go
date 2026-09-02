@@ -456,9 +456,6 @@ func cmdServe(args []string) error {
 	defer stop()
 
 	srv.StartTelemetry(ctx, 3*time.Second)
-	// Machines that do not coordinate a network connect out to the one that
-	// does, so a worker behind NAT stays reachable without a forwarded port.
-	srv.StartTunnels(ctx)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())

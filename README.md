@@ -169,13 +169,10 @@ signs this machine into the tailnet and records the address it got. That address
 is what training uses too, so a link the cluster proves reachable is the link
 NCCL will run over.
 
-A machine with no reachable address — an ordinary desktop behind NAT, or behind
-carrier-grade NAT — connects out to its coordinator and keeps that connection
-open, and work arrives back down it. No forwarded port, nothing configured on a
-router. One machine still has to be reachable for the others to dial: a desktop
-with a forwarded port, a cheap always-on box, or any address both sides can
-see. Bulk transfer between two unreachable machines currently passes through
-the coordinator rather than going directly, which is the relay work still open. The
+A machine with no reachable address of its own — an ordinary desktop behind NAT,
+or behind carrier-grade NAT — is reached at its tailnet address. There is no
+Plainshow-specific fallback: cross-network needs tailscale on both machines, and
+the interface says so rather than timing out. The
 distributed launcher is implemented and its lifecycle is tested with local and
 two-node integration runs; a real multi-GPU PyTorch run still needs validation
 on CUDA machines before the Phase 5 alpha is published.
