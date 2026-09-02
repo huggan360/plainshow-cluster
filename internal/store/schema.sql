@@ -43,3 +43,27 @@ CREATE TABLE IF NOT EXISTS job (
 
 CREATE INDEX IF NOT EXISTS job_created_idx ON job (created_at DESC);
 CREATE INDEX IF NOT EXISTS job_project_idx ON job (project_id, created_at DESC);
+
+-- People with access to this cluster's projects, and what each may do.
+--
+-- The capability set mirrors the Plainshow console's so the two products behave
+-- the same way, with the two hosting capabilities replaced by the two that
+-- matter here: run (start jobs and notebooks) and train (start distributed
+-- training runs).
+CREATE TABLE IF NOT EXISTS member (
+    project_id  TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    github_login TEXT NOT NULL DEFAULT '',
+    view        INTEGER NOT NULL DEFAULT 1,
+    code        INTEGER NOT NULL DEFAULT 0,
+    push        INTEGER NOT NULL DEFAULT 0,
+    run         INTEGER NOT NULL DEFAULT 0,
+    train       INTEGER NOT NULL DEFAULT 0,
+    manage      INTEGER NOT NULL DEFAULT 0,
+    -- The role GitHub last reported, so a later sync can tell "unchanged there"
+    -- apart from "somebody changed it there".
+    github_role TEXT NOT NULL DEFAULT '',
+    owner       INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, username)
+);

@@ -47,6 +47,8 @@ ok('node roles', JSON.stringify(ov.node.roles) === '["master","worker"]');
 ok('self machine registered', ov.machines.length === 1 && ov.machines[0].is_self);
 ok('system probed', ov.system.cpu_cores > 0 && ov.system.ram_total_mb > 0);
 ok('git detected', ov.git_available === true);
+ok('GitHub starts disconnected', ov.github.connected === false);
+ok('updater is configured', ov.update.repository === 'huggan360/plainshow-cluster');
 
 console.log('\nPROJECTS');
 const created = await j('/api/projects', { method: 'POST', body: { name: 'demo', description: 'smoke' } });
@@ -55,6 +57,17 @@ ok('duplicate name refused', (await j('/api/projects', { method: 'POST', body: {
 ok('bad name refused', (await j('/api/projects', { method: 'POST', body: { name: '../evil' } })).status === 400);
 ok('starter files present', (await j('/api/projects/demo/tree')).body.length === 2);
 ok('missing project 404s', (await j('/api/projects/ghost/tree')).status === 404);
+
+console.log('\nTEAM / GITHUB');
+const members = (await j('/api/projects/demo/members')).body;
+ok('new project has one owner', members.members.length === 1 && members.members[0].owner);
+ok('owner has every capability', members.capabilities.every((name) =>
+  members.members[0].capabilities[name] === true));
+ok('GitHub status is usable without a token', (await j('/api/github')).body.connected === false);
+ok('repository link requires GitHub',
+  (await j('/api/projects/demo/repository', {
+    method: 'POST', body: { repository: 'plainshow/demo' },
+  })).status === 428);
 
 console.log('\nFILES');
 ok('write', (await j('/api/projects/demo/file', { method: 'PUT', body: { path: 'a/b/deep.py', content: 'x=1\n' } })).status === 200);
@@ -107,11 +120,18 @@ const stopped = await waitFor(async () =>
 ok('job stopped', stopped === true);
 
 console.log('\nSETTINGS / POLICY');
-ok('terminal off by default', (await j('/api/settings')).body.worker.allow_terminal === false);
+const settings = (await j('/api/settings')).body;
+ok('terminal off by default', settings.worker.allow_terminal === false);
+ok('update settings exposed', settings.update.enabled === true && settings.update.channel === 'stable');
 await j('/api/settings', { method: 'PUT', body: { worker: { enabled: false, allow_jobs: true, allow_gpu: true, allow_terminal: false } } });
 ok('policy refuses work when disabled', (await j('/api/jobs', { method: 'POST', body: { command: 'echo nope' } })).status === 403);
 await j('/api/settings', { method: 'PUT', body: { worker: { enabled: true, allow_jobs: true, allow_gpu: true, allow_terminal: false } } });
 ok('policy restored', (await j('/api/jobs', { method: 'POST', body: { command: 'true' } })).status === 201);
+const updateStatus = (await j('/api/update')).body;
+ok('update endpoint reports current version', !!updateStatus.current && updateStatus.enabled);
+ok('invalid update repository refused', (await j('/api/settings', {
+  method: 'PUT', body: { update: { ...settings.update, repository: 'not-a-repository' } },
+})).status === 400);
 
 console.log('\nDELETE PROJECT');
 ok('delete project', (await j('/api/projects/demo', { method: 'DELETE' })).status === 200);

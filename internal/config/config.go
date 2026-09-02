@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +29,11 @@ const EnvRoot = "PSCLUSTER_ROOT"
 // DefaultPort is where the web interface listens when nothing else is asked
 // for. Init probes upward from here for a free port rather than assuming it.
 const DefaultPort = 9999
+
+// DefaultUpdateRepository is where a node looks for new releases until it is
+// told otherwise. It is a default, not a constant of the system: point
+// update.repository at a fork or a mirror and nothing else changes.
+const DefaultUpdateRepository = "huggan360/plainshow-cluster"
 
 // Role is a capability a machine carries in the cluster.
 type Role string
@@ -63,6 +69,37 @@ type Config struct {
 	Cluster ClusterConfig `yaml:"cluster" json:"cluster"`
 	Network NetworkConfig `yaml:"network" json:"network"`
 	Worker  WorkerConfig  `yaml:"worker" json:"worker"`
+	Update  UpdateConfig  `yaml:"update" json:"update"`
+}
+
+// UpdateConfig controls how this node keeps itself current.
+//
+// Nothing here names a particular repository at build time: the source is a
+// setting like everything else, so a fork or a private mirror works without a
+// code change.
+type UpdateConfig struct {
+	Enabled    bool   `yaml:"enabled" json:"enabled"`
+	Repository string `yaml:"repository" json:"repository"`
+	Channel    string `yaml:"channel" json:"channel"`
+	// CheckEvery is a Go duration such as "6h". Zero disables the timer while
+	// leaving manual checks available.
+	CheckEvery string `yaml:"check_every" json:"check_every"`
+	// Automatic applies a found update without being asked. Off by default:
+	// replacing the binary under a running training job is the machine owner's
+	// decision, not the cluster's.
+	Automatic bool `yaml:"automatic" json:"automatic"`
+}
+
+// CheckInterval parses CheckEvery, falling back to six hours.
+func (u UpdateConfig) CheckInterval() time.Duration {
+	if u.CheckEvery == "" {
+		return 6 * time.Hour
+	}
+	d, err := time.ParseDuration(u.CheckEvery)
+	if err != nil || d < time.Minute {
+		return 6 * time.Hour
+	}
+	return d
 }
 
 // NodeConfig identifies this machine within the cluster.
@@ -139,6 +176,13 @@ func Defaults() *Config {
 			MaxCPU:        0,
 			MaxRAMMB:      0,
 		},
+		Update: UpdateConfig{
+			Enabled:    true,
+			Repository: DefaultUpdateRepository,
+			Channel:    "stable",
+			CheckEvery: "6h",
+			Automatic:  false,
+		},
 	}
 }
 
@@ -173,7 +217,12 @@ func (l Layout) Logs() string       { return filepath.Join(l.Root, "logs") }
 func (l Layout) JobLogs() string    { return filepath.Join(l.Root, "logs", "jobs") }
 func (l Layout) Run() string        { return filepath.Join(l.Root, "run") }
 func (l Layout) Bin() string        { return filepath.Join(l.Root, "bin") }
-func (l Layout) PIDFile() string    { return filepath.Join(l.Root, "run", "pscluster.pid") }
+func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "pscluster") }
+
+// GitHubToken is where this node keeps its GitHub credential. It is inside the
+// install root like everything else, and readable only by the owner.
+func (l Layout) GitHubToken() string { return filepath.Join(l.Root, "keys", "github.token") }
+func (l Layout) PIDFile() string     { return filepath.Join(l.Root, "run", "pscluster.pid") }
 
 // Dirs lists every directory the node expects to exist.
 func (l Layout) Dirs() []string {
@@ -254,6 +303,15 @@ func (c *Config) applyFallbacks() {
 	}
 	if c.Network.Bind == "" {
 		c.Network.Bind = d.Network.Bind
+	}
+	if c.Update.Repository == "" {
+		c.Update.Repository = d.Update.Repository
+	}
+	if c.Update.Channel == "" {
+		c.Update.Channel = d.Update.Channel
+	}
+	if c.Update.CheckEvery == "" {
+		c.Update.CheckEvery = d.Update.CheckEvery
 	}
 }
 

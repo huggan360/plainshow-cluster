@@ -3,6 +3,8 @@
 import { el, mount, ago, bytes, fileIcon, stateDot } from '../lib/ui.js';
 import { api, on, toast, modal, navigate, refresh, state } from '../lib/client.js';
 import { highlight, languageOf } from '../lib/highlight.js';
+import { teamPanel, repositoryPanel } from './team.js';
+import { cloneForm } from './github.js';
 
 export async function renderWorkspace(host, args) {
     if (args.length > 0) return renderProject(host, args[0], args.slice(1).join('/'));
@@ -26,8 +28,11 @@ async function renderProjectList(host) {
                     el('p', { class: 'page__sub' },
                         'A project is a folder of code. Edit it here, run it on this ' +
                         'machine, and keep its history in git.')),
-                el('button', { class: 'btn btn--primary', onclick: () => newProject(draw) },
-                    '+ New project')),
+                el('div', { style: 'display:flex;gap:8px' },
+                    el('button', { class: 'btn', onclick: () => cloneForm(draw) },
+                        'Clone from GitHub'),
+                    el('button', { class: 'btn btn--primary', onclick: () => newProject(draw) },
+                        '+ New project'))),
             projects.length
                 ? el('div', { class: 'grid grid--3' }, ...projects.map(card))
                 : el('div', { class: 'panel' }, el('div', { class: 'empty' },
@@ -107,7 +112,6 @@ async function renderProject(host, name, initialPath) {
     const treeBox = el('div', { class: 'tree' });
     const editorBox = el('div', { class: 'editor' });
     const outputBox = el('div', { class: 'console' });
-    const gitBox = el('div', {});
     let currentJob = null;
 
     // ---- file tree ----
@@ -294,52 +298,11 @@ async function renderProject(host, name, initialPath) {
         } catch (err) { toast(err.message, 'err'); }
     }
 
-    // ---- git ----
+    // ---- repository and team ----
 
-    async function loadGit() {
-        let git;
-        try {
-            git = await api(`/api/projects/${encodeURIComponent(name)}/git`);
-        } catch { return; }
-
-        if (!git.available) {
-            mount(gitBox, el('p', { class: 'muted', style: 'font-size:12.5px;margin:0' },
-                'git is not installed on this machine, so this project has no history.'));
-            return;
-        }
-        mount(gitBox,
-            el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:12px' },
-                el('span', { class: 'chip chip--cyan' }, git.branch || 'main'),
-                el('span', { class: 'chip' },
-                    `${git.changes.length} change${git.changes.length === 1 ? '' : 's'}`),
-                el('span', { style: 'flex:1' }),
-                el('button', {
-                    class: 'btn btn--sm', disabled: git.changes.length === 0,
-                    onclick: () => commit(name, loadGit),
-                }, 'Commit')),
-            git.changes.length
-                ? el('div', { class: 'rows' }, ...git.changes.slice(0, 8).map((c) =>
-                    el('div', { class: 'row', style: 'cursor:default' },
-                        el('span', {
-                            class: `chip ${c.status === 'new' ? 'chip--good' : 'chip--warn'}`,
-                        }, c.status),
-                        el('span', { class: 'row__main' },
-                            el('span', { class: 'row__title mono', style: 'font-size:12px' },
-                                c.path)))))
-                : el('p', { class: 'muted', style: 'font-size:12.5px;margin:0' },
-                    'Everything is committed.'),
-            git.log.length
-                ? el('div', { style: 'margin-top:14px' },
-                    el('div', { class: 'panel__head' }, 'History'),
-                    el('div', { class: 'rows' }, ...git.log.slice(0, 5).map((entry) =>
-                        el('div', { class: 'row', style: 'cursor:default' },
-                            el('span', { class: 'mono dim', style: 'font-size:10.5px' },
-                                entry.short),
-                            el('span', { class: 'row__main' },
-                                el('span', { class: 'row__title' }, entry.subject),
-                                el('span', { class: 'row__meta' }, ago(entry.when)))))))
-                : null);
-    }
+    const repository = repositoryPanel(name, loadTree);
+    const team = teamPanel(name);
+    const loadGit = repository.reload;
 
     // ---- assemble ----
 
@@ -381,13 +344,14 @@ async function renderProject(host, name, initialPath) {
                         runBtn, stopBtn),
                     el('div', { style: 'margin-top:12px' }, outputBox)),
                 el('div', { class: 'panel' },
-                    el('div', { class: 'panel__head' }, 'Version history'), gitBox))));
+                    el('div', { class: 'panel__head' }, 'Repository'), repository.node),
+                el('div', { class: 'panel' },
+                    el('div', { class: 'panel__head' }, 'Team'), team.node))));
 
     mount(outputBox, el('div', { class: 'console__line console__line--meta' },
         'Output appears here when you run something.'));
 
     await loadTree();
-    await loadGit();
     if (ctx.path) await openFile(ctx.path);
     paint();
 

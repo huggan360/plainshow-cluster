@@ -26,6 +26,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/updater"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 	"github.com/huggan360/plainshow-cluster/web"
 )
@@ -295,14 +296,16 @@ func cmdServe(args []string) error {
 
 	hub := events.NewHub()
 	sup := jobs.NewSupervisor(st, hub, l, cfg)
+	up := updater.New(cfg, l, hub)
 
-	srv := api.New(cfg, l, st, hub, sup, web.Assets)
+	srv := api.New(cfg, l, st, hub, sup, up, web.Assets)
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	srv.StartTelemetry(ctx, 3*time.Second)
+	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())
 

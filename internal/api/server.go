@@ -30,23 +30,26 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/updater"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
 
 // Server holds everything a request might need.
 type Server struct {
-	cfg    *config.Config
-	layout config.Layout
-	store  *store.Store
-	hub    *events.Hub
-	sup    *jobs.Supervisor
-	web    fs.FS
+	cfg     *config.Config
+	layout  config.Layout
+	store   *store.Store
+	hub     *events.Hub
+	sup     *jobs.Supervisor
+	updater *updater.Updater
+	web     fs.FS
 }
 
 // New builds a server. web is the embedded interface, rooted at its index.html.
 func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
-	sup *jobs.Supervisor, web fs.FS) *Server {
-	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup, web: web}
+	sup *jobs.Supervisor, up *updater.Updater, web fs.FS) *Server {
+	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
+		updater: up, web: web}
 }
 
 // Handler builds the route table.
@@ -74,6 +77,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /api/jobs/{id}/logs", s.getJobLogs)
 	mux.HandleFunc("POST /api/jobs/{id}/stop", s.stopJob)
+
+	mux.HandleFunc("GET /api/projects/{name}/members", s.listMembers)
+	mux.HandleFunc("POST /api/projects/{name}/members", s.addMember)
+	mux.HandleFunc("PUT /api/projects/{name}/members/{username}", s.updateMember)
+	mux.HandleFunc("DELETE /api/projects/{name}/members/{username}", s.removeMember)
+	mux.HandleFunc("POST /api/projects/{name}/members/sync", s.syncMembers)
+
+	mux.HandleFunc("POST /api/projects/{name}/repository", s.linkRepository)
+	mux.HandleFunc("DELETE /api/projects/{name}/repository", s.unlinkRepository)
+	mux.HandleFunc("POST /api/projects/{name}/push", s.gitPush)
+	mux.HandleFunc("POST /api/projects/{name}/pull", s.gitPull)
+	mux.HandleFunc("POST /api/projects/{name}/merge/abort", s.gitAbortMerge)
+
+	mux.HandleFunc("GET /api/github", s.githubStatus)
+	mux.HandleFunc("POST /api/github", s.githubConnect)
+	mux.HandleFunc("DELETE /api/github", s.githubDisconnect)
+	mux.HandleFunc("GET /api/github/repositories", s.githubRepositories)
+	mux.HandleFunc("POST /api/github/clone", s.cloneRepository)
+
+	mux.HandleFunc("GET /api/update", s.updateStatus)
+	mux.HandleFunc("POST /api/update/check", s.updateCheck)
+	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
@@ -186,6 +211,8 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		"recent_jobs":   recent,
 		"system":        sysinfo.Probe(s.layout.Root),
 		"git_available": gitrepo.Available(),
+		"github":        map[string]bool{"connected": s.tokenStore().Connected()},
+		"update":        s.updater.Status(),
 	})
 }
 
@@ -258,6 +285,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.seedOwner(p)
 	s.hub.Publish("project.created", p)
 	writeJSON(w, 201, p)
 }
@@ -411,6 +439,7 @@ func (s *Server) gitState(w http.ResponseWriter, r *http.Request) {
 	if !gitrepo.Available() {
 		writeJSON(w, 200, map[string]any{
 			"available": false, "changes": []any{}, "log": []any{},
+			"conflicts": []any{}, "repository": "",
 		})
 		return
 	}
@@ -425,12 +454,26 @@ func (s *Server) gitState(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{
-		"available": true,
-		"branch":    repo.Branch(),
-		"changes":   changes,
-		"log":       entries,
-	})
+	repository := s.projectRepo(p)
+	response := map[string]any{
+		"available":  true,
+		"branch":     repo.Branch(),
+		"changes":    changes,
+		"log":        entries,
+		"repository": repository,
+		"in_merge":   repo.InMerge(),
+		"conflicts":  []string{},
+	}
+	if repository != "" {
+		response["ahead"] = repo.Ahead()
+		response["behind"] = repo.Behind()
+	}
+	if repo.InMerge() {
+		if conflicts, err := repo.Conflicts(); err == nil {
+			response["conflicts"] = conflicts
+		}
+	}
+	writeJSON(w, 200, response)
 }
 
 func (s *Server) gitCommit(w http.ResponseWriter, r *http.Request) {
@@ -551,6 +594,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"cluster": s.cfg.Cluster,
 		"network": s.cfg.Network,
 		"worker":  s.cfg.Worker,
+		"update":  s.cfg.Update,
 		"root":    s.layout.Root,
 		"version": version.Version,
 		"paths": map[string]string{
@@ -564,9 +608,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// putSettings updates the machine owner's policy. Only the worker block is
-// writable over HTTP: identity and network settings belong to whoever has a
-// shell on the machine, not to a browser.
+// putSettings updates machine-local policy. Identity and network settings
+// still belong to whoever has a shell on the machine; worker limits and the
+// release channel are safe to administer from the local interface.
 //
 // The incoming object is decoded *onto a copy of the current policy*, so a
 // request that omits a field leaves it alone. Decoding into a zero value would
@@ -574,25 +618,42 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 // exists to protect the machine's owner is the worst possible default.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	current := s.cfg.Worker
+	currentUpdate := s.cfg.Update
 	body := struct {
 		Worker *config.WorkerConfig `json:"worker"`
-	}{Worker: &current}
+		Update *config.UpdateConfig `json:"update"`
+	}{Worker: &current, Update: &currentUpdate}
 
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	if body.Worker == nil {
+	if body.Worker == nil || body.Update == nil {
 		fail(w, 400, "No settings given.")
 		return
 	}
+	body.Update.Repository = strings.TrimSpace(body.Update.Repository)
+	if body.Update.Repository == "" || strings.Count(body.Update.Repository, "/") != 1 {
+		fail(w, 400, "The update repository must be written as owner/name.")
+		return
+	}
+	if body.Update.Channel != "stable" && body.Update.Channel != "beta" && body.Update.Channel != "any" {
+		fail(w, 400, "The update channel must be stable, beta, or any.")
+		return
+	}
+	if _, err := time.ParseDuration(body.Update.CheckEvery); err != nil {
+		fail(w, 400, "The update interval must be a duration such as 6h or 30m.")
+		return
+	}
 	s.cfg.Worker = *body.Worker
+	s.cfg.Update = *body.Update
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not save settings: %v", err))
 		return
 	}
+	s.updater.Configure(s.cfg.Update)
 	s.hub.Publish("settings.changed", s.cfg.Worker)
-	writeJSON(w, 200, s.cfg.Worker)
+	writeJSON(w, 200, map[string]any{"worker": s.cfg.Worker, "update": s.cfg.Update})
 }
 
 // -------------------------------------------------------------- realtime ----

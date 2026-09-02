@@ -45,7 +45,66 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate database: %w", err)
+	}
+	return s, nil
+}
+
+// migrate applies changes that a declarative schema cannot express.
+//
+// SQLite has no "ADD COLUMN IF NOT EXISTS", and re-running a plain ALTER fails
+// on every start after the first. Each step here checks the database rather
+// than tracking a version number, so it is safe to run on a fresh database, on
+// an old one, and repeatedly.
+func (s *Store) migrate() error {
+	columns := []struct{ table, column, definition string }{
+		// A project may mirror a GitHub repository. Cached here so the
+		// interface can show it without shelling out to git; the live remote
+		// still wins when the two disagree.
+		{"project", "repository", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, c := range columns {
+		has, err := s.hasColumn(c.table, c.column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.column, c.definition)
+		if _, err := s.db.Exec(stmt); err != nil {
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+// hasColumn reports whether a table already carries a column.
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name, typ  string
+			notNull    int
+			dflt       sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close releases the database handle.
@@ -124,6 +183,7 @@ type Project struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Repository  string `json:"repository"`
 	Created     string `json:"created_at"`
 	Updated     string `json:"updated_at"`
 }
@@ -143,7 +203,7 @@ func (s *Store) CreateProject(p *Project) error {
 // Projects lists all projects, most recently touched first.
 func (s *Store) Projects() ([]Project, error) {
 	rows, err := s.db.Query(`
-        SELECT id, name, description, created_at, updated_at
+        SELECT id, name, description, repository, created_at, updated_at
         FROM project ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -153,7 +213,8 @@ func (s *Store) Projects() ([]Project, error) {
 	out := []Project{}
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Created, &p.Updated); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Repository,
+			&p.Created, &p.Updated); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -165,9 +226,9 @@ func (s *Store) Projects() ([]Project, error) {
 func (s *Store) ProjectByName(name string) (Project, error) {
 	var p Project
 	err := s.db.QueryRow(`
-        SELECT id, name, description, created_at, updated_at
+        SELECT id, name, description, repository, created_at, updated_at
         FROM project WHERE name = ?`, name).
-		Scan(&p.ID, &p.Name, &p.Description, &p.Created, &p.Updated)
+		Scan(&p.ID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -180,10 +241,24 @@ func (s *Store) TouchProject(name string) error {
 	return err
 }
 
+// SetProjectRepository records which GitHub repository a project mirrors.
+func (s *Store) SetProjectRepository(name, repository string) error {
+	_, err := s.db.Exec(`UPDATE project SET repository = ?, updated_at = ? WHERE name = ?`,
+		repository, Now(), name)
+	return err
+}
+
 // DeleteProject removes a project row. Files are removed separately, by the
 // caller, so a failed delete never leaves the row gone and the data orphaned.
 func (s *Store) DeleteProject(name string) error {
-	_, err := s.db.Exec(`DELETE FROM project WHERE name = ?`, name)
+	p, err := s.ProjectByName(name)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM member WHERE project_id = ?`, p.ID); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DELETE FROM project WHERE name = ?`, name)
 	return err
 }
 

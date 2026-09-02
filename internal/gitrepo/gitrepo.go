@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -212,4 +213,216 @@ func (r Repo) Branch() string {
 		return "main"
 	}
 	return strings.TrimSpace(out)
+}
+
+// ---------------------------------------------------------------- remotes --
+
+// runAuthed executes a git command that talks to a remote, supplying the token
+// through a credential helper on the command line.
+//
+// The token is never written into .git/config, never put in the remote URL, and
+// never passed as a bare argument that would show up in `ps`. It reaches git
+// through an environment variable that the helper reads at the moment it is
+// asked, which is the narrowest exposure the git CLI allows.
+func (r Repo) runAuthed(token string, args ...string) (string, error) {
+	if !Available() {
+		return "", ErrNoGit
+	}
+	helper := `!f() { echo username=x-access-token; echo "password=$PSCLUSTER_GIT_TOKEN"; }; f`
+	full := append([]string{"-c", "credential.helper=", "-c", "credential.helper=" + helper}, args...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Dir = r.Dir
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_OPTIONAL_LOCKS=0",
+		"PSCLUSTER_GIT_TOKEN="+token,
+	)
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(errb.String())
+		if message == "" {
+			message = err.Error()
+		}
+		// Never let a token reach a log or the interface, however git framed it.
+		if token != "" {
+			message = strings.ReplaceAll(message, token, "***")
+		}
+		return out.String(), fmt.Errorf("git %s: %s", args[0], message)
+	}
+	return out.String(), nil
+}
+
+// Remote returns the URL of a remote, or "" when it is not set.
+func (r Repo) Remote(name string) string {
+	out, err := r.run("remote", "get-url", name)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// RemoteRepository reads the "owner/name" this repository points at, if any.
+func (r Repo) RemoteRepository() string {
+	return RepositoryFromURL(r.Remote("origin"))
+}
+
+var remotePattern = regexp.MustCompile(
+	`(?:github\.com[:/])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
+
+// RepositoryFromURL extracts "owner/name" from a GitHub remote URL.
+func RepositoryFromURL(url string) string {
+	match := remotePattern.FindStringSubmatch(strings.TrimSpace(url))
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
+}
+
+// SetRemote points origin at a repository, adding it when it does not exist.
+func (r Repo) SetRemote(repository string) error {
+	url := "https://github.com/" + repository + ".git"
+	if r.Remote("origin") == "" {
+		_, err := r.run("remote", "add", "origin", url)
+		return err
+	}
+	_, err := r.run("remote", "set-url", "origin", url)
+	return err
+}
+
+// RemoveRemote disconnects origin without changing the working tree or its
+// history. A missing origin is already disconnected and is therefore not an
+// error.
+func (r Repo) RemoveRemote() error {
+	if r.Remote("origin") == "" {
+		return nil
+	}
+	_, err := r.run("remote", "remove", "origin")
+	return err
+}
+
+// Push sends the current branch to origin and sets it to track.
+func (r Repo) Push(token string) (string, error) {
+	branch := r.Branch()
+	out, err := r.runAuthed(token, "push", "--set-upstream", "origin", branch)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// PullResult describes what a pull did, including a merge that could not be
+// completed automatically.
+type PullResult struct {
+	Output    string   `json:"output"`
+	Conflicts []string `json:"conflicts"`
+	Merged    bool     `json:"merged"`
+}
+
+// Pull fetches and merges origin into the current branch.
+//
+// It merges rather than rebases on purpose. Two people working on separate
+// machines, each with local commits, is the normal case here — a rebase would
+// rewrite one side's history under them, and a merge records honestly that both
+// happened. A conflict is reported rather than resolved: the files are left in
+// the working tree with markers, exactly as they would be on the command line.
+func (r Repo) Pull(token string) (PullResult, error) {
+	result := PullResult{}
+	if _, err := r.runAuthed(token, "fetch", "origin"); err != nil {
+		return result, err
+	}
+
+	branch := r.Branch()
+	// A remote branch that does not exist yet means nothing to merge, which is
+	// the normal state right after a repository is created.
+	if _, err := r.run("rev-parse", "--verify", "origin/"+branch); err != nil {
+		result.Output = "Nothing to pull yet — the remote branch does not exist."
+		return result, nil
+	}
+
+	out, err := r.run("merge", "--no-edit", "origin/"+branch)
+	result.Output = strings.TrimSpace(out)
+	if err == nil {
+		result.Merged = true
+		return result, nil
+	}
+
+	conflicts, listErr := r.Conflicts()
+	if listErr != nil || len(conflicts) == 0 {
+		return result, err
+	}
+	result.Conflicts = conflicts
+	return result, nil
+}
+
+// Conflicts lists the paths left unmerged by a failed merge.
+func (r Repo) Conflicts() ([]string, error) {
+	out, err := r.run("diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
+}
+
+// InMerge reports whether a merge is in progress and waiting to be resolved.
+func (r Repo) InMerge() bool {
+	_, err := os.Stat(filepath.Join(r.Dir, ".git", "MERGE_HEAD"))
+	return err == nil
+}
+
+// AbortMerge throws away an in-progress merge and returns to where it started.
+func (r Repo) AbortMerge() error {
+	_, err := r.run("merge", "--abort")
+	return err
+}
+
+// Ahead reports how many commits the local branch has that origin does not.
+func (r Repo) Ahead() int {
+	branch := r.Branch()
+	out, err := r.run("rev-list", "--count", "origin/"+branch+".."+branch)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	fmt.Sscanf(strings.TrimSpace(out), "%d", &n)
+	return n
+}
+
+// Behind reports how many commits origin has that the local branch does not.
+func (r Repo) Behind() int {
+	branch := r.Branch()
+	out, err := r.run("rev-list", "--count", branch+"..origin/"+branch)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	fmt.Sscanf(strings.TrimSpace(out), "%d", &n)
+	return n
+}
+
+// Clone copies a repository into dir, which must not exist yet.
+func Clone(token, repository, dir string) error {
+	if !Available() {
+		return ErrNoGit
+	}
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o750); err != nil {
+		return err
+	}
+	// Clone runs in the parent, since the target directory is its output.
+	staging := Repo{Dir: parent}
+	_, err := staging.runAuthed(token, "clone",
+		"https://github.com/"+repository+".git", dir)
+	return err
 }
