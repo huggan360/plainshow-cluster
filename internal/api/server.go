@@ -37,6 +37,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/training"
+	"github.com/huggan360/plainshow-cluster/internal/tunnel"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
@@ -55,7 +56,8 @@ type Server struct {
 	device        *identity.Device
 	fingerprint   string
 	remoteMu      sync.RWMutex
-	remoteClients map[string]*mesh.Client
+	tunnels       *tunnel.Registry
+	remoteClients map[string]peerTransport
 	remoteLogs    map[string][]jobs.LogLine
 	reservations  *training.Reservations
 	localToken    string
@@ -69,9 +71,20 @@ func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
 	device *identity.Device, fingerprint string, web fs.FS) *Server {
 	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
 		notebooks: notebooks, collab: collaboration, datasets: datasets, updater: up, device: device, fingerprint: fingerprint,
-		remoteClients: make(map[string]*mesh.Client), remoteLogs: make(map[string][]jobs.LogLine),
+		tunnels:       tunnel.NewRegistry(),
+		remoteClients: make(map[string]peerTransport), remoteLogs: make(map[string][]jobs.LogLine),
 		reservations: training.NewReservations(), web: web}
 }
+
+// peerTransport is how this node reaches another machine. A direct mesh client
+// and a reverse tunnel are interchangeable here, which is what lets a machine
+// with no reachable address be treated exactly like one that has one.
+type peerTransport interface {
+	JSON(method, path string, input, output any, authenticate bool) error
+}
+
+// Tunnels exposes the registry so the daemon can report reachability.
+func (s *Server) Tunnels() *tunnel.Registry { return s.tunnels }
 
 // UseLocalToken lets the command line authenticate as the machine's owner
 // against its own daemon.

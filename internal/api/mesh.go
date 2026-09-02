@@ -20,6 +20,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/tunnel"
 )
 
 // ListenAndServeMesh starts the encrypted peer port.
@@ -129,9 +130,28 @@ type joinResponse struct {
 // port. The browser interface and local administration API are never exposed
 // there.
 func (s *Server) MeshHandler() http.Handler {
+	// Anything arriving over the network must not be able to claim the tunnel's
+	// trust marker, so it is stripped before the routes see it.
+	return mesh.StripTunnelMarker(s.meshRoutes())
+}
+
+// TunnelHandler serves requests handed over by an open tunnel. It is reached
+// in-process only, never bound to a port.
+func (s *Server) TunnelHandler() http.Handler { return s.meshRoutes() }
+
+func (s *Server) meshRoutes() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /mesh/v1/join/{network}", s.acceptJoin)
 	authed := http.NewServeMux()
+	// The upgrade is signature-checked like any other mesh call; every frame
+	// afterwards inherits that one proof instead of signing itself.
+	authed.HandleFunc("GET "+tunnel.Path, func(w http.ResponseWriter, r *http.Request) {
+		s.tunnels.Accept(w, r, func() {
+			s.hub.Publish("mesh.reachability", map[string]any{
+				"tunnelled": s.tunnels.Devices(),
+			})
+		})
+	})
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
 	authed.HandleFunc("POST /mesh/v1/datasets/sync", s.acceptDatasetSync)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}", s.remoteJob)
@@ -334,13 +354,20 @@ func policyMap(policy config.WorkerConfig) map[string]any {
 
 func joiningRoles() []string { return []string{string(config.RoleWorker)} }
 
-func (s *Server) clientForNode(networkID, nodeID string) (*mesh.Client, error) {
+func (s *Server) clientForNode(networkID, nodeID string) (peerTransport, error) {
 	node, err := s.store.NetworkNode(networkID, nodeID)
 	if err != nil {
 		return nil, err
 	}
+	// A machine that dialled in is reachable through that connection whether or
+	// not it has an address anybody can open. Prefer it: behind NAT it is the
+	// only route that works, and it is already authenticated.
+	if open, ok := s.tunnels.Get(networkID, nodeID); ok {
+		return open, nil
+	}
 	if node.Address == "" || node.Fingerprint == "" {
-		return nil, fmt.Errorf("machine %s has no reachable mesh address", node.Name)
+		return nil, fmt.Errorf(
+			"%s has no reachable address and no open connection to this node", node.Name)
 	}
 	return mesh.NewClient(node.Address, node.Fingerprint, networkID, s.device), nil
 }
@@ -349,7 +376,7 @@ func terminalJobState(state string) bool {
 	return state == store.JobSucceeded || state == store.JobFailed || state == store.JobStopped
 }
 
-func (s *Server) monitorRemoteJob(networkID, nodeID string, client *mesh.Client, initial store.Job) {
+func (s *Server) monitorRemoteJob(networkID, nodeID string, client peerTransport, initial store.Job) {
 	lastSeq := 0
 	ticker := time.NewTicker(300 * time.Millisecond)
 	defer ticker.Stop()
@@ -382,7 +409,7 @@ func (s *Server) monitorRemoteJob(networkID, nodeID string, client *mesh.Client,
 	}
 }
 
-func (s *Server) remoteClient(jobID string) (*mesh.Client, bool) {
+func (s *Server) remoteClient(jobID string) (peerTransport, bool) {
 	s.remoteMu.RLock()
 	defer s.remoteMu.RUnlock()
 	client, ok := s.remoteClients[jobID]

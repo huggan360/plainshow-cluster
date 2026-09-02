@@ -66,9 +66,12 @@ exceed.
 Recorded so nobody "fixes" them by accident, and so the cost of each is known.
 
 - **mTLS + Ed25519-signed requests instead of WireGuard/tsnet.** Simpler, no
-  dependency, works today. **Cost: no NAT traversal.** Two machines need a
-  route to each other (LAN, VPN, or a forwarded port). Closing this is the
-  single biggest remaining gap — see Roadmap.
+  dependency. NAT traversal is solved by inverting the direction rather than by
+  a VPN: a machine that cannot be dialled connects *out* to its coordinator and
+  work arrives back down that connection (`internal/tunnel`). **Remaining cost:**
+  peer-to-peer bulk transfer between two unreachable machines still has no
+  direct path, so datasets and checkpoints between two NATed workers go through
+  the coordinator instead of directly. That is the relay work still open.
 - **Server-authoritative operational transform instead of Yjs/CRDT.** All edits
   serialise through one mutex on the master, so cross-client convergence does
   not depend on the transform being provably correct. Verified: 400 randomly
@@ -133,11 +136,14 @@ Phases 0–5 are landed. What remains, in order:
 1. **Reliability pass on what exists.** Done: the collaboration write path,
    the sign-in gate, `internal/api` tests, the peer port, and the CLI commands
    for networks, invites, joining, GitHub and updates.
-2. **Phase 6 — the always-on controller.** A stateless coordinator that gives
-   NAT traversal: rendezvous (peers publish endpoints and fetch keys), relay
-   (forward encrypted bytes when direct fails), and a signed directory record
-   saying where the master is. This is what makes two home networks work
-   without port forwarding, and it is the largest remaining gap.
+2. **Phase 6 — the always-on controller.** Half landed. The reverse tunnel
+   (`internal/tunnel`) means a worker on an ordinary home connection needs no
+   forwarded port: it dials out and holds the connection, and the coordinator
+   sends work down it. **Still open:** the coordinator itself must be reachable
+   by everyone, so one machine (or a cheap always-on box) still needs an
+   address. And bulk transfer between two unreachable peers has no direct path
+   yet — a relay that forwards encrypted bytes between two tunnels, so datasets
+   and checkpoints stop going through the coordinator's own process.
 3. **Phase 7 — real-machine validation.** A genuine multi-GPU `torchrun` across
    two CUDA machines. The launcher is implemented and unit-tested; it has never
    run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
@@ -159,6 +165,26 @@ bearer header. It grants nothing new — anyone who can read that file can alrea
 read the database beside it — but it keeps a headless machine manageable after
 it has an owner account, without loosening the rules the browser is held to.
 There is no browser on a GPU box to sign in with.
+
+## How a machine behind NAT is reached
+
+`internal/tunnel`. Dialling a peer needs it to be reachable, which a home
+desktop is not. So a worker connects out to its coordinator and keeps the
+connection open; the coordinator sends mesh requests down it and reads the
+replies. Outbound is the only direction that reliably works, so it is the only
+direction used.
+
+What crosses the tunnel is exactly what would have crossed the peer port — same
+paths, same JSON, same handler. `peerTransport` in `internal/api` is the seam:
+a direct `mesh.Client` and an open tunnel are interchangeable, so nothing above
+the transport knows which it got.
+
+The connection is signature-checked once, at the upgrade, and every frame after
+it inherits that proof rather than signing itself. That is what
+`mesh.TrustedTunnelHeader` marks — and it is why `mesh.StripTunnelMarker` wraps
+the network-facing handler. **Without that strip, anybody who could reach the
+peer port could impersonate an enrolled machine with one header.** There is a
+test for exactly this; do not remove it.
 
 ## Traps found the hard way
 

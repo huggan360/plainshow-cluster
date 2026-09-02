@@ -102,9 +102,39 @@ func (c *Client) JSON(method, path string, input, output any, authenticate bool)
 
 type PublicKeyLookup func(networkID, deviceID string) (ed25519.PublicKey, error)
 
+// TrustedTunnelHeader marks a request that arrived over an already-established
+// tunnel, whose connection was signature-checked when it was accepted.
+//
+// It is only ever set in-process, by the tunnel dispatching to the local mesh
+// handler. The network-facing handler strips it from every incoming request
+// before this middleware runs, so it cannot be presented by a peer.
+const TrustedTunnelHeader = "X-Plainshow-Tunnel-Device"
+
+// StripTunnelMarker removes the tunnel's trust marker from requests arriving
+// over the network. Without this, anybody who can reach the peer port could
+// claim to be an enrolled device by setting one header.
+func StripTunnelMarker(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del(TrustedTunnelHeader)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func Authenticate(next http.Handler, lookup PublicKeyLookup) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		networkID, deviceID := r.Header.Get("X-Plainshow-Network"), r.Header.Get("X-Plainshow-Device")
+
+		// A request handed over by the tunnel was authenticated once, when the
+		// connection was opened, and cannot have come from anywhere else. The
+		// marker only survives to here on the in-process path.
+		if trusted := r.Header.Get(TrustedTunnelHeader); trusted != "" {
+			if _, err := lookup(networkID, trusted); err != nil {
+				http.Error(w, `{"error":"device is not enrolled in this network"}`, 401)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		stamp := r.Header.Get("X-Plainshow-Time")
 		when, err := strconv.ParseInt(stamp, 10, 64)
 		if err != nil || time.Since(time.Unix(when, 0)) > maxClockSkew || time.Until(time.Unix(when, 0)) > maxClockSkew {
