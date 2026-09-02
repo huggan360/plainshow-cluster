@@ -45,7 +45,15 @@ race:
 	go test -race -count=1 ./...
 
 ## smoke: end-to-end check against a throwaway node on port 9971
+##
+## Refuses to start when the port is busy. A previous run left running, or a
+## development node on the same port, produces a scatter of unrelated failures
+## that looks like a regression and is not.
 smoke: build
+	@if ss -tln 2>/dev/null | grep -q ':9971 '; then \
+		echo "port 9971 is already in use — stop the node using it and retry"; \
+		exit 1; \
+	fi
 	@rm -rf .smokenode
 	@./$(BINARY) init --root ./.smokenode --name smoke --cluster smoke --port 9971 >/dev/null
 	@./$(BINARY) serve --root ./.smokenode >/dev/null 2>&1 & echo $$! > .smokepid
