@@ -85,6 +85,10 @@ pscluster version
 pscluster-controller init [--root DIR] [--name NAME] [--bind ADDR] [--port N]
 pscluster-controller serve [--root DIR]
 pscluster-controller status [--root DIR]
+
+pscluster-admin init [--root DIR] [--public-url HTTPS_URL]
+pscluster-admin serve [--root DIR]
+pscluster-admin status [--root DIR]
 ```
 
 The commands after `config` talk to this machine's own running daemon, so a
@@ -145,6 +149,12 @@ no internet access renders identically to one with it.
 `make build` also produces `pscluster-controller`, the optional HTTPS service
 for live collaboration and cross-network overview. It has a separate root,
 identity, certificate and configuration, and it cannot run node jobs.
+
+It also produces `pscluster-admin`, the central account authority and global
+statistics page. The service uses a dedicated SQLite database and binds to
+loopback for a public TLS reverse proxy. Its configured URL in the main
+Plainshow environment is `https://clusteradmin.plainshow.se`; that hostname is
+deployment configuration rather than a client-side constant.
 
 ## Layout
 

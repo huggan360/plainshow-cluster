@@ -7,6 +7,8 @@ BINARY            := pscluster
 PKG               := ./cmd/pscluster
 CONTROLLER_BINARY := pscluster-controller
 CONTROLLER_PKG    := ./cmd/pscluster-controller
+ADMIN_BINARY      := pscluster-admin
+ADMIN_PKG         := ./cmd/pscluster-admin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
@@ -21,7 +23,8 @@ all: build
 build: web
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(CONTROLLER_BINARY) $(CONTROLLER_PKG)
-	@echo "built ./$(BINARY) and ./$(CONTROLLER_BINARY)  $(VERSION)"
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(ADMIN_BINARY) $(ADMIN_PKG)
+	@echo "built ./$(BINARY), ./$(CONTROLLER_BINARY), and ./$(ADMIN_BINARY)  $(VERSION)"
 
 ## web: verify the interface's module graph before embedding it
 web:
@@ -81,6 +84,8 @@ dist: web
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-amd64 $(CONTROLLER_PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-arm64 $(CONTROLLER_PKG)
+	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-amd64 $(ADMIN_PKG)
+	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-arm64 $(ADMIN_PKG)
 	@cd dist && sha256sum *-linux-* > checksums.txt
 	@echo
 	@ls -lh dist/
@@ -109,4 +114,4 @@ run: build
 	./$(BINARY) serve --root ./.devnode
 
 clean:
-	rm -rf $(BINARY) $(CONTROLLER_BINARY) dist .devnode .smokenode .smokepid
+	rm -rf $(BINARY) $(CONTROLLER_BINARY) $(ADMIN_BINARY) dist .devnode .smokenode .smokepid

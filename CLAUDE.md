@@ -277,10 +277,12 @@ project data. Live editing is the feature it adds; git works without it.
 
 ### C. Accounts across devices (revised: central account authority)
 
-8. **Plainshow Account Server.** Build a separate, lightweight service with its
-   own root and SQLite database for global accounts, registration, login, and
-   aggregate environment statistics. Its public URL is deployment config, not
-   compiled into the clients. The main deployment is
+8. ~~**Plainshow Account Server.**~~ Done. `pscluster-admin` has its own root and
+   SQLite database for global accounts, registration, login, device check-ins,
+   and aggregate environment statistics. The first administrator needs a
+   one-time bootstrap token, account sessions are stored as hashes, and admins
+   can disable accounts from the embedded page. Its public URL is deployment
+   config, not compiled into clients. The main deployment is
    `clusteradmin.plainshow.se` on the Plainshow Raspberry Pi.
 9. **Nodes sign in through the Account Server.** Replace per-node account setup
    with the central identity, while keeping a cached signed session so an

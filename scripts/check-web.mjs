@@ -7,9 +7,10 @@
 // is actually exported by it.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve, relative } from 'node:path';
 
-const ROOT = 'web';
+const ROOTS = ['web', 'adminweb'];
 const problems = [];
 
 /** walk lists every .js file under dir. */
@@ -42,11 +43,16 @@ function exportsOf(source) {
     return names;
 }
 
-const files = walk(ROOT);
+const files = ROOTS.flatMap(walk);
 const exportCache = new Map();
 
 for (const file of files) {
     const source = readFileSync(file, 'utf8');
+    try {
+        execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+    } catch (error) {
+        problems.push(`${file}: ${String(error.stderr || error.message).trim()}`);
+    }
 
     for (const m of source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)) {
         const [, namesRaw, spec] = m;
@@ -77,13 +83,15 @@ for (const file of files) {
 }
 
 // Every module the page loads must be embedded in the binary.
-const embedded = readFileSync(join(ROOT, 'embed.go'), 'utf8');
-const patterns = (embedded.match(/\/\/go:embed (.+)/) || [, ''])[1].split(/\s+/);
-for (const file of files) {
-    const rel = relative(ROOT, file);
-    const top = rel.split('/')[0];
-    if (!patterns.includes(rel) && !patterns.includes(top)) {
-        problems.push(`${file} is not covered by the //go:embed patterns in web/embed.go`);
+for (const root of ROOTS) {
+    const embedded = readFileSync(join(root, 'embed.go'), 'utf8');
+    const patterns = (embedded.match(/\/\/go:embed (.+)/) || [, ''])[1].split(/\s+/);
+    for (const file of files.filter((candidate) => candidate.startsWith(`${root}/`))) {
+        const rel = relative(root, file);
+        const top = rel.split('/')[0];
+        if (!patterns.includes(rel) && !patterns.includes(top)) {
+            problems.push(`${file} is not covered by the //go:embed patterns in ${root}/embed.go`);
+        }
     }
 }
 

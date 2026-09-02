@@ -350,6 +350,11 @@ func (l Layout) ControllerCert() string { return filepath.Join(l.Root, "keys", "
 func (l Layout) ControllerPIDFile() string {
 	return filepath.Join(l.Root, "run", "pscluster-controller.pid")
 }
+func (l Layout) AdminConfigFile() string { return filepath.Join(l.Root, "admin.yaml") }
+func (l Layout) AdminDatabase() string   { return filepath.Join(l.Root, "accounts.db") }
+func (l Layout) AdminPIDFile() string {
+	return filepath.Join(l.Root, "run", "pscluster-admin.pid")
+}
 
 // Dirs lists every directory the node expects to exist.
 func (l Layout) Dirs() []string {
@@ -374,6 +379,17 @@ func (l Layout) EnsureDirs() error {
 // is a compute device.
 func (l Layout) EnsureControllerDirs() error {
 	for _, dir := range []string{l.Root, l.Keys(), l.Logs(), l.Run(), l.Bin()} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+// EnsureAdminDirs creates the central account service's deliberately small
+// layout. It stores identity metadata, never project or job data.
+func (l Layout) EnsureAdminDirs() error {
+	for _, dir := range []string{l.Root, l.Logs(), l.Run(), l.Bin()} {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}

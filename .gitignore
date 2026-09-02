@@ -1,6 +1,7 @@
 # Build output
 /pscluster
 /pscluster-controller
+/pscluster-admin
 /dist/
 
 # A development node created by `make run`

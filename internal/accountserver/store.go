@@ -1,0 +1,353 @@
+package accountserver
+
+import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"database/sql"
+	_ "embed"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed schema.sql
+var schema string
+
+var (
+	// ErrNotFound is returned when an account or session does not exist.
+	ErrNotFound = errors.New("not found")
+	// ErrRegistrationClosed means only the bootstrap account may be created.
+	ErrRegistrationClosed = errors.New("registration is closed")
+	// ErrBootstrapToken means the first administrator token was wrong.
+	ErrBootstrapToken = errors.New("bootstrap token is invalid")
+	// ErrNodeOwner means another account already registered the same node id.
+	ErrNodeOwner = errors.New("node belongs to another account")
+)
+
+// Account is a global Plainshow identity.
+type Account struct {
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"display_name"`
+	PasswordHash string `json:"-"`
+	Admin        bool   `json:"admin"`
+	Disabled     bool   `json:"disabled"`
+	Created      string `json:"created_at"`
+	LastLogin    string `json:"last_login_at"`
+}
+
+// NetworkRef is the non-sensitive network identity a node reports for global
+// counts and administration.
+type NetworkRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// NodeCheckIn is aggregate metadata only. It intentionally has no project
+// names, commands, logs, addresses, keys, datasets or artifacts.
+type NodeCheckIn struct {
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Version      string       `json:"version"`
+	OS           string       `json:"os"`
+	Arch         string       `json:"arch"`
+	GPUCount     int          `json:"gpu_count"`
+	ProjectCount int          `json:"project_count"`
+	RunningJobs  int          `json:"running_jobs"`
+	Networks     []NetworkRef `json:"networks"`
+}
+
+// Node is one globally registered device.
+type Node struct {
+	ID             string `json:"id"`
+	OwnerAccountID string `json:"owner_account_id"`
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	OS             string `json:"os"`
+	Arch           string `json:"arch"`
+	GPUCount       int    `json:"gpu_count"`
+	ProjectCount   int    `json:"project_count"`
+	RunningJobs    int    `json:"running_jobs"`
+	LastSeen       string `json:"last_seen"`
+	Created        string `json:"created_at"`
+}
+
+// Stats is the intentionally small global overview.
+type Stats struct {
+	Accounts    int `json:"accounts"`
+	Disabled    int `json:"disabled_accounts"`
+	Nodes       int `json:"nodes"`
+	OnlineNodes int `json:"online_nodes"`
+	Networks    int `json:"networks"`
+	GPUs        int `json:"gpus"`
+	Projects    int `json:"projects"`
+	RunningJobs int `json:"running_jobs"`
+}
+
+// Store owns the account server's independent SQLite database.
+type Store struct{ db *sql.DB }
+
+// Open creates or opens the central account database.
+func Open(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		return nil, err
+	}
+	// This service is tiny; serial writes make bootstrap and ownership checks
+	// deterministic without adding a distributed transaction problem.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply account schema: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
+// Close releases the database.
+func (s *Store) Close() error { return s.db.Close() }
+
+func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// TokenHash hashes bootstrap and session secrets before durable storage.
+func TokenHash(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+// InitialiseBootstrap records the first-admin token hash only while there are
+// no accounts. Re-running init cannot replace a live system's credential.
+func (s *Store) InitialiseBootstrap(hash string) error {
+	var accounts int
+	if err := s.db.QueryRow(`SELECT count(*) FROM account`).Scan(&accounts); err != nil {
+		return err
+	}
+	if accounts != 0 {
+		return nil
+	}
+	_, err := s.db.Exec(`INSERT INTO setting(name,value) VALUES('bootstrap_hash',?)
+        ON CONFLICT(name) DO NOTHING`, hash)
+	return err
+}
+
+// CreateAccount atomically makes the first account an administrator after
+// checking the one-time bootstrap token. Later accounts obey RegistrationOpen.
+func (s *Store) CreateAccount(account Account, bootstrapHash string, registrationOpen bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRow(`SELECT count(*) FROM account`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		var want string
+		if err := tx.QueryRow(`SELECT value FROM setting WHERE name='bootstrap_hash'`).Scan(&want); err != nil ||
+			subtle.ConstantTimeCompare([]byte(want), []byte(bootstrapHash)) != 1 {
+			return ErrBootstrapToken
+		}
+		account.Admin = true
+	} else if !registrationOpen {
+		return ErrRegistrationClosed
+	}
+	account.Created = now()
+	_, err = tx.Exec(`INSERT INTO account
+        (id,username,display_name,password_hash,is_admin,disabled,created_at,last_login_at)
+        VALUES(?,?,?,?,?,?,?,?)`, account.ID, account.Username, account.DisplayName,
+		account.PasswordHash, account.Admin, false, account.Created, "")
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := tx.Exec(`DELETE FROM setting WHERE name='bootstrap_hash'`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// AccountByUsername returns an enabled or disabled account for credential
+// checking and administration.
+func (s *Store) AccountByUsername(username string) (Account, error) {
+	var account Account
+	err := s.db.QueryRow(`SELECT id,username,display_name,password_hash,is_admin,
+        disabled,created_at,last_login_at FROM account WHERE username=?`, username).Scan(
+		&account.ID, &account.Username, &account.DisplayName, &account.PasswordHash,
+		&account.Admin, &account.Disabled, &account.Created, &account.LastLogin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return account, ErrNotFound
+	}
+	return account, err
+}
+
+// Accounts lists identities without password material.
+func (s *Store) Accounts() ([]Account, error) {
+	rows, err := s.db.Query(`SELECT id,username,display_name,is_admin,disabled,
+        created_at,last_login_at FROM account ORDER BY lower(username)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Account{}
+	for rows.Next() {
+		var account Account
+		if err := rows.Scan(&account.ID, &account.Username, &account.DisplayName,
+			&account.Admin, &account.Disabled, &account.Created, &account.LastLogin); err != nil {
+			return nil, err
+		}
+		out = append(out, account)
+	}
+	return out, rows.Err()
+}
+
+// SetAccountDisabled enables or disables an account.
+func (s *Store) SetAccountDisabled(id string, disabled bool) error {
+	result, err := s.db.Exec(`UPDATE account SET disabled=? WHERE id=?`, disabled, id)
+	if err != nil {
+		return err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return ErrNotFound
+	}
+	if disabled {
+		_, _ = s.db.Exec(`DELETE FROM login_session WHERE account_id=?`, id)
+	}
+	return nil
+}
+
+// CreateSession stores only a digest of the bearer token.
+func (s *Store) CreateSession(token, accountID string, expires time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO login_session(token_hash,account_id,expires_at,created_at)
+		VALUES(?,?,?,?)`, TokenHash(token), accountID, expires.UTC().Format(time.RFC3339), now())
+	if err == nil {
+		_, _ = s.db.Exec(`UPDATE account SET last_login_at=? WHERE id=?`, now(), accountID)
+	}
+	return err
+}
+
+// SessionAccount resolves a live session and rejects disabled identities.
+func (s *Store) SessionAccount(token string) (Account, error) {
+	var account Account
+	err := s.db.QueryRow(`SELECT a.id,a.username,a.display_name,a.is_admin,
+        a.disabled,a.created_at,a.last_login_at FROM login_session s
+        JOIN account a ON a.id=s.account_id
+		WHERE s.token_hash=? AND s.expires_at>? AND a.disabled=0`, TokenHash(token), now()).Scan(
+		&account.ID, &account.Username, &account.DisplayName, &account.Admin,
+		&account.Disabled, &account.Created, &account.LastLogin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return account, ErrNotFound
+	}
+	return account, err
+}
+
+// DeleteSession revokes one bearer token.
+func (s *Store) DeleteSession(token string) error {
+	_, err := s.db.Exec(`DELETE FROM login_session WHERE token_hash=?`, TokenHash(token))
+	return err
+}
+
+// CheckIn records aggregate node counts while preventing one account from
+// taking over a node id already registered by another.
+func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var owner string
+	err = tx.QueryRow(`SELECT owner_account_id FROM node WHERE id=?`, input.ID).Scan(&owner)
+	if err == nil && owner != accountID {
+		return ErrNodeOwner
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	seen := now()
+	_, err = tx.Exec(`INSERT INTO node
+        (id,owner_account_id,name,version,os,arch,gpu_count,project_count,running_jobs,last_seen,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,
+          os=excluded.os,arch=excluded.arch,gpu_count=excluded.gpu_count,
+          project_count=excluded.project_count,running_jobs=excluded.running_jobs,
+          last_seen=excluded.last_seen`, input.ID, accountID, input.Name, input.Version,
+		input.OS, input.Arch, input.GPUCount, input.ProjectCount, input.RunningJobs, seen, seen)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM node_network WHERE node_id=?`, input.ID); err != nil {
+		return err
+	}
+	for _, network := range input.Networks {
+		if network.ID == "" || network.Name == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO network(id,name,last_seen,created_at) VALUES(?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET name=excluded.name,last_seen=excluded.last_seen`,
+			network.ID, network.Name, seen, seen); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO node_network(node_id,network_id) VALUES(?,?)`,
+			input.ID, network.ID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Nodes lists globally registered devices.
+func (s *Store) Nodes() ([]Node, error) {
+	rows, err := s.db.Query(`SELECT id,owner_account_id,name,version,os,arch,
+        gpu_count,project_count,running_jobs,last_seen,created_at
+        FROM node ORDER BY last_seen DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Node{}
+	for rows.Next() {
+		var node Node
+		if err := rows.Scan(&node.ID, &node.OwnerAccountID, &node.Name, &node.Version,
+			&node.OS, &node.Arch, &node.GPUCount, &node.ProjectCount,
+			&node.RunningJobs, &node.LastSeen, &node.Created); err != nil {
+			return nil, err
+		}
+		out = append(out, node)
+	}
+	return out, rows.Err()
+}
+
+// Stats computes the lightweight global overview directly from indexed rows.
+func (s *Store) Stats() (Stats, error) {
+	var out Stats
+	onlineSince := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
+	queries := []struct {
+		query string
+		value *int
+	}{
+		{`SELECT count(*) FROM account`, &out.Accounts},
+		{`SELECT count(*) FROM account WHERE disabled=1`, &out.Disabled},
+		{`SELECT count(*) FROM node`, &out.Nodes},
+		{`SELECT count(*) FROM node WHERE last_seen>=?`, &out.OnlineNodes},
+		{`SELECT count(*) FROM network`, &out.Networks},
+		{`SELECT coalesce(sum(gpu_count),0) FROM node`, &out.GPUs},
+		{`SELECT coalesce(sum(project_count),0) FROM node`, &out.Projects},
+		{`SELECT coalesce(sum(running_jobs),0) FROM node`, &out.RunningJobs},
+	}
+	for _, item := range queries {
+		var err error
+		if item.query == `SELECT count(*) FROM node WHERE last_seen>=?` {
+			err = s.db.QueryRow(item.query, onlineSince).Scan(item.value)
+		} else {
+			err = s.db.QueryRow(item.query).Scan(item.value)
+		}
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
