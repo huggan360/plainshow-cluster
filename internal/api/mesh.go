@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
@@ -111,14 +112,16 @@ func (s *Server) meshNeeded() bool {
 }
 
 type joinRequest struct {
-	Token       string         `json:"token"`
-	NodeID      string         `json:"node_id"`
-	Name        string         `json:"name"`
-	PublicKey   string         `json:"public_key"`
-	Fingerprint string         `json:"fingerprint"`
-	Endpoint    string         `json:"endpoint"`
-	Info        sysinfo.Info   `json:"info"`
-	Policy      map[string]any `json:"policy"`
+	Token        string         `json:"token"`
+	NodeID       string         `json:"node_id"`
+	Name         string         `json:"name"`
+	PublicKey    string         `json:"public_key"`
+	Fingerprint  string         `json:"fingerprint"`
+	Endpoint     string         `json:"endpoint"`
+	Account      store.Account  `json:"account"`
+	AccountToken string         `json:"account_token"`
+	Info         sysinfo.Info   `json:"info"`
+	Policy       map[string]any `json:"policy"`
 }
 
 type joinResponse struct {
@@ -181,12 +184,38 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "The joining device supplied an invalid identity.")
 		return
 	}
-	account := store.Account{ID: body.NodeID, Username: body.Name, DisplayName: body.Name, PublicKey: body.PublicKey}
-	if err := s.store.UpsertAccount(account); err != nil {
+	if s.usesCentralAccounts() {
+		client, clientErr := accountclient.New(s.cfg.Account.Server)
+		if clientErr != nil {
+			fail(w, 500, clientErr.Error())
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		central, authErr := client.Session(ctx, body.AccountToken)
+		if authErr != nil || central.ID != body.Account.ID {
+			fail(w, 403, "The joining device could not prove its Plainshow account.")
+			return
+		}
+		body.Account = centralAccount(central)
+	} else if body.Account.ID == "" || body.Account.Username == "" {
+		// Older nodes used their device key as the local account identity.
+		body.Account = store.Account{ID: body.NodeID, Username: body.Name,
+			DisplayName: body.Name, PublicKey: body.PublicKey}
+	}
+	if err := s.store.UpsertAccount(body.Account); err != nil {
 		fail(w, 409, "That device name is already used by another account.")
 		return
 	}
-	if err := s.store.AddNetworkMember(networkID, account.ID, invitation.Role); err != nil {
+	accountRole := invitation.Role
+	if existing, memberErr := s.store.NetworkMember(networkID, body.Account.ID); memberErr == nil {
+		// Enrolling another device must not demote an account that already owns
+		// or administers the network.
+		accountRole = existing.Role
+	} else if !errors.Is(memberErr, store.ErrNotFound) {
+		fail(w, 500, memberErr.Error())
+		return
+	} else if err := s.store.AddNetworkMember(networkID, body.Account.ID, accountRole); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -206,7 +235,7 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, _ := s.store.NetworkNodes(networkID)
 	s.hub.Publish("networks.changed", network)
-	writeJSON(w, 201, joinResponse{Network: network, Role: invitation.Role, Nodes: nodes})
+	writeJSON(w, 201, joinResponse{Network: network, Role: accountRole, Nodes: nodes})
 }
 
 // StartPeerDiscovery periodically exchanges each network's directory with
@@ -233,7 +262,7 @@ func (s *Server) StartPeerDiscovery(ctx context.Context, every time.Duration) {
 }
 
 func (s *Server) syncPeersOnce(ctx context.Context) {
-	networks, err := s.store.Networks(s.cfg.Node.ID)
+	networks, err := s.store.Networks(s.cfg.AccountID())
 	if err != nil {
 		return
 	}

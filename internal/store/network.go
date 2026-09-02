@@ -129,6 +129,25 @@ func (s *Store) AddNetworkMember(networkID, accountID, role string) error {
 	return err
 }
 
+// NetworkMember returns one account's durable role in a network.
+func (s *Store) NetworkMember(networkID, accountID string) (NetworkMemberRow, error) {
+	var member NetworkMemberRow
+	err := s.db.QueryRow(`SELECT m.network_id,a.id,a.username,a.display_name,
+        a.public_key,a.created_at,m.role,m.manage_network,m.manage_members,
+        m.create_projects,m.run_jobs,m.manage_nodes,m.created_at
+        FROM network_member m JOIN account a ON a.id=m.account_id
+        WHERE m.network_id=? AND m.account_id=?`, networkID, accountID).Scan(
+		&member.NetworkID, &member.Account.ID, &member.Account.Username,
+		&member.Account.DisplayName, &member.Account.PublicKey, &member.Account.Created,
+		&member.Role, &member.Permissions.ManageNetwork, &member.Permissions.ManageMembers,
+		&member.Permissions.CreateProjects, &member.Permissions.RunJobs,
+		&member.Permissions.ManageNodes, &member.Created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return member, ErrNotFound
+	}
+	return member, err
+}
+
 func (s *Store) Networks(accountID string) ([]Network, error) {
 	rows, err := s.db.Query(`SELECT n.id, n.name, n.owner_account_id, m.role,
         n.created_at, n.updated_at FROM network n

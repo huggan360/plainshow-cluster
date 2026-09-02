@@ -26,6 +26,9 @@ import (
 // EnvRoot names the environment variable that overrides the install root.
 const EnvRoot = "PSCLUSTER_ROOT"
 
+// EnvAccountServer overrides the global account authority URL.
+const EnvAccountServer = "PSCLUSTER_ACCOUNT_SERVER"
+
 // DefaultPort is where the web interface listens when nothing else is asked
 // for. Init probes upward from here for a free port rather than assuming it.
 const DefaultPort = 9999
@@ -102,8 +105,18 @@ type Config struct {
 	Memberships   []MembershipConfig `yaml:"memberships" json:"memberships"`
 	ActiveNetwork string             `yaml:"active_network" json:"active_network"`
 	Network       NetworkConfig      `yaml:"network" json:"network"`
+	Account       AccountConfig      `yaml:"account" json:"account"`
 	Worker        WorkerConfig       `yaml:"worker" json:"worker"` // device-wide safety ceiling
 	Update        UpdateConfig       `yaml:"update" json:"update"`
+}
+
+// AccountConfig caches the global identity selected on this device. The bearer
+// token is kept separately under keys with mode 0600.
+type AccountConfig struct {
+	Server      string `yaml:"server" json:"server"`
+	ID          string `yaml:"id,omitempty" json:"id"`
+	Username    string `yaml:"username,omitempty" json:"username"`
+	DisplayName string `yaml:"display_name,omitempty" json:"display_name"`
 }
 
 // MembershipConfig describes how this device participates in one independent
@@ -112,6 +125,7 @@ type MembershipConfig struct {
 	ID          string       `yaml:"id" json:"id"`
 	Name        string       `yaml:"name" json:"name"`
 	Roles       []Role       `yaml:"roles" json:"roles"`
+	AccountRole string       `yaml:"account_role,omitempty" json:"account_role"`
 	Enabled     bool         `yaml:"enabled" json:"enabled"`
 	Coordinator []string     `yaml:"coordinator,omitempty" json:"coordinator"`
 	Policy      WorkerConfig `yaml:"policy" json:"policy"`
@@ -206,6 +220,15 @@ func (c *Config) RoleNames() []string {
 	return out
 }
 
+// AccountID returns the selected global account, falling back to the legacy
+// device-shaped owner until the first central sign-in migrates it.
+func (c *Config) AccountID() string {
+	if c.Account.ID != "" {
+		return c.Account.ID
+	}
+	return c.Node.ID
+}
+
 // ActiveMembership returns the selected network membership. Legacy configs
 // appear as one implicit membership until they are next saved.
 func (c *Config) ActiveMembership() MembershipConfig {
@@ -219,7 +242,7 @@ func (c *Config) ActiveMembership() MembershipConfig {
 	}
 	return MembershipConfig{
 		ID: c.Cluster.ID, Name: c.Cluster.Name, Roles: c.Node.Roles,
-		Enabled: true, Policy: c.Worker,
+		AccountRole: "owner", Enabled: true, Policy: c.Worker,
 	}
 }
 
@@ -228,8 +251,14 @@ func (c *Config) EnsureMemberships() {
 	if len(c.Memberships) == 0 {
 		c.Memberships = []MembershipConfig{{
 			ID: c.Cluster.ID, Name: c.Cluster.Name,
-			Roles: append([]Role(nil), c.Node.Roles...), Enabled: true, Policy: c.Worker,
+			Roles: append([]Role(nil), c.Node.Roles...), AccountRole: "owner",
+			Enabled: true, Policy: c.Worker,
 		}}
+	}
+	for i := range c.Memberships {
+		if c.Memberships[i].AccountRole == "" {
+			c.Memberships[i].AccountRole = "owner"
+		}
 	}
 	if c.ActiveNetwork == "" {
 		c.ActiveNetwork = c.Memberships[0].ID
@@ -282,6 +311,8 @@ func Defaults() *Config {
 		},
 		Cluster: ClusterConfig{ID: NewID(), Name: "cluster"},
 		Network: NetworkConfig{Bind: "127.0.0.1", Port: 0, PeerPort: 10000},
+		Account: AccountConfig{Server: strings.TrimRight(
+			strings.TrimSpace(os.Getenv(EnvAccountServer)), "/")},
 		Worker: WorkerConfig{
 			Enabled:       true,
 			AllowJobs:     true,
@@ -335,10 +366,11 @@ func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "psclu
 
 // GitHubToken is where this node keeps its GitHub credential. It is inside the
 // install root like everything else, and readable only by the owner.
-func (l Layout) GitHubToken() string { return filepath.Join(l.Root, "keys", "github.token") }
-func (l Layout) DeviceKey() string   { return filepath.Join(l.Root, "keys", "device.key") }
-func (l Layout) DeviceCert() string  { return filepath.Join(l.Root, "keys", "device.crt") }
-func (l Layout) PIDFile() string     { return filepath.Join(l.Root, "run", "pscluster.pid") }
+func (l Layout) GitHubToken() string  { return filepath.Join(l.Root, "keys", "github.token") }
+func (l Layout) AccountToken() string { return filepath.Join(l.Root, "keys", "account.token") }
+func (l Layout) DeviceKey() string    { return filepath.Join(l.Root, "keys", "device.key") }
+func (l Layout) DeviceCert() string   { return filepath.Join(l.Root, "keys", "device.crt") }
+func (l Layout) PIDFile() string      { return filepath.Join(l.Root, "run", "pscluster.pid") }
 
 // Controller paths use the same one-root rule without creating node-only
 // project, dataset or artifact directories.
@@ -463,6 +495,10 @@ func (c *Config) applyFallbacks() {
 	if c.Network.PeerBind == "" {
 		c.Network.PeerBind = d.Network.PeerBind
 	}
+	if c.Account.Server == "" {
+		c.Account.Server = d.Account.Server
+	}
+	c.Account.Server = strings.TrimRight(strings.TrimSpace(c.Account.Server), "/")
 	if c.Update.Repository == "" {
 		c.Update.Repository = d.Update.Repository
 	}

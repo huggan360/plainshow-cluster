@@ -284,10 +284,13 @@ project data. Live editing is the feature it adds; git works without it.
    can disable accounts from the embedded page. Its public URL is deployment
    config, not compiled into clients. The main deployment is
    `clusteradmin.plainshow.se` on the Plainshow Raspberry Pi.
-9. **Nodes sign in through the Account Server.** Replace per-node account setup
-   with the central identity, while keeping a cached signed session so an
-   Account Server outage prevents new logins but does not stop existing jobs,
-   peer communication, or local git work.
+9. ~~**Nodes sign in through the Account Server.**~~ Done. Nodes register or sign
+   in against the configured authority, migrate legacy local ownership to the
+   global account ID, keep the authority token at `keys/account.token`, and
+   cache a local browser session. An Account Server outage prevents a new login
+   but does not stop an existing session, jobs, peer communication, or git work.
+   Join requests prove the global account to the receiving peer, while device
+   keys remain independent identities.
 
 ### D. Networking (≈2.5d)
 

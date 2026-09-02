@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/api"
 	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -91,7 +92,8 @@ func usage() {
 
   pscluster init [--root DIR] [--name NAME] [--cluster NAME]
                  [--port N] [--peer-port N]
-                 [--bind ADDR] [--advertise HTTPS_URL]
+	         [--bind ADDR] [--advertise HTTPS_URL]
+	         [--account-server HTTPS_URL]
       Create a node. Everything it stores lives under one directory.
 
   pscluster serve [--root DIR]
@@ -238,6 +240,12 @@ func cmdInit(args []string) error {
 		cfg.Network.PeerPort = n
 	}
 	cfg.Network.Advertise = strings.TrimRight(f.get("advertise", cfg.Network.Advertise), "/")
+	if server := strings.TrimRight(f.get("account-server", cfg.Account.Server), "/"); server != "" {
+		if _, err := accountclient.New(server); err != nil {
+			return err
+		}
+		cfg.Account.Server = server
+	}
 	if err := l.EnsureDirs(); err != nil {
 		return err
 	}
@@ -292,20 +300,34 @@ func cmdInit(args []string) error {
 // is the local machine's authority; the database is the queryable directory
 // shared with the interface and, later, remote peers.
 func syncNetworks(st *store.Store, cfg *config.Config, device *identity.Device, fingerprint string, info sysinfo.Info) error {
-	account := store.Account{
-		ID: cfg.Node.ID, Username: cfg.Node.Name, DisplayName: cfg.Node.Name,
-		PublicKey: base64.RawURLEncoding.EncodeToString(device.Public),
+	account := store.Account{ID: cfg.AccountID(), Username: cfg.Account.Username,
+		DisplayName: cfg.Account.DisplayName}
+	if account.Username == "" {
+		account.Username, account.DisplayName = cfg.Node.Name, cfg.Node.Name
+		account.PublicKey = base64.RawURLEncoding.EncodeToString(device.Public)
 	}
 	if err := st.UpsertAccount(account); err != nil {
 		return err
 	}
 	for _, membership := range cfg.Memberships {
-		if err := st.UpsertNetwork(store.Network{
-			ID: membership.ID, Name: membership.Name, OwnerAccountID: account.ID,
-		}); err != nil {
+		if _, err := st.NetworkByID(membership.ID); errors.Is(err, store.ErrNotFound) {
+			if err := st.UpsertNetwork(store.Network{
+				ID: membership.ID, Name: membership.Name, OwnerAccountID: account.ID,
+			}); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
 		}
-		if err := st.AddNetworkMember(membership.ID, account.ID, store.NetworkOwner); err != nil {
+		if _, err := st.NetworkMember(membership.ID, account.ID); errors.Is(err, store.ErrNotFound) {
+			role := membership.AccountRole
+			if role == "" {
+				role = store.NetworkOwner
+			}
+			if err := st.AddNetworkMember(membership.ID, account.ID, role); err != nil {
+				return err
+			}
+		} else if err != nil {
 			return err
 		}
 		policyRaw, _ := json.Marshal(membership.Policy)
@@ -442,6 +464,7 @@ func cmdServe(args []string) error {
 
 	srv.StartTelemetry(ctx, 3*time.Second)
 	srv.StartPeerDiscovery(ctx, 30*time.Second)
+	srv.StartAccountCheckIn(ctx, time.Minute)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())
@@ -680,6 +703,8 @@ func configGet(c *config.Config, l config.Layout, key string) (string, error) {
 		return c.Network.Bind, nil
 	case "network.port":
 		return strconv.Itoa(c.Network.Port), nil
+	case "account.server":
+		return c.Account.Server, nil
 	case "worker.enabled":
 		return strconv.FormatBool(c.Worker.Enabled), nil
 	case "worker.allow_terminal":
@@ -715,6 +740,14 @@ func configSet(c *config.Config, key, value string) error {
 			return fmt.Errorf("network.port expects 0-65535, got %q", value)
 		}
 		c.Network.Port = n
+	case "account.server":
+		value = strings.TrimRight(strings.TrimSpace(value), "/")
+		if value != "" {
+			if _, err := accountclient.New(value); err != nil {
+				return err
+			}
+		}
+		c.Account.Server = value
 	case "worker.enabled":
 		b, err := parseBool()
 		if err != nil {

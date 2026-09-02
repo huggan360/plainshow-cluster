@@ -113,3 +113,33 @@ func TestTouchNetworkNodeRequiresAnExistingNode(t *testing.T) {
 		t.Fatalf("missing node error = %v, want ErrNotFound", err)
 	}
 }
+
+func TestAdoptGlobalAccountMovesNetworkOwnershipNotDeviceIdentity(t *testing.T) {
+	st := open(t)
+	legacy := Account{ID: "device", Username: "desktop"}
+	if err := st.UpsertAccount(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertNetwork(Network{ID: "network", Name: "Lab", OwnerAccountID: legacy.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNetworkMember("network", legacy.ID, NetworkOwner); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertNetworkNode(NetworkNode{NetworkID: "network", NodeID: "device", Name: "desktop"}); err != nil {
+		t.Fatal(err)
+	}
+	global := Account{ID: "account", Username: "hugo", DisplayName: "Hugo"}
+	if err := st.AdoptGlobalAccount(legacy.ID, global); err != nil {
+		t.Fatal(err)
+	}
+	network, _ := st.NetworkByID("network")
+	members, _ := st.NetworkMembers("network")
+	node, nodeErr := st.NetworkNode("network", "device")
+	if network.OwnerAccountID != global.ID || len(members) != 1 || members[0].Account.ID != global.ID {
+		t.Fatalf("ownership was not migrated: network=%#v members=%#v", network, members)
+	}
+	if nodeErr != nil || node.NodeID != legacy.ID {
+		t.Fatalf("device identity moved with account: %#v, %v", node, nodeErr)
+	}
+}

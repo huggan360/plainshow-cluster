@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
+	"github.com/huggan360/plainshow-cluster/internal/accountserver"
 	"github.com/huggan360/plainshow-cluster/internal/auth"
+	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
@@ -48,6 +51,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		if err != nil {
 			fail(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if s.usesCentralAccounts() {
+			enabled = true
 		}
 		if !enabled {
 			next.ServeHTTP(w, r)
@@ -141,7 +147,12 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	response := map[string]any{"enabled": enabled, "authenticated": false}
+	central := s.usesCentralAccounts()
+	if central {
+		enabled = s.cfg.Account.ID != ""
+	}
+	response := map[string]any{"enabled": enabled, "authenticated": false,
+		"central": central, "account_server": s.cfg.Account.Server}
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
 		if account, err := s.store.SessionAccount(cookie.Value); err == nil {
 			response["authenticated"] = true
@@ -154,6 +165,10 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 // authSetup creates the owner account on a node that has none, and signs the
 // caller in as that owner.
 func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) {
+	if s.usesCentralAccounts() {
+		s.centralRegister(w, r)
+		return
+	}
 	enabled, err := s.store.AuthEnabled()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -225,6 +240,10 @@ func validUsername(name string) bool {
 }
 
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
+	if s.usesCentralAccounts() {
+		s.centralLogin(w, r)
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -249,6 +268,98 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"account": account, "authenticated": true,
 	})
+}
+
+func (s *Server) usesCentralAccounts() bool {
+	return strings.TrimSpace(s.cfg.Account.Server) != ""
+}
+
+func (s *Server) centralRegister(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Username       string `json:"username"`
+		DisplayName    string `json:"display_name"`
+		Password       string `json:"password"`
+		BootstrapToken string `json:"bootstrap_token"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	client, err := accountclient.New(s.cfg.Account.Server)
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	response, err := client.Register(ctx, strings.TrimSpace(body.Username),
+		strings.TrimSpace(body.DisplayName), body.Password, strings.TrimSpace(body.BootstrapToken))
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	s.finishCentralAuth(w, r, response)
+}
+
+func (s *Server) centralLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	client, err := accountclient.New(s.cfg.Account.Server)
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	response, err := client.Login(ctx, strings.TrimSpace(body.Username), body.Password)
+	if err != nil {
+		fail(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	s.finishCentralAuth(w, r, response)
+}
+
+func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, response accountclient.AuthResponse) {
+	if response.Account.ID == "" || response.Token == "" {
+		fail(w, http.StatusBadGateway, "The Account Server returned an incomplete identity.")
+		return
+	}
+	if s.cfg.Account.ID != "" && s.cfg.Account.ID != response.Account.ID {
+		fail(w, http.StatusConflict, "This device is already linked to another Plainshow account.")
+		return
+	}
+	local := centralAccount(response.Account)
+	if err := s.store.AdoptGlobalAccount(s.cfg.AccountID(), local); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.cfg.Account.ID = local.ID
+	s.cfg.Account.Username = local.Username
+	s.cfg.Account.DisplayName = local.DisplayName
+	if err := config.Save(s.layout, s.cfg); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := config.SaveAccountToken(s.layout, response.Token); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.issueSession(w, r, local); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	go s.checkInAccountServer(context.Background())
+	writeJSON(w, http.StatusOK, map[string]any{"account": local, "authenticated": true})
+}
+
+func centralAccount(local accountserver.Account) store.Account {
+	return store.Account{ID: local.ID, Username: local.Username, DisplayName: local.DisplayName}
 }
 
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {

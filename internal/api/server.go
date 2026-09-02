@@ -266,7 +266,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	networks, _ := s.store.Networks(s.cfg.Node.ID)
+	networks, _ := s.store.Networks(s.cfg.AccountID())
 	writeJSON(w, 200, map[string]any{
 		"cluster": map[string]string{
 			"id":   s.cfg.Cluster.ID,

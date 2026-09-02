@@ -17,7 +17,7 @@ import (
 )
 
 func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
-	networks, err := s.store.Networks(s.cfg.Node.ID)
+	networks, err := s.store.Networks(s.cfg.AccountID())
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -90,6 +90,10 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
+	if s.usesCentralAccounts() && s.cfg.Account.ID == "" {
+		fail(w, 409, "Sign in with your Plainshow account before joining a network.")
+		return
+	}
 	var body struct {
 		Code     string `json:"code"`
 		Endpoint string `json:"endpoint"`
@@ -111,10 +115,21 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		body.Endpoint = advertisedEndpointFor(s.cfg, tailnet.Probe(r.Context()))
 	}
 	info := sysinfo.Probe(s.layout.Root)
+	account, err := s.store.Account(s.cfg.AccountID())
+	if err != nil {
+		fail(w, 409, "This device has no account identity. Sign in and try again.")
+		return
+	}
+	accountToken, err := config.LoadAccountToken(s.layout)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
 	client := mesh.NewClient(invite.Endpoint, invite.Fingerprint, invite.NetworkID, s.device)
 	request := joinRequest{Token: invite.Token, NodeID: s.device.ID, Name: s.cfg.Node.Name,
 		PublicKey: base64.RawURLEncoding.EncodeToString(s.device.Public), Fingerprint: s.fingerprint,
-		Endpoint: body.Endpoint, Info: info, Policy: policyMap(s.cfg.Worker)}
+		Endpoint: body.Endpoint, Account: account, AccountToken: accountToken,
+		Info: info, Policy: policyMap(s.cfg.Worker)}
 	var response joinResponse
 	if err := client.JSON("POST", "/mesh/v1/join/"+invite.NetworkID, request, &response, false); err != nil {
 		fail(w, 502, "Could not join the network: "+err.Error())
@@ -122,24 +137,12 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	membership := config.MembershipConfig{ID: response.Network.ID, Name: response.Network.Name,
 		Roles: []config.Role{config.RoleWorker}, Enabled: true,
+		AccountRole: response.Role,
 		Coordinator: []string{invite.Endpoint}, Policy: s.cfg.Worker}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	s.cfg.SetActiveNetwork(membership.ID)
 	s.cfg.Network.Advertise = strings.TrimRight(body.Endpoint, "/")
 	if err := config.Save(s.layout, s.cfg); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	if err := s.store.UpsertNetwork(response.Network); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	if err := s.store.UpsertAccount(store.Account{ID: s.device.ID, Username: s.cfg.Node.Name,
-		DisplayName: s.cfg.Node.Name, PublicKey: request.PublicKey}); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	if err := s.store.AddNetworkMember(membership.ID, s.device.ID, response.Role); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -150,7 +153,7 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.recordLocalMembership(membership); err != nil {
+	if err := s.recordLocalMembership(membership, response.Network); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -174,7 +177,7 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	membership := config.MembershipConfig{
 		ID: config.NewID(), Name: body.Name,
-		Roles:   []config.Role{config.RoleWorker},
+		Roles: []config.Role{config.RoleWorker}, AccountRole: store.NetworkOwner,
 		Enabled: true, Policy: s.cfg.Worker,
 	}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
@@ -183,7 +186,9 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	if err := s.recordLocalMembership(membership); err != nil {
+	if err := s.recordLocalMembership(membership, store.Network{
+		ID: membership.ID, Name: membership.Name, OwnerAccountID: s.cfg.AccountID(),
+	}); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -265,7 +270,12 @@ func (s *Server) updateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, err.Error())
 			return
 		}
-		if err := s.recordLocalMembership(*membership); err != nil {
+		network, err := s.store.NetworkByID(membership.ID)
+		if err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+		if err := s.recordLocalMembership(*membership, network); err != nil {
 			fail(w, 500, err.Error())
 			return
 		}
@@ -284,25 +294,28 @@ func hasMembership(cfg *config.Config, id string) bool {
 	return false
 }
 
-func (s *Server) recordLocalMembership(membership config.MembershipConfig) error {
+func (s *Server) recordLocalMembership(membership config.MembershipConfig, network store.Network) error {
 	device, err := identity.LoadOrCreate(s.layout.DeviceKey())
 	if err != nil {
 		return err
 	}
 	public := base64.RawURLEncoding.EncodeToString(device.Public)
-	account := store.Account{
-		ID: s.cfg.Node.ID, Username: s.cfg.Node.Name,
-		DisplayName: s.cfg.Node.Name, PublicKey: public,
+	account := store.Account{ID: s.cfg.AccountID(), Username: s.cfg.Account.Username,
+		DisplayName: s.cfg.Account.DisplayName}
+	if account.Username == "" {
+		account.Username, account.DisplayName, account.PublicKey = s.cfg.Node.Name, s.cfg.Node.Name, public
 	}
 	if err := s.store.UpsertAccount(account); err != nil {
 		return err
 	}
-	if err := s.store.UpsertNetwork(store.Network{
-		ID: membership.ID, Name: membership.Name, OwnerAccountID: account.ID,
-	}); err != nil {
+	if err := s.store.UpsertNetwork(network); err != nil {
 		return err
 	}
-	if err := s.store.AddNetworkMember(membership.ID, account.ID, store.NetworkOwner); err != nil {
+	role := membership.AccountRole
+	if role == "" {
+		role = store.NetworkOwner
+	}
+	if err := s.store.AddNetworkMember(membership.ID, account.ID, role); err != nil {
 		return err
 	}
 	policyRaw, _ := json.Marshal(membership.Policy)

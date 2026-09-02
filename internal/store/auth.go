@@ -63,3 +63,53 @@ func (s *Store) DeleteSession(token string) error {
 	_, err := s.db.Exec(`DELETE FROM login_session WHERE token_hash=?`, SessionHash(token))
 	return err
 }
+
+// AdoptGlobalAccount replaces the old device-shaped owner with the identity
+// returned by the central Account Server. Network permissions move with it;
+// device rows and cryptographic identities remain untouched.
+func (s *Store) AdoptGlobalAccount(legacyID string, account Account) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`INSERT INTO account
+        (id,username,display_name,public_key,password_hash,created_at)
+        VALUES(?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET username=excluded.username,
+          display_name=excluded.display_name`, account.ID, account.Username,
+		account.DisplayName, account.PublicKey, "", Now())
+	if err != nil {
+		return err
+	}
+	if legacyID != "" && legacyID != account.ID {
+		_, err = tx.Exec(`INSERT INTO network_member
+            (network_id,account_id,role,manage_network,manage_members,
+             create_projects,run_jobs,manage_nodes,created_at)
+            SELECT network_id,?,role,manage_network,manage_members,
+             create_projects,run_jobs,manage_nodes,created_at
+            FROM network_member WHERE account_id=?
+            ON CONFLICT(network_id,account_id) DO UPDATE SET
+             role=excluded.role,manage_network=excluded.manage_network,
+             manage_members=excluded.manage_members,create_projects=excluded.create_projects,
+             run_jobs=excluded.run_jobs,manage_nodes=excluded.manage_nodes`, account.ID, legacyID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE network SET owner_account_id=? WHERE owner_account_id=?`,
+			account.ID, legacyID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE login_session SET account_id=? WHERE account_id=?`,
+			account.ID, legacyID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM network_member WHERE account_id=?`, legacyID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM account WHERE id=?`, legacyID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
