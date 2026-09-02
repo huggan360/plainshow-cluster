@@ -27,9 +27,25 @@ export async function api(path, options = {}) {
         try { data = JSON.parse(text); } catch { data = null; }
     }
     if (!res.ok) {
-        throw new Error((data && data.error) || `Request failed (${res.status}).`);
+        const error = new Error((data && data.error) || `Request failed (${res.status}).`);
+        error.status = res.status;
+        // A 401 anywhere means the session went away underneath us. Tell the
+        // shell once, so one expired session does not become a page full of
+        // identical failures.
+        if (res.status === 401 && !path.startsWith('/api/auth/')) {
+            unauthorized.forEach((handler) => handler());
+        }
+        throw error;
     }
     return data;
+}
+
+const unauthorized = new Set();
+
+/** onUnauthorized runs when the node stops recognising this browser. */
+export function onUnauthorized(handler) {
+    unauthorized.add(handler);
+    return () => unauthorized.delete(handler);
 }
 
 // ---------------------------------------------------------------- state ----

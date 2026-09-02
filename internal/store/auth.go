@@ -21,9 +21,27 @@ func (s *Store) AccountByUsername(username string) (Account, error) {
 	}
 	return a, err
 }
+
+// SetAccountPassword names an existing account and gives it a password.
+//
+// It reports an error when no such account exists. An UPDATE that matches
+// nothing returns no error of its own, so without this check a caller with the
+// wrong id is told the password was set when nothing happened.
 func (s *Store) SetAccountPassword(id, username, displayName, hash string) error {
-	_, err := s.db.Exec(`UPDATE account SET username=?,display_name=?,password_hash=? WHERE id=?`, username, displayName, hash, id)
-	return err
+	result, err := s.db.Exec(
+		`UPDATE account SET username=?,display_name=?,password_hash=? WHERE id=?`,
+		username, displayName, hash, id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 func SessionHash(token string) string {
 	sum := sha256.Sum256([]byte(token))

@@ -4,13 +4,14 @@
 // runs one way: app -> views -> client.
 
 import { el, mount, initials } from './lib/ui.js';
-import { state, refresh, connect, onConnection } from './lib/client.js';
+import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
 import { renderHome } from './views/home.js';
 import { renderWorkspace } from './views/workspace.js';
 import { renderJobs } from './views/jobs.js';
 import { renderMachines } from './views/machines.js';
 import { renderSettings } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
+import { renderGate } from './views/signin.js';
 import { renderNotebooks } from './views/notebooks.js';
 import { renderNetworks } from './views/networks.js';
 import { renderDatasets } from './views/datasets.js';
@@ -130,6 +131,14 @@ function shell(overview) {
 
 async function boot() {
     const app = document.getElementById('app');
+
+    // A node with no owner account is unclaimed: offer to claim it rather than
+    // dropping straight into a workspace anyone on the network could use.
+    const auth = await api('/api/auth/status').catch(() => null);
+    if (auth && (!auth.enabled || !auth.authenticated)) {
+        await renderGate(app, auth);
+    }
+
     try {
         await refresh();
     } catch (err) {
@@ -157,6 +166,10 @@ async function boot() {
         dot.className = `dot ${live ? 'dot--on' : 'dot--bad'}`;
         label.textContent = live ? 'live' : 'offline';
     });
+
+    // A session can expire while the page is open. Show the gate again rather
+    // than leaving a workspace whose every request quietly fails.
+    onUnauthorized(() => location.reload());
 
     connect();
     window.addEventListener('hashchange', renderRoute);

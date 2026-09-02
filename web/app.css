@@ -57,6 +57,9 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 /* ---------------------------------------------------------------- shell -- */
 
 .app { display: flex; min-height: 100vh; }
+.login-page { display:flex;min-height:100vh;width:100%;align-items:center;justify-content:center;padding:24px; }
+.login-card { width:min(420px,100%); }
+.bad-text { color:var(--bad);font-size:12px; }
 
 .rail {
     position: fixed;

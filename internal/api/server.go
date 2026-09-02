@@ -77,6 +77,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/overview", s.getOverview)
+	mux.HandleFunc("GET /api/auth/status", s.authStatus)
+	mux.HandleFunc("POST /api/auth/setup", s.authSetup)
+	mux.HandleFunc("POST /api/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
 	mux.HandleFunc("GET /api/sysinfo", s.getSysinfo)
 	mux.HandleFunc("GET /api/machines", s.getMachines)
 	mux.HandleFunc("GET /api/networks", s.listNetworks)
@@ -148,7 +152,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /ws", s.serveWS)
 
 	mux.Handle("/", s.staticHandler())
-	return logRequests(mux)
+	return logRequests(s.authenticate(mux))
 }
 
 // ------------------------------------------------------------- plumbing ----
