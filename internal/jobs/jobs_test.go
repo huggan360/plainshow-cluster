@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,7 +196,10 @@ func TestLiveAndReplayedLogsAgree(t *testing.T) {
 	sub := hub.Subscribe()
 	defer sub.Close()
 
-	var live []LogLine
+	var (
+		mu   sync.Mutex
+		live []LogLine
+	)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -204,7 +208,9 @@ func TestLiveAndReplayedLogsAgree(t *testing.T) {
 				continue
 			}
 			if line, ok := ev.Data.(LogLine); ok {
+				mu.Lock()
 				live = append(live, line)
+				mu.Unlock()
 			}
 		}
 	}()
@@ -216,11 +222,26 @@ func TestLiveAndReplayedLogsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForState(t, st, job.ID)
-	time.Sleep(150 * time.Millisecond) // let the last events drain
+
+	// The job is finished, but its last log events may still be in flight to
+	// this subscriber. Wait for the count to settle rather than sleeping a
+	// fixed amount: under a loaded test run any fixed wait is eventually too
+	// short, and this test then fails for a reason that has nothing to do with
+	// what it checks.
+	replayed := sup.Tail(job.ID, 100)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		seen := len(live)
+		mu.Unlock()
+		if seen >= len(replayed) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	sub.Close()
 	<-done
 
-	replayed := sup.Tail(job.ID, 100)
 	if len(replayed) != len(live) {
 		t.Fatalf("replayed %d lines but %d were broadcast", len(replayed), len(live))
 	}

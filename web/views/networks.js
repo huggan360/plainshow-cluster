@@ -162,9 +162,7 @@ async function configureMachine(network, redraw) {
     modal({
         title: `${network.name} · this machine`, confirmLabel: 'Save',
         body: () => el('div', {},
-            roleRow('master', 'Keep canonical project and dataset state for this network.'),
             roleRow('worker', 'Accept jobs within the local safety limits.'),
-            roleRow('controller', 'Help members discover and reach one another.')),
         onConfirm: async (close) => {
             const selected = Object.entries(checks).filter(([, input]) => input.checked).map(([role]) => role);
             if (!selected.length) throw new Error('Choose at least one role.');

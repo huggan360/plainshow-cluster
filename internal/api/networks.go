@@ -174,7 +174,7 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	membership := config.MembershipConfig{
 		ID: config.NewID(), Name: body.Name,
-		Roles:   []config.Role{config.RoleMaster, config.RoleWorker},
+		Roles:   []config.Role{config.RoleWorker},
 		Enabled: true, Policy: s.cfg.Worker,
 	}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)

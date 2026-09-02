@@ -44,23 +44,55 @@ These are settled. Do not quietly reverse them.
    4090 + 4070 across two houses is one faster GPU. Measure and say so — and
    refuse a run that cannot work rather than letting it hang (see below).
 
-## Roles
+## Shape of the system
 
-Three, freely combinable on one machine.
+Three things, and only one of them is required.
 
-| Role | Holds | If it disappears |
-|---|---|---|
-| `master` | State, project files, datasets, artifacts. Serves the interface. | Editing and new jobs stop; running jobs continue and buffer. |
-| `worker` | Caches and running processes. Nothing canonical. | Its jobs reschedule. |
-| `controller` | Discovery and relay only. No data, no jobs. | Established peers carry on; new joins stop. |
+**Account.** You register once. The account is your identity across every
+network you belong to, and it is what a device is enrolled *as*.
 
-`master` is the **data home**, not the coordinator of a training run. That
-coordinator is picked per job and shown as `rank 0`; it is never configured.
+**Network.** A set of devices and people who work together. Anybody can create
+one; joining is a single-use code. A device can belong to several, and each
+membership keeps its own projects, people and policy.
 
-One installation can belong to **several networks**. Each membership has its own
-projects, accounts, machines, roles and worker policy. `worker` in the top-level
-config is a device-wide ceiling that a per-network policy can narrow but never
-exceed.
+**Device.** Any machine that has joined a network. **Every device is equal.**
+There is no master, no coordinator, no machine that holds the real copy. Every
+device can run tasks and connects directly to every other device on the network.
+What a device is willing to do is its own local policy — accept jobs, expose a
+GPU, allow a terminal — and nothing remote can widen it.
+
+**Controller Server** *(separate program, optional).* A machine you already have
+online — a web server, a VPS, a Pi — running a second, smaller program. It holds
+the WebSocket that makes live collaborative editing possible, and serves a web
+overview of the networks it is attached to. It is configured with which networks
+it serves. It is **not** a device role and it runs no jobs.
+
+### Where project state lives
+
+**Git is the source of truth, and every device has a full clone.** There is no
+canonical holder to be offline. Two people can work while disconnected from each
+other and reconcile with a real three-way merge, which is the one thing that has
+to keep working when the network does not.
+
+So collaboration has two tiers, and the difference is honest:
+
+- **Without a controller server** — the stock experience. Edit, commit, pull.
+  Asynchronous, works with nobody online but you, needs nothing extra installed.
+- **With a controller server** — the same projects, plus live editing over its
+  socket. Real-time collaboration needs something always reachable by everyone,
+  which is exactly what a device on a home connection is not.
+
+Live editing is a *feature the controller adds*, never a thing the cluster
+degrades without. Git keeps working either way.
+
+### What this replaces
+
+Earlier versions had `master`, `worker` and `controller` as roles on a device,
+with the master holding canonical state. That is gone. It made one machine
+special, made its being offline everybody's problem, and put the thing most
+likely to be a gaming desktop in the critical path. `master` and `controller`
+are still parsed from old configs and treated as an ordinary device, so an
+existing install keeps working.
 
 ## The most important rule: bundle, do not rebuild
 
@@ -189,34 +221,94 @@ Everything above could be verified on the development Pi; a multi-GPU
 of estimate usually breaks. Expect the driver and CUDA mismatch handling to be
 wrong in some specific way that only appears on real hardware.
 
-## Roadmap
+## Handover: the exact steps to 100%
 
-Phases 0–5 are landed. What remains, in order:
+Ordered. Each is a commit or two, and each leaves the tree working. Sizes are
+working days for one person who has read this file. **Roughly six weeks.**
 
-1. **Reliability pass on what exists.** Done: the collaboration write path,
-   the sign-in gate, `internal/api` tests, the peer port, and the CLI commands
-   for networks, invites, joining, GitHub and updates.
-2. **Phase 6 — finish the Tailscale migration.** Steps 1 and 2 below are done. Not by finishing ours.
-   Plainshow should require the tailscale daemon, bring it up with an auth key
-   during join, and read peer addresses from `tailscale status --json`. That
-   gives NAT traversal, key distribution, roaming and a relay fallback for
-   nothing, and — the part our tunnel cannot do — a real interface that torch
-   and NCCL can bind to, so distributed training works between houses.
-   `internal/mesh` and `internal/tunnel` then shrink to almost nothing: with
-   every machine reachable at a stable address, peers are just dialled.
-   Headscale, or Tailscale's free tier, covers the coordination server.
-3. **Phase 7 — real-machine validation.** A genuine multi-GPU `torchrun` across
-   two CUDA machines. The launcher is implemented and unit-tested; it has never
-   run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
-   Note that a cross-house run will now be *refused* rather than hanging, so
-   validation needs two machines with a route between them — same network, a
-   VPN, or a forwarded port.
-4. **Phase 8 — release engineering.** Landed: `make dist` writes the assets the
-   updater looks for plus `checksums.txt`, and pushing a `v*` tag runs
-   `.github/workflows/release.yml`, which re-runs the gate, verifies the binary
-   reports the tag, and publishes. **No release has been cut yet**, so every
-   node's update check currently answers "no releases found" — correctly.
-   Signed builds are still open.
+The architecture change above — every device equal, git as the truth, a separate
+controller server for live editing — adds scope relative to earlier estimates.
+It also deletes more than it adds, and removes the machine that was a single
+point of failure.
+
+### A. Finish the peer model (≈3d)
+
+1. **Normalise stored roles.** `network_node.roles` rows written by older
+   versions still say `master`. Run them through `config.Normalise` on read so
+   nothing downstream sees a role that no longer exists. *0.5d*
+2. **Drop roles from enrolment.** Joining should not ask what a machine is; it
+   is a device. Remove the role picker from `web/views/networks.js` and the
+   roles argument from the join path. *0.5d*
+3. **All-to-all peer discovery.** Today a joining device learns about the
+   machine that invited it. Every device needs every other device's address, so
+   any pair can work together. Add a peers exchange on check-in: a device asks
+   any peer it knows for the current member list and merges. No coordinator,
+   converges, survives any single machine being off. *2d*
+
+### B. Controller Server (≈7d)
+
+A second binary, `cmd/pscluster-controller`. It runs no jobs and stores no
+project data. Live editing is the feature it adds; git works without it.
+
+4. **The binary and its config.** Which networks it serves, its own identity
+   keypair, listen address, TLS. Reuse `internal/config` layout rules — one
+   directory, nothing compiled in. *1d*
+5. **Attaching to a network.** A network admin mints a controller token; the
+   controller presents it and enrols as a non-device member. Devices learn the
+   controller's address the same way they learn each other's. *1d*
+6. **Live editing moves behind it.** `internal/collab` becomes the controller's
+   job. Devices open the doc socket against the controller; on idle it writes
+   through to the project working tree and commits. Git stays the truth, so a
+   controller that disappears costs live editing and nothing else. *3d*
+7. **Web overview.** The controller serves a read-mostly view across its
+   networks: devices, jobs, projects. Reuses `web/` with a different data
+   source. *2d*
+
+### C. Accounts across devices (≈3d)
+
+8. **Account is a keypair, not a row.** Today the first person to open a node
+   claims it. Make an account an identity the person carries, so the same
+   account on a second device is the same person. *2d*
+9. **Sign in on a new device with an existing account** rather than creating a
+   fresh owner. *1d*
+
+### D. Networking (≈2.5d)
+
+10. **Auth key in the join code.** `mesh.Invite` carries an optional tailscale
+    auth key; `join` calls `tailnet.Up` first. One step instead of two. *1d*
+11. **Warn on relayed links** in the training preflight. `internal/tailnet`
+    already reports which peers are relayed; a relayed link is somebody else's
+    bandwidth. *0.5d*
+12. **Shrink `internal/mesh`.** Keep mTLS and request signing. Drop what remains
+    of working around unreachability. *1d*
+
+### E. Features never built (≈6d)
+
+13. **Terminal.** Section 10 of the original brief, and nothing exists — while
+    `allow_terminal` has been guarding it. xterm.js plus a PTY job kind; the job
+    lifecycle already handles streaming and stopping. *3d*
+14. **Notebooks onto `jupyter_server`.** Delete the hand-written kernel. Gains
+    ipywidgets, rich output, completion and inspection, all for free. *3d*
+
+### F. Release readiness (≈11d)
+
+15. **`internal/api` coverage.** ~3,000 lines, and only the auth gate and the
+    reachability probe are tested. *3d*
+16. **Real multi-GPU validation.** Two CUDA machines, an actual `torchrun`.
+    Needs hardware nobody has run this on. Expect the driver and CUDA mismatch
+    handling to be wrong. **This is where the estimate is most likely to
+    break.** *3d*
+17. **Cut v0.1.0 and test a real upgrade** — install an old build, publish a new
+    one, watch a node take it. *2d*
+18. **Install hardening and docs.** *3d*
+
+### Done and not to be redone
+
+Single-machine workspace · GitHub repos, push/pull and two-way team sync · auth
+and permissions · CLI parity with the browser · datasets · job supervision and
+log streaming · the update daemon and release workflow · the tailscale driver ·
+the rendezvous reachability check. See the status table above for what is
+partial.
 
 ## How the command line reaches the daemon
 

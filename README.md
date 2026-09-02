@@ -44,21 +44,26 @@ The root is chosen in this order: `--root`, then `PSCLUSTER_ROOT`, then
 `/opt/plainshow-cluster` when running as root and `~/.plainshow-cluster`
 otherwise.
 
-## Roles
+## How it fits together
 
-A machine carries any combination of three roles.
+**Every device is equal.** Any machine that joins a network can run tasks and
+talks directly to every other machine on it. There is no master, no coordinator,
+and no machine whose being offline is everybody's problem. What a device is
+willing to do — accept jobs, expose a GPU, allow a terminal — is its own local
+setting, and nothing remote can widen it.
 
-| Role | Holds | Notes |
-|---|---|---|
-| `master` | State, project files, datasets, artifacts. Serves the interface. | The data home. |
-| `worker` | Nothing canonical — caches and running processes. | Contributes CPU, GPU and disk. |
-| `controller` | Node keys and relay. No project data, no jobs. | An always-on box that helps machines find each other. Optional. |
+**Git is the source of truth for projects**, and every device keeps a full
+clone. Two people can work while disconnected and reconcile with a real merge.
 
-A single machine runs `master` and `worker` and is complete on its own.
+**Live collaborative editing needs the Plainshow Controller Server** — a second,
+smaller program you run on a machine that is already online, configured with
+which networks it serves. It holds the editing socket and a web overview. It is
+optional: without it you get git-based collaboration, which works with nobody
+online but you.
 
-`master` is the data home, not the coordinator of a training run. That
-coordinator is chosen per job and shown as `rank 0`; it is never something you
-configure.
+Machines on different networks find each other through **tailscale**, which
+Plainshow drives rather than reimplements.
+
 
 ## Commands
 

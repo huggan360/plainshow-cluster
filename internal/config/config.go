@@ -41,25 +41,57 @@ type Role string
 const (
 	// RoleController runs discovery and relay for the cluster. It holds no
 	// project data and executes no jobs.
-	RoleController Role = "controller"
-	// RoleMaster holds the canonical copy of cluster state and projects, and
-	// serves the web interface.
-	RoleMaster Role = "master"
-	// RoleWorker contributes CPU, GPU and disk to jobs.
+	// RoleWorker is what every device is. Every machine that joins a network
+	// can run tasks and talks directly to every other machine on it; what it
+	// is willing to do is its own local policy, not a role.
 	RoleWorker Role = "worker"
+
+	// RoleMaster and RoleController are retired. Devices used to carry them,
+	// with the master holding canonical state — which made one machine special
+	// and its absence everybody's problem. They are still accepted from an
+	// existing config and read as an ordinary device.
+	RoleMaster     Role = "master"
+	RoleController Role = "controller"
 )
 
 // AllRoles lists every valid role, in presentation order.
-var AllRoles = []Role{RoleController, RoleMaster, RoleWorker}
+var AllRoles = []Role{RoleWorker}
+
+// retiredRoles are accepted from an existing configuration and read as a plain
+// device, so upgrading a node does not require editing its config by hand.
+var retiredRoles = []Role{RoleMaster, RoleController}
 
 // Valid reports whether r is a role this build understands.
 func (r Role) Valid() bool {
-	for _, k := range AllRoles {
+	for _, k := range append(append([]Role{}, AllRoles...), retiredRoles...) {
 		if k == r {
 			return true
 		}
 	}
 	return false
+}
+
+// Normalise collapses a role list to what this version understands. Retired
+// roles become an ordinary device, and an empty list is one too.
+func Normalise(roles []Role) []Role {
+	seen := map[Role]bool{}
+	out := []Role{}
+	for _, role := range roles {
+		if !role.Valid() {
+			continue
+		}
+		if role != RoleWorker {
+			role = RoleWorker // master and controller are just devices now
+		}
+		if !seen[role] {
+			seen[role] = true
+			out = append(out, role)
+		}
+	}
+	if len(out) == 0 {
+		out = []Role{RoleWorker}
+	}
+	return out
 }
 
 // Config is the full settings document for a node. Every field has a working
@@ -246,7 +278,7 @@ func Defaults() *Config {
 		Node: NodeConfig{
 			ID:    NewID(),
 			Name:  host,
-			Roles: []Role{RoleMaster, RoleWorker},
+			Roles: []Role{RoleWorker},
 		},
 		Cluster: ClusterConfig{ID: NewID(), Name: "cluster"},
 		Network: NetworkConfig{Bind: "127.0.0.1", Port: 0, PeerPort: 10000},
@@ -376,8 +408,9 @@ func (c *Config) applyFallbacks() {
 	if c.Node.Name == "" {
 		c.Node.Name = d.Node.Name
 	}
-	if len(c.Node.Roles) == 0 {
-		c.Node.Roles = d.Node.Roles
+	c.Node.Roles = Normalise(c.Node.Roles)
+	for i := range c.Memberships {
+		c.Memberships[i].Roles = Normalise(c.Memberships[i].Roles)
 	}
 	if c.Cluster.ID == "" {
 		c.Cluster.ID = d.Cluster.ID

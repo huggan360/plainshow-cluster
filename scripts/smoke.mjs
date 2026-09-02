@@ -44,7 +44,9 @@ console.log('\nOVERVIEW');
 const ov = (await j('/api/overview')).body;
 const defaultNetwork = ov.active_network;
 ok('cluster named', typeof ov.cluster.name === 'string' && ov.cluster.name.length > 0);
-ok('node roles', JSON.stringify(ov.node.roles) === '["master","worker"]');
+// Every device is equal now: one role, and no machine is special.
+ok('node is an ordinary device', JSON.stringify(ov.node.roles) === '["worker"]',
+   JSON.stringify(ov.node.roles));
 ok('self machine registered', ov.machines.length === 1 && ov.machines[0].is_self);
 ok('system probed', ov.system.cpu_cores > 0 && ov.system.ram_total_mb > 0);
 ok('git detected', ov.git_available === true);

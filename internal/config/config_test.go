@@ -56,7 +56,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	want := Defaults()
 	want.Node.Name = "fredrik-pc"
 	want.Cluster.Name = "HomeLab"
-	want.Node.Roles = []Role{RoleMaster, RoleWorker}
+	want.Node.Roles = []Role{RoleWorker}
 	want.Network.Port = 9999
 	want.Worker.AllowTerminal = true
 
@@ -72,7 +72,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		got.Worker.AllowTerminal != want.Worker.AllowTerminal {
 		t.Errorf("round trip lost settings: %+v", got)
 	}
-	if !got.HasRole(RoleMaster) || !got.HasRole(RoleWorker) || got.HasRole(RoleController) {
+	// Every device carries exactly one role now; master and controller are
+	// retired and normalise away on load.
+	if !got.HasRole(RoleWorker) || len(got.Node.Roles) != 1 {
 		t.Errorf("roles round-tripped wrongly: %v", got.RoleNames())
 	}
 	if len(got.Memberships) != 1 || got.ActiveNetwork != got.Cluster.ID {
@@ -229,4 +231,60 @@ func mapKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestRetiredRolesBecomeOrdinaryDevices: an existing install has "master" and
+// "controller" written into its config. Upgrading must not refuse to start, and
+// must not leave a machine still believing it is special.
+func TestRetiredRolesBecomeOrdinaryDevices(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []Role
+		want []Role
+	}{
+		{"old master node", []Role{RoleMaster, RoleWorker}, []Role{RoleWorker}},
+		{"old controller", []Role{RoleController}, []Role{RoleWorker}},
+		{"all three", []Role{RoleController, RoleMaster, RoleWorker}, []Role{RoleWorker}},
+		{"already current", []Role{RoleWorker}, []Role{RoleWorker}},
+		{"empty", nil, []Role{RoleWorker}},
+		{"unknown dropped", []Role{"gpu", RoleWorker}, []Role{RoleWorker}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Normalise(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("Normalise(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("Normalise(%v) = %v, want %v", tc.in, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestLoadNormalisesAnOldConfig covers the upgrade path end to end.
+func TestLoadNormalisesAnOldConfig(t *testing.T) {
+	l, err := NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	old := "node:\n  name: fredrik-pc\n  roles:\n    - master\n    - worker\n"
+	if err := os.WriteFile(l.ConfigFile(), []byte(old), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(l)
+	if err != nil {
+		t.Fatalf("an old config would not load: %v", err)
+	}
+	if cfg.HasRole(RoleMaster) {
+		t.Error("the machine still believes it is a master")
+	}
+	if !cfg.HasRole(RoleWorker) {
+		t.Error("the machine is not a device at all")
+	}
 }
