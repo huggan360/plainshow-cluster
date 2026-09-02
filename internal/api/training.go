@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
+	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 	"github.com/huggan360/plainshow-cluster/internal/training"
 )
 
@@ -102,7 +105,28 @@ func (s *Server) trainingPreflight(w http.ResponseWriter, r *http.Request) {
 	} else {
 		issues = append(issues, s.rendezvousIssues(nodes, plan)...)
 	}
-	writeJSON(w, 200, map[string]any{"ready": len(issues) == 0, "issues": issues, "plan": plan, "advice": training.Advise(body.Parameters, 4, body.BandwidthMbps, body.ObservedStepSeconds, len(nodes))})
+	writeJSON(w, 200, map[string]any{"ready": len(issues) == 0, "issues": issues,
+		"warnings": s.trainingLinkWarnings(nodes), "plan": plan,
+		"advice": training.Advise(body.Parameters, 4, body.BandwidthMbps,
+			body.ObservedStepSeconds, len(nodes))})
+}
+
+func (s *Server) trainingLinkWarnings(nodes []store.NetworkNode) []string {
+	status := tailnet.Probe(context.Background())
+	warnings := []string{}
+	for _, node := range nodes {
+		nodeAddress := node.Address
+		if parsed, err := url.Parse(node.Address); err == nil && parsed.Hostname() != "" {
+			nodeAddress = parsed.Hostname()
+		}
+		for _, peer := range status.Peers {
+			if peer.Address == nodeAddress && peer.Relayed {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s is reached through a Tailscale relay; training can run, but bandwidth and latency may be unsuitable.", node.Name))
+			}
+		}
+	}
+	return warnings
 }
 
 // rendezvousIssues checks that every rank can actually reach the coordinating

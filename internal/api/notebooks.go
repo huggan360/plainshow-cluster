@@ -1,13 +1,11 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/projectfs"
@@ -106,54 +104,44 @@ func (s *Server) notebookStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.notebooks.Status(project.Root))
 }
 
-func (s *Server) executeNotebookCell(w http.ResponseWriter, r *http.Request) {
-	p, project, err := s.project(r.PathValue("name"))
-	if err != nil {
-		fail(w, 404, "No such project.")
-		return
-	}
-	if !s.cfg.Worker.Enabled || !s.cfg.Worker.AllowJobs {
-		fail(w, 403, "This machine is not accepting code execution.")
-		return
-	}
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := decode(r, &body); err != nil {
-		fail(w, 400, err.Error())
-		return
-	}
-	if strings.TrimSpace(body.Code) == "" {
-		fail(w, 400, "The cell is empty.")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 24*time.Hour)
-	defer cancel()
-	s.hub.Publish("notebook.busy", map[string]string{"project": p.Name})
-	result, err := s.notebooks.Execute(ctx, project.Root, body.Code)
-	if err != nil {
-		status := 500
-		if errors.Is(err, notebook.ErrNoPython) {
-			status = 412
-		}
-		fail(w, status, err.Error())
-		return
-	}
-	s.hub.Publish("notebook.idle", map[string]string{"project": p.Name})
-	writeJSON(w, 200, result)
-}
-
-func (s *Server) interruptNotebook(w http.ResponseWriter, r *http.Request) {
+func (s *Server) openJupyter(w http.ResponseWriter, r *http.Request) {
 	_, project, err := s.project(r.PathValue("name"))
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
 	}
-	if err := s.notebooks.Interrupt(project.Root); err != nil {
-		fail(w, 409, err.Error())
+	if !s.cfg.Worker.Enabled || !s.cfg.Worker.AllowJobs {
+		fail(w, 403, "This machine is not accepting notebook kernels.")
 		return
 	}
-	writeJSON(w, 200, map[string]string{"status": "interrupting"})
+	status, err := s.notebooks.Open(project.Root)
+	if err != nil {
+		code := 500
+		if errors.Is(err, notebook.ErrNoJupyter) {
+			code = 412
+		}
+		fail(w, code, err.Error())
+		return
+	}
+	writeJSON(w, 200, status)
+}
+
+func (s *Server) proxyJupyter(w http.ResponseWriter, r *http.Request) {
+	proxy, err := s.notebooks.Proxy(r.PathValue("id"))
+	if err != nil {
+		fail(w, 404, err.Error())
+		return
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) executeNotebookCell(w http.ResponseWriter, r *http.Request) {
+	fail(w, http.StatusGone,
+		"Cell execution moved to Jupyter Server. Open this notebook from the Notebooks page.")
+}
+
+func (s *Server) interruptNotebook(w http.ResponseWriter, r *http.Request) {
+	fail(w, http.StatusGone, "Interrupt kernels from the Jupyter interface.")
 }
 
 func (s *Server) restartNotebook(w http.ResponseWriter, r *http.Request) {

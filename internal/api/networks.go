@@ -39,10 +39,12 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Endpoint string `json:"endpoint"`
-		Role     string `json:"role"`
-		Minutes  int    `json:"minutes"`
-		MaxUses  int    `json:"max_uses"`
+		Endpoint           string `json:"endpoint"`
+		Role               string `json:"role"`
+		Minutes            int    `json:"minutes"`
+		MaxUses            int    `json:"max_uses"`
+		TailnetAuthKey     string `json:"tailnet_auth_key"`
+		TailnetLoginServer string `json:"tailnet_login_server"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
@@ -74,6 +76,8 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	invite.TailnetAuthKey = strings.TrimSpace(body.TailnetAuthKey)
+	invite.TailnetLoginServer = strings.TrimRight(strings.TrimSpace(body.TailnetLoginServer), "/")
 	if err := s.store.CreateInvitation(store.Invitation{ID: invite.ID, NetworkID: id,
 		TokenHash: tokenHash, Role: body.Role, Expires: invite.Expires,
 		MaxUses: body.MaxUses, CreatedBy: s.cfg.Node.ID}); err != nil {
@@ -106,6 +110,13 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	if invite.TailnetAuthKey != "" {
+		if err := tailnet.Up(r.Context(), invite.TailnetAuthKey, s.cfg.Node.Name,
+			invite.TailnetLoginServer); err != nil {
+			fail(w, 502, "Could not join the network tailnet: "+err.Error())
+			return
+		}
 	}
 	if hasMembership(s.cfg, invite.NetworkID) {
 		fail(w, 409, "This device already belongs to that network.")

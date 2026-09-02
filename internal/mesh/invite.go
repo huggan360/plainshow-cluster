@@ -16,15 +16,17 @@ import (
 const invitePrefix = "psc1_"
 
 type Invite struct {
-	Version     int    `json:"v"`
-	ID          string `json:"id"`
-	NetworkID   string `json:"network_id"`
-	NetworkName string `json:"network_name"`
-	Endpoint    string `json:"endpoint"`
-	Fingerprint string `json:"fingerprint"`
-	Token       string `json:"token"`
-	Role        string `json:"role"`
-	Expires     string `json:"expires_at"`
+	Version            int    `json:"v"`
+	ID                 string `json:"id"`
+	NetworkID          string `json:"network_id"`
+	NetworkName        string `json:"network_name"`
+	Endpoint           string `json:"endpoint"`
+	Fingerprint        string `json:"fingerprint"`
+	Token              string `json:"token"`
+	Role               string `json:"role"`
+	TailnetAuthKey     string `json:"tailnet_auth_key,omitempty"`
+	TailnetLoginServer string `json:"tailnet_login_server,omitempty"`
+	Expires            string `json:"expires_at"`
 }
 
 func NewInvite(networkID, networkName, endpoint, fingerprint, role string,

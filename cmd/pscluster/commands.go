@@ -84,8 +84,14 @@ func cmdInvite(args []string) error {
 		Code    string `json:"code"`
 		Expires string `json:"expires_at"`
 	}
-	if err := d.call("POST", "/api/networks/"+network+"/invites",
-		map[string]any{"role": role}, &out); err != nil {
+	body := map[string]any{"role": role}
+	if key := f.get("tailnet-auth-key", ""); key != "" {
+		body["tailnet_auth_key"] = key
+	}
+	if server := f.get("tailnet-login-server", ""); server != "" {
+		body["tailnet_login_server"] = server
+	}
+	if err := d.call("POST", "/api/networks/"+network+"/invites", body, &out); err != nil {
 		return err
 	}
 
@@ -137,6 +143,31 @@ func cmdJoin(args []string) error {
 	}
 	fmt.Printf("\n  Joined %s as %s.\n\n", out.Network.Name, out.Role)
 	fmt.Printf("  This machine now shares that network's projects and jobs.\n\n")
+	return nil
+}
+
+func cmdController(args []string) error {
+	f := parseFlags(args)
+	action := ""
+	if len(f.rest) > 0 {
+		action = f.rest[0]
+	}
+	if action != "invite" {
+		return errors.New("usage: pscluster controller invite [--network ID]")
+	}
+	d, _, cfg, err := openDaemon(f)
+	if err != nil {
+		return err
+	}
+	network := f.get("network", cfg.ActiveNetwork)
+	var out struct {
+		Code string `json:"code"`
+	}
+	if err := d.call("POST", "/api/networks/"+network+"/controller-invites", map[string]any{}, &out); err != nil {
+		return err
+	}
+	fmt.Printf("\n  Controller enrollment code\n\n  %s\n\n", out.Code)
+	fmt.Printf("  pscluster-controller attach %s --advertise https://controller.example\n\n", shorten(out.Code))
 	return nil
 }
 

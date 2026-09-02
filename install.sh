@@ -1,89 +1,100 @@
 #!/bin/sh
-# Install Plainshow Cluster on this machine.
-#
-# Everything the node stores goes under one directory. The only things this
-# script may put elsewhere are a symlink onto PATH and a systemd unit, and the
-# node runs correctly without either — decline both and nothing outside the
-# install root is touched.
+# Install one Plainshow Cluster component without installing dependencies.
+# Usage: ./install.sh [node|controller|admin] [binary]
 
 set -eu
 
-BINARY_SRC="${1:-./pscluster}"
-ROOT="${PSCLUSTER_ROOT:-}"
+COMPONENT="${1:-node}"
+case "$COMPONENT" in
+    node)       BINARY_NAME=pscluster; ROOT="${PSCLUSTER_ROOT:-/opt/plainshow-cluster}" ;;
+    controller) BINARY_NAME=pscluster-controller; ROOT="${PSCLUSTER_CONTROLLER_ROOT:-/opt/plainshow-controller}" ;;
+    admin)      BINARY_NAME=pscluster-admin; ROOT="${PSCLUSTER_ADMIN_ROOT:-/opt/plainshow-cluster-admin}" ;;
+    *) echo "install: component must be node, controller, or admin" >&2; exit 2 ;;
+esac
 
+BINARY_SRC="${2:-./$BINARY_NAME}"
 if [ ! -x "$BINARY_SRC" ]; then
-    echo "install: $BINARY_SRC not found. Run 'make build' first." >&2
+    echo "install: $BINARY_SRC not found; run 'make build' first" >&2
     exit 1
 fi
 
-if [ -z "$ROOT" ]; then
-    if [ "$(id -u)" -eq 0 ]; then
-        ROOT=/opt/plainshow-cluster
-    else
-        ROOT="$HOME/.plainshow-cluster"
-    fi
+if [ "$(id -u)" -ne 0 ] && [ "${ROOT#/opt/}" != "$ROOT" ]; then
+    ROOT="${HOME}/.${BINARY_NAME}"
 fi
-
-echo
-echo "  Plainshow Cluster"
-echo
-echo "  Install root   $ROOT"
-echo "  Binary         $ROOT/bin/pscluster"
-echo
 
 mkdir -p "$ROOT/bin"
-cp "$BINARY_SRC" "$ROOT/bin/pscluster"
-chmod 755 "$ROOT/bin/pscluster"
+temporary="$ROOT/bin/.${BINARY_NAME}.new"
+cp "$BINARY_SRC" "$temporary"
+chmod 755 "$temporary"
+mv "$temporary" "$ROOT/bin/$BINARY_NAME"
 
-if [ ! -f "$ROOT/config.yaml" ]; then
-    "$ROOT/bin/pscluster" init --root "$ROOT"
-else
-    echo "  A node already exists here — the binary was updated in place."
-    echo
-fi
+case "$COMPONENT" in
+    node)
+        if [ ! -f "$ROOT/config.yaml" ]; then
+            set -- init --root "$ROOT"
+            if [ -n "${PSCLUSTER_ACCOUNT_SERVER:-}" ]; then
+                set -- "$@" --account-server "$PSCLUSTER_ACCOUNT_SERVER"
+            fi
+            "$ROOT/bin/$BINARY_NAME" "$@"
+        fi
+        ;;
+    controller)
+        if [ ! -f "$ROOT/controller.yaml" ]; then
+            set -- init --root "$ROOT"
+            if [ -n "${PSCLUSTER_CONTROLLER_URL:-}" ]; then
+                set -- "$@" --advertise "$PSCLUSTER_CONTROLLER_URL"
+            fi
+            "$ROOT/bin/$BINARY_NAME" "$@"
+        fi
+        ;;
+    admin)
+        if [ ! -f "$ROOT/admin.yaml" ]; then
+            set -- init --root "$ROOT"
+            if [ -n "${PSCLUSTER_ADMIN_URL:-}" ]; then
+                set -- "$@" --public-url "$PSCLUSTER_ADMIN_URL"
+            fi
+            "$ROOT/bin/$BINARY_NAME" "$@"
+        fi
+        ;;
+esac
 
-# Optional: put the command on PATH.
-LINK_DIR=""
 if [ "$(id -u)" -eq 0 ] && [ -d /usr/local/bin ]; then
-    LINK_DIR=/usr/local/bin
-elif [ -d "$HOME/.local/bin" ]; then
-    LINK_DIR="$HOME/.local/bin"
+    ln -sf "$ROOT/bin/$BINARY_NAME" "/usr/local/bin/$BINARY_NAME"
 fi
 
-if [ -n "$LINK_DIR" ]; then
-    ln -sf "$ROOT/bin/pscluster" "$LINK_DIR/pscluster"
-    echo "  Linked         $LINK_DIR/pscluster -> $ROOT/bin/pscluster"
-fi
+SERVICE_NAME="plainshow-cluster"
+[ "$COMPONENT" = controller ] && SERVICE_NAME="plainshow-controller"
+[ "$COMPONENT" = admin ] && SERVICE_NAME="plainshow-cluster-admin"
 
-# Optional: a systemd unit, written into the root and linked from systemd so the
-# unit file itself is still part of the install directory.
 if [ "$(id -u)" -eq 0 ] && [ -d /etc/systemd/system ]; then
-    cat > "$ROOT/plainshow-cluster.service" <<UNIT
-[Unit]
-Description=Plainshow Cluster node
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=$ROOT/bin/pscluster serve --root $ROOT
-Restart=on-failure
-RestartSec=3
-# The node writes only inside its own root.
-ReadWritePaths=$ROOT
-ProtectSystem=full
-NoNewPrivileges=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-    ln -sf "$ROOT/plainshow-cluster.service" /etc/systemd/system/plainshow-cluster.service
+    SERVICE_FILE="$ROOT/$SERVICE_NAME.service"
+    {
+        echo '[Unit]'
+        echo "Description=Plainshow Cluster $COMPONENT"
+        echo 'After=network-online.target'
+        echo 'Wants=network-online.target'
+        echo
+        echo '[Service]'
+        echo 'Type=simple'
+        echo "ExecStart=$ROOT/bin/$BINARY_NAME serve --root $ROOT"
+        echo 'Restart=on-failure'
+        echo 'RestartSec=3'
+        echo "ReadWritePaths=$ROOT"
+        echo 'ProtectSystem=full'
+        echo 'PrivateTmp=yes'
+        echo 'NoNewPrivileges=yes'
+        echo
+        echo '[Install]'
+        echo 'WantedBy=multi-user.target'
+    } > "$SERVICE_FILE"
+    chmod 640 "$SERVICE_FILE"
+    ln -sf "$SERVICE_FILE" "/etc/systemd/system/$SERVICE_NAME.service"
     systemctl daemon-reload 2>/dev/null || true
-    echo "  Service        plainshow-cluster.service (not started)"
-    echo
-    echo "  Start on boot: systemctl enable --now plainshow-cluster"
 fi
 
 echo
-echo "  Start it now:  pscluster serve --root $ROOT"
-echo
+echo "Installed $BINARY_NAME in $ROOT"
+echo "Run now: $ROOT/bin/$BINARY_NAME serve --root $ROOT"
+if [ "$(id -u)" -eq 0 ] && [ -d /etc/systemd/system ]; then
+    echo "Start on boot: systemctl enable --now $SERVICE_NAME"
+fi

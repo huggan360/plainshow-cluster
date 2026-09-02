@@ -77,6 +77,7 @@ export function emit(topic, data) {
 }
 
 let socket = null;
+let controllerSocket = null;
 let attempts = 0;
 let live = false;
 const connectionListeners = new Set();
@@ -92,6 +93,9 @@ export function send(topic, data, durable = false) {
     const message = { topic, data };
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
+        if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN && topic.startsWith('collab.')) {
+            controllerSocket.send(JSON.stringify(message));
+        }
         return true;
     }
     if (durable) {
@@ -126,6 +130,7 @@ export function connect() {
         outbox = [];
         localStorage.setItem(outboxKey, '[]');
         pending.forEach((message) => socket.send(JSON.stringify(message)));
+        connectController();
     };
     socket.onmessage = (event) => {
         let msg;
@@ -143,6 +148,20 @@ export function connect() {
         setTimeout(connect, Math.min(1000 * attempts, 5000));
     };
     socket.onerror = () => socket.close();
+}
+
+function connectController() {
+    const target = state.overview && state.overview.controller;
+    if (!target || !target.ws_url || (controllerSocket && controllerSocket.readyState < 2)) return;
+    controllerSocket = new WebSocket(target.ws_url);
+    controllerSocket.onmessage = (event) => {
+        // The sending browser already delivered the operation to its node.
+        // Other browsers deliver the controller copy to their own node, which
+        // writes it to that clone and publishes the normal local event.
+        if (socket && socket.readyState === WebSocket.OPEN) socket.send(event.data);
+    };
+    controllerSocket.onclose = () => setTimeout(connectController, 3000);
+    controllerSocket.onerror = () => controllerSocket.close();
 }
 
 // --------------------------------------------------------------- toasts ----

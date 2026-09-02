@@ -16,6 +16,7 @@ import { renderNotebooks } from './views/notebooks.js';
 import { renderNetworks } from './views/networks.js';
 import { renderDatasets } from './views/datasets.js';
 import { renderTrain } from './views/train.js';
+import { renderTerminal } from './views/terminal.js';
 
 const ROUTES = [
     { id: 'home', label: 'Home', icon: '⌂', render: renderHome },
@@ -24,6 +25,7 @@ const ROUTES = [
     { id: 'notebooks', label: 'Notebooks', icon: '▦', render: renderNotebooks },
 	{ id: 'datasets', label: 'Datasets', icon: '◈', render: renderDatasets },
 	{ id: 'train', label: 'Train', icon: '△', render: renderTrain },
+    { id: 'terminal', label: 'Terminal', icon: '›_', render: renderTerminal },
     { id: 'jobs', label: 'Jobs', icon: '▤', render: renderJobs },
     { id: 'machines', label: 'Machines', icon: '▣', render: renderMachines },
     { id: 'github', label: 'GitHub', icon: '⑂', render: renderGitHub },

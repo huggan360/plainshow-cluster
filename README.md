@@ -12,7 +12,7 @@ layers build on top of it.
 git clone https://github.com/huggan360/plainshow-cluster.git
 cd plainshow-cluster
 make build
-./pscluster init
+PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se ./pscluster init
 ./pscluster serve
 ```
 
@@ -78,12 +78,14 @@ pscluster config [show | get KEY | set KEY VALUE | path | root]
 pscluster network [list | use ID]
 pscluster invite [--role member] [--network ID]
 pscluster join CODE [--endpoint URL]
+pscluster controller invite [--network ID]
 pscluster github [status | connect | disconnect]
 pscluster update [check | status | apply]
 pscluster version
 
 pscluster-controller init [--root DIR] [--name NAME] [--bind ADDR] [--port N]
 pscluster-controller serve [--root DIR]
+pscluster-controller attach CODE --advertise HTTPS_URL
 pscluster-controller status [--root DIR]
 
 pscluster-admin init [--root DIR] [--public-url HTTPS_URL]
@@ -136,6 +138,9 @@ make check      # fmt, vet, module graph, tests
 make build      # ./pscluster for this machine
 make dist       # linux/amd64 and linux/arm64
 make run        # throwaway node in ./.devnode
+sudo make install             # node
+sudo make install-controller  # optional collaboration controller
+sudo PSCLUSTER_ADMIN_URL=https://clusteradmin.example make install-admin
 ```
 
 `make race` runs the suite under the race detector. It needs a kernel with a
@@ -174,10 +179,26 @@ web/               the interface, embedded
 scripts/           checks a compiler cannot do
 ```
 
-## Current alpha status
+## Runtime programs
 
-Working now: the complete single-machine workspace, persistent Python
-notebooks, GitHub project/team flows, multiple independent network memberships,
+The node does not silently install tools. Install the programs for the features
+you use: `git` for project history, Tailscale for cross-network peers,
+util-linux `script` for interactive terminals, `jupyter_server` for notebooks,
+and PyTorch/`torchrun` plus the appropriate CUDA stack for distributed training.
+Missing optional tools produce an actionable message in the interface.
+
+To attach the optional controller, mint a code on any network-owner node and
+redeem it on the always-online machine:
+
+```sh
+pscluster controller invite
+pscluster-controller attach 'psc1_…' --advertise https://controller.example
+```
+
+## Implementation status
+
+Working now: the complete single-machine workspace, Jupyter-backed notebooks,
+interactive terminal jobs, GitHub project/team flows, multiple independent network memberships,
 single-use join codes, pinned TLS and Ed25519-authenticated peer requests,
 project transfer, remote jobs with live logs, revisioned collaborative editing
 with offline replay, immutable content-addressed datasets, worker placement,
@@ -196,7 +217,7 @@ Plainshow-specific fallback: cross-network needs tailscale on both machines, and
 the interface says so rather than timing out. The
 distributed launcher is implemented and its lifecycle is tested with local and
 two-node integration runs; a real multi-GPU PyTorch run still needs validation
-on CUDA machines before the Phase 5 alpha is published.
+on two CUDA machines before v1.0 is tagged.
 
 One installation can belong to several networks. Each membership has its own
 projects, accounts, machines and worker policy, and the active network is

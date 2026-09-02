@@ -131,7 +131,8 @@ type joinResponse struct {
 }
 
 type peerExchange struct {
-	Nodes []store.NetworkNode `json:"nodes"`
+	Nodes       []store.NetworkNode       `json:"nodes"`
+	Controllers []store.NetworkController `json:"controllers,omitempty"`
 }
 
 // MeshHandler is the deliberately narrow API exposed on the encrypted peer
@@ -140,6 +141,7 @@ type peerExchange struct {
 func (s *Server) MeshHandler() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /mesh/v1/join/{network}", s.acceptJoin)
+	root.HandleFunc("POST /mesh/v1/controllers/join/{network}", s.acceptControllerJoin)
 	authed := http.NewServeMux()
 	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
@@ -148,6 +150,7 @@ func (s *Server) MeshHandler() http.Handler {
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}", s.remoteJob)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}/logs", s.remoteJobLogs)
 	authed.HandleFunc("POST /mesh/v1/jobs/{id}/stop", s.remoteJobStop)
+	authed.HandleFunc("POST /mesh/v1/jobs/{id}/input", s.remoteJobInput)
 	authed.HandleFunc("GET /mesh/v1/ping", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"node_id": s.cfg.Node.ID, "time": store.Now()})
 	})
@@ -280,7 +283,8 @@ func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
 	if err != nil {
 		return
 	}
-	request := peerExchange{Nodes: nodes}
+	controllers, _ := s.store.NetworkControllers(networkID)
+	request := peerExchange{Nodes: nodes, Controllers: controllers}
 	var wg sync.WaitGroup
 	for _, node := range nodes {
 		if node.NodeID == s.cfg.Node.ID || node.Address == "" || node.Fingerprint == "" {
@@ -301,6 +305,7 @@ func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
 				return
 			}
 			s.mergePeerNodes(networkID, response.Nodes)
+			s.mergeControllers(networkID, response.Controllers)
 		}(node)
 	}
 	wg.Wait()
@@ -318,13 +323,25 @@ func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mergePeerNodes(networkID, exchange.Nodes)
+	s.mergeControllers(networkID, exchange.Controllers)
 	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
 	nodes, err := s.store.NetworkNodes(networkID)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, peerExchange{Nodes: nodes})
+	controllers, _ := s.store.NetworkControllers(networkID)
+	writeJSON(w, 200, peerExchange{Nodes: nodes, Controllers: controllers})
+}
+
+func (s *Server) mergeControllers(networkID string, items []store.NetworkController) {
+	for _, item := range items {
+		if item.NetworkID != networkID || item.ID == "" || item.PublicKey == "" ||
+			item.Fingerprint == "" || item.Address == "" || item.CollabToken == "" {
+			continue
+		}
+		_ = s.store.UpsertNetworkController(item)
+	}
 }
 
 // mergePeerNodes accepts only complete, newer records and never lets gossip
@@ -404,29 +421,35 @@ func (s *Server) acceptRemoteJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if body.ProjectID == "" || body.Project == "" || strings.TrimSpace(body.Command) == "" {
+	if strings.TrimSpace(body.Command) == "" ||
+		(body.Kind != "terminal" && (body.ProjectID == "" || body.Project == "")) {
 		fail(w, 400, "The remote job is missing its project or command.")
 		return
 	}
-	project, err := s.store.ProjectByNameInNetwork(networkID, body.Project)
-	if errors.Is(err, store.ErrNotFound) {
-		project = store.Project{ID: body.ProjectID, NetworkID: networkID, Name: body.Project, Description: body.Description}
-		if err = s.store.CreateProject(&project); err != nil {
+	project := store.Project{ID: body.ProjectID, NetworkID: networkID, Name: body.Project}
+	dir := s.layout.Root
+	if body.Project != "" {
+		var err error
+		project, err = s.store.ProjectByNameInNetwork(networkID, body.Project)
+		if errors.Is(err, store.ErrNotFound) {
+			project = store.Project{ID: body.ProjectID, NetworkID: networkID, Name: body.Project, Description: body.Description}
+			if err = s.store.CreateProject(&project); err != nil {
+				fail(w, 500, err.Error())
+				return
+			}
+		} else if err != nil {
 			fail(w, 500, err.Error())
 			return
 		}
-	} else if err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	dir := filepath.Join(s.layout.Projects(), networkID, body.Project)
-	if err := os.RemoveAll(dir); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	if err := mesh.ExtractArchive(body.Archive, dir); err != nil {
-		fail(w, 400, "Could not materialise project: "+err.Error())
-		return
+		dir = filepath.Join(s.layout.Projects(), networkID, body.Project)
+		if err := os.RemoveAll(dir); err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+		if err := mesh.ExtractArchive(body.Archive, dir); err != nil {
+			fail(w, 400, "Could not materialise project: "+err.Error())
+			return
+		}
 	}
 	job, err := s.sup.Start(jobs.Request{ProjectID: project.ID, Project: project.Name,
 		Kind: body.Kind, Title: body.Title, Command: body.Command, Workdir: dir, Env: body.Environment})
@@ -491,6 +514,21 @@ func (s *Server) remoteJobStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "stopping"})
+}
+
+func (s *Server) remoteJobInput(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Input string `json:"input"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if err := s.sup.Input(r.PathValue("id"), body.Input); err != nil {
+		fail(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "written"})
 }
 
 // advertisedEndpoint is the address other machines should use to reach this

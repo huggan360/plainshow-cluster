@@ -42,7 +42,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/ws" {
+		if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/ws" &&
+			!strings.HasPrefix(r.URL.Path, "/jupyter/") {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -209,7 +209,7 @@ web/               interface, embedded via embed.FS, no build step
 scripts/           checks a compiler cannot do
 ```
 
-## Where this actually is — roughly 70%
+## Where this actually is — implementation complete, hardware validation pending
 
 Assessed by running it, not by reading commit messages.
 
@@ -218,16 +218,17 @@ Assessed by running it, not by reading commit messages.
 | Single-machine workspace: files, editor, run, live logs, jobs | done |
 | GitHub: repos, push/pull, two-way team sync | done |
 | Auth, permissions, CLI parity | done |
-| Datasets | ~80% — content-addressed and syncing; no sharding |
-| Collaborative editing | ~85% — no offline mode; overlapping edits lose intention |
-| Notebooks | ~70% — real `.ipynb`; no widgets, rich output or completions |
-| Updates and releases | ~70% — built end to end, never exercised, no release cut |
-| Multi-machine networking | ~55% — mid-migration to tailscale |
-| Distributed training | ~50% — launcher complete and guarded, **never run on a real GPU** |
-| **Terminal** | **0% — not built.** `allow_terminal` guards a feature that does not exist |
-| Install hardening and docs | ~60% |
+| Datasets | implemented — content-addressed and direct peer syncing; no sharding |
+| Collaborative editing | implemented — controller relay plus local durable writes and offline outbox |
+| Notebooks | implemented through an installed `jupyter_server` |
+| Updates and releases | implemented; real published upgrade remains a release exercise |
+| Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
+| Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
+| Terminal | implemented as a policy-controlled interactive PTY job |
+| Install hardening and docs | three component installer and deployment documentation implemented |
 
-Remaining is about two and a half weeks, but it holds most of the risk.
+Remaining work is validation and release operation rather than missing product
+programs. The highest-risk gate is still the real two-CUDA-machine run.
 Everything above could be verified on the development Pi; a multi-GPU
 `torchrun` across two CUDA machines never has been, and that is where this kind
 of estimate usually breaks. Expect the driver and CUDA mismatch handling to be
@@ -264,14 +265,17 @@ project data. Live editing is the feature it adds; git works without it.
 4. ~~**The binary and its config.**~~ Done. `pscluster-controller` has its own
    one-root config, identity keypair, pinned TLS certificate and HTTPS listener.
    It creates none of the node's project, dataset, artifact, or job state.
-5. **Attaching to a network.** A network admin mints a controller token; the
+5. ~~**Attaching to a network.**~~ A network admin mints a controller token; the
    controller presents it and enrols as a non-device member. Devices learn the
    controller's address the same way they learn each other's. *1d*
-6. **Live editing moves behind it.** `internal/collab` becomes the controller's
-   job. Devices open the doc socket against the controller; on idle it writes
-   through to the project working tree and commits. Git stays the truth, so a
-   controller that disappears costs live editing and nothing else. *3d*
-7. **Web overview.** The controller serves a read-mostly view across its
+6. ~~**Live editing moves behind it.**~~ The controller relays live collaboration
+   between browsers while each browser's node applies the operation to its own
+   working tree. `internal/collab` remains the durable per-clone operation log,
+   so controller loss removes live cross-node delivery and nothing else.
+   The original wording proposed storing documents on the controller, which
+   contradicted the rule that it holds no project data; the relay design avoids
+   that contradiction.
+7. ~~**Web overview.**~~ The controller serves a read-mostly view across its
    networks: devices, jobs, projects. Reuses `web/` with a different data
    source. *2d*
 
@@ -294,20 +298,26 @@ project data. Live editing is the feature it adds; git works without it.
 
 ### D. Networking (≈2.5d)
 
-10. **Auth key in the join code.** `mesh.Invite` carries an optional tailscale
+10. ~~**Auth key in the join code.**~~ `mesh.Invite` carries an optional tailscale
     auth key; `join` calls `tailnet.Up` first. One step instead of two. *1d*
-11. **Warn on relayed links** in the training preflight. `internal/tailnet`
+11. ~~**Warn on relayed links**~~ in the training preflight. `internal/tailnet`
     already reports which peers are relayed; a relayed link is somebody else's
     bandwidth. *0.5d*
-12. **Shrink `internal/mesh`.** Keep mTLS and request signing. Drop what remains
+12. ~~**Shrink `internal/mesh`.**~~ Only direct HTTPS, mTLS identity pinning,
+    request signing, enrollment and task/data APIs remain; the reachability
+    workaround and tunnel stack are gone.
     of working around unreachability. *1d*
 
 ### E. Features never built (≈6d)
 
-13. **Terminal.** Section 10 of the original brief, and nothing exists — while
+13. ~~**Terminal.**~~ Implemented as a `terminal` job using a PTY from util-linux
+    `script`, with streamed output, input, remote placement, stop handling and
+    the existing local `allow_terminal` policy.
     `allow_terminal` has been guarding it. xterm.js plus a PTY job kind; the job
     lifecycle already handles streaming and stopping. *3d*
-14. **Notebooks onto `jupyter_server`.** Delete the hand-written kernel. Gains
+14. ~~**Notebooks onto `jupyter_server`.**~~ The hand-written kernel is deleted.
+    Plainshow launches and reverse-proxies the machine's installed Jupyter
+    Server, gaining its kernels, widgets, rich MIME output and completions.
     ipywidgets, rich output, completion and inspection, all for free. *3d*
 
 ### F. Release readiness (≈11d)
@@ -320,7 +330,10 @@ project data. Live editing is the feature it adds; git works without it.
     break.** *3d*
 17. **Cut v0.1.0 and test a real upgrade** — install an old build, publish a new
     one, watch a node take it. *2d*
-18. **Install hardening and docs.** *3d*
+18. ~~**Install hardening and docs.**~~ `install.sh` installs the node,
+    controller or account service atomically, creates the matching one-root
+    configuration, and writes optional systemd integration. README and
+    `CODEX.md` describe operation and handover.
 
 ### Done and not to be redone
 

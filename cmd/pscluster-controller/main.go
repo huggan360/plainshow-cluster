@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/controller"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
+	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
 
@@ -36,6 +38,8 @@ func run(args []string) error {
 		return initialise(flags)
 	case "serve":
 		return serve(flags)
+	case "attach":
+		return attach(flags)
 	case "status":
 		return status(flags)
 	case "version", "--version", "-v":
@@ -59,6 +63,9 @@ func usage() {
   pscluster-controller serve [--root DIR]
       Serve collaboration and network overview over HTTPS.
 
+  pscluster-controller attach CODE [--root DIR] [--advertise HTTPS_URL]
+      Attach this controller to a network using an admin-minted code.
+
   pscluster-controller status [--root DIR]
   pscluster-controller version
 
@@ -72,6 +79,9 @@ func parseFlags(args []string) flags {
 	out := flags{}
 	for i := 0; i < len(args); i++ {
 		if !strings.HasPrefix(args[i], "--") {
+			if out["_arg"] == "" {
+				out["_arg"] = args[i]
+			}
 			continue
 		}
 		key := strings.TrimPrefix(args[i], "--")
@@ -189,10 +199,70 @@ func serve(flags flags) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := controller.NewServer(value, fingerprint)
+	server.SetOverviewPath(layout.ControllerOverview())
 	return server.ListenAndServe(ctx, certificate, func(address string) {
 		fmt.Printf("\n  %s Controller  ·  %s\n\n", version.Product, value.Name)
 		fmt.Printf("  %s\n", address)
 		fmt.Printf("  root      %s\n", layout.Root)
 		fmt.Printf("  networks  %d\n\n", len(value.Networks))
 	})
+}
+
+func attach(flags flags) error {
+	layout, value, err := open(flags)
+	if err != nil {
+		return err
+	}
+	code := flags.get("_arg", "")
+	if code == "" {
+		return errors.New("usage: pscluster-controller attach CODE [--advertise HTTPS_URL]")
+	}
+	invite, err := mesh.DecodeInvite(code)
+	if err != nil {
+		return err
+	}
+	if invite.Role != "controller" {
+		return errors.New("that code enrolls a device, not a controller")
+	}
+	key, err := identity.LoadOrCreate(layout.ControllerKey())
+	if err != nil {
+		return err
+	}
+	_, fingerprint, err := identity.TLSCertificate(key, layout.ControllerCert())
+	if err != nil {
+		return err
+	}
+	address := strings.TrimRight(flags.get("advertise", value.Listen.Advertise), "/")
+	if address == "" {
+		return errors.New("set --advertise to the HTTPS address devices can reach")
+	}
+	request := controller.EnrollmentRequest{Token: invite.Token, ID: value.ID,
+		Name: value.Name, PublicKey: base64.RawURLEncoding.EncodeToString(key.Public),
+		Fingerprint: fingerprint, Address: address}
+	client := mesh.NewClient(invite.Endpoint, invite.Fingerprint, invite.NetworkID, key)
+	var response controller.EnrollmentResponse
+	if err := client.JSON("POST", "/mesh/v1/controllers/join/"+invite.NetworkID,
+		request, &response, false); err != nil {
+		return fmt.Errorf("attach controller: %w", err)
+	}
+	network := controller.NetworkConfig{ID: response.Network.ID, Name: response.Network.Name,
+		CollabToken: response.CollabToken}
+	for _, node := range response.Nodes {
+		network.Nodes = append(network.Nodes, controller.NodeKey{ID: node.NodeID, PublicKey: node.PublicKey})
+	}
+	replaced := false
+	for i := range value.Networks {
+		if value.Networks[i].ID == network.ID {
+			value.Networks[i], replaced = network, true
+		}
+	}
+	if !replaced {
+		value.Networks = append(value.Networks, network)
+	}
+	value.Listen.Advertise = address
+	if err := controller.Save(layout, value); err != nil {
+		return err
+	}
+	fmt.Printf("Attached %s to %s.\n", value.Name, network.Name)
+	return nil
 }

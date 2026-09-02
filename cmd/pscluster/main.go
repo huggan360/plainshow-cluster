@@ -67,6 +67,8 @@ func main() {
 		err = cmdInvite(rest)
 	case "join":
 		err = cmdJoin(rest)
+	case "controller":
+		err = cmdController(rest)
 	case "github":
 		err = cmdGitHub(rest)
 	case "update":
@@ -112,10 +114,14 @@ func usage() {
       Show the networks this machine belongs to, or switch the active one.
 
   pscluster invite [--role member] [--network ID]
+                   [--tailnet-auth-key KEY] [--tailnet-login-server URL]
       Create a single-use join code for another machine.
 
   pscluster join CODE [--endpoint URL]
       Join a network with a code from another machine.
+
+  pscluster controller invite [--network ID]
+      Mint a single-use enrollment code for a controller server.
 
   pscluster github [status | connect | disconnect]
       Connect a GitHub account. connect reads the token from the terminal,
@@ -465,6 +471,7 @@ func cmdServe(args []string) error {
 	srv.StartTelemetry(ctx, 3*time.Second)
 	srv.StartPeerDiscovery(ctx, 30*time.Second)
 	srv.StartAccountCheckIn(ctx, time.Minute)
+	srv.StartControllerCheckIn(ctx, 15*time.Second)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())

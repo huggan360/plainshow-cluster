@@ -38,8 +38,17 @@ type ListenConfig struct {
 // NetworkConfig identifies a network this controller serves. Enrollment fills
 // these entries; an empty list is a valid unattached controller.
 type NetworkConfig struct {
-	ID   string `yaml:"id" json:"id"`
-	Name string `yaml:"name" json:"name"`
+	ID          string    `yaml:"id" json:"id"`
+	Name        string    `yaml:"name" json:"name"`
+	CollabToken string    `yaml:"collab_token" json:"-"`
+	Nodes       []NodeKey `yaml:"nodes" json:"-"`
+}
+
+// NodeKey lets an attached controller authenticate device snapshots without
+// becoming a device itself.
+type NodeKey struct {
+	ID        string `yaml:"id" json:"id"`
+	PublicKey string `yaml:"public_key" json:"public_key"`
 }
 
 // Defaults returns a host-neutral controller configuration.

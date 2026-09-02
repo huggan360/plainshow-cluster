@@ -377,8 +377,9 @@ func (l Layout) PIDFile() string      { return filepath.Join(l.Root, "run", "psc
 func (l Layout) ControllerConfigFile() string {
 	return filepath.Join(l.Root, "controller.yaml")
 }
-func (l Layout) ControllerKey() string  { return filepath.Join(l.Root, "keys", "controller.key") }
-func (l Layout) ControllerCert() string { return filepath.Join(l.Root, "keys", "controller.crt") }
+func (l Layout) ControllerKey() string      { return filepath.Join(l.Root, "keys", "controller.key") }
+func (l Layout) ControllerCert() string     { return filepath.Join(l.Root, "keys", "controller.crt") }
+func (l Layout) ControllerOverview() string { return filepath.Join(l.Root, "overview.json") }
 func (l Layout) ControllerPIDFile() string {
 	return filepath.Join(l.Root, "run", "pscluster-controller.pid")
 }

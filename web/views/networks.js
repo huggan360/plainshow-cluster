@@ -34,6 +34,7 @@ function networkCard(network, active) {
             api(`/api/networks/${encodeURIComponent(network.id)}/nodes`),
             api(`/api/networks/${encodeURIComponent(network.id)}/members`),
         ]);
+		const controllers = await api(`/api/networks/${encodeURIComponent(network.id)}/controllers`);
         mount(details,
             el('div', { class: 'panel__head', style: 'margin-top:16px' }, 'Machines'),
             el('div', { class: 'rows' }, ...nodes.map((node) =>
@@ -51,6 +52,8 @@ function networkCard(network, active) {
                         el('span', { class: 'row__title' }, member.account.display_name),
                         el('span', { class: 'row__meta' }, `@${member.account.username}`)),
                     el('span', { class: 'chip' }, member.role)))));
+		if (controllers.length) details.append(el('div', { class: 'panel__head', style: 'margin-top:16px' },
+			`Controller: ${controllers[0].name}`));
     };
     loadDetails().catch((err) => mount(details,
         el('p', { class: 'muted', style: 'font-size:12px' }, err.message)));
@@ -74,9 +77,22 @@ function networkCard(network, active) {
                     },
                 }, 'Switch to') : null,
 				el('button', { class: 'btn btn--sm', onclick: () => createInvite(network) },
-					'Invite machine')),
+					'Invite machine'),
+				el('button', { class: 'btn btn--sm', onclick: () => createControllerInvite(network) },
+					'Attach controller')),
             details);
     }
+}
+
+async function createControllerInvite(network) {
+	const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/controller-invites`,
+		{ method: 'POST', body: {} });
+	const code = el('textarea', { class: 'textarea input--mono', rows: '8', readonly: true }, invite.code);
+	modal({ title: 'Controller enrollment code', confirmLabel: 'Copy code',
+		body: () => el('div', {}, code, el('p', { class: 'muted' },
+			'Run pscluster-controller attach CODE --advertise HTTPS_URL on the controller server.')),
+		onConfirm: async (close) => { await navigator.clipboard.writeText(invite.code); close(); toast('Code copied.'); },
+	});
 }
 
 function joinNetwork() {
@@ -103,15 +119,25 @@ function joinNetwork() {
 function createInvite(network) {
 	const endpoint = el('input', { class: 'input input--mono',
 		placeholder: 'https://host-or-vpn-address:10000' });
+	const authKey = el('input', { class: 'input input--mono', type: 'password',
+		placeholder: 'tskey-auth-… (optional)' });
+	const loginServer = el('input', { class: 'input input--mono',
+		placeholder: 'Headscale URL (optional)' });
 	modal({ title: `Invite to ${network.name}`, confirmLabel: 'Create code',
 		body: () => el('div', {},
 			el('div', { class: 'field' }, el('label', { class: 'field__label' },
 				'Reachable address (optional)'), endpoint),
+			el('div', { class: 'field' }, el('label', { class: 'field__label' },
+				'Tailscale reusable auth key (optional)'), authKey),
+			el('div', { class: 'field' }, el('label', { class: 'field__label' },
+				'Headscale login server (optional)'), loginServer),
 			el('p', { class: 'muted', style: 'font-size:12px;margin:0' },
 				'The code is single-use and expires after 15 minutes. It pins this machine’s TLS identity.')),
 		onConfirm: async (close) => {
 			const body = { minutes: 15, max_uses: 1 };
 			if (endpoint.value.trim()) body.endpoint = endpoint.value.trim();
+			if (authKey.value.trim()) body.tailnet_auth_key = authKey.value.trim();
+			if (loginServer.value.trim()) body.tailnet_login_server = loginServer.value.trim();
 			const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/invites`,
 				{ method: 'POST', body });
 			close(); showInvite(invite);

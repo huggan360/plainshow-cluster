@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -105,6 +106,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/networks/{id}/members", s.networkMembers)
 	mux.HandleFunc("PUT /api/networks/{id}/policy", s.updateNetworkPolicy)
 	mux.HandleFunc("POST /api/networks/{id}/invites", s.createNetworkInvite)
+	mux.HandleFunc("POST /api/networks/{id}/controller-invites", s.createControllerInvite)
+	mux.HandleFunc("GET /api/networks/{id}/controllers", s.networkControllers)
 	mux.HandleFunc("POST /api/networks/join", s.joinNetwork)
 
 	mux.HandleFunc("GET /api/projects", s.listProjects)
@@ -132,12 +135,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /api/jobs/{id}/logs", s.getJobLogs)
 	mux.HandleFunc("POST /api/jobs/{id}/stop", s.stopJob)
+	mux.HandleFunc("POST /api/jobs/{id}/input", s.jobInput)
 
 	mux.HandleFunc("POST /api/projects/{name}/notebooks", s.createNotebook)
 	mux.HandleFunc("GET /api/projects/{name}/kernel", s.notebookStatus)
+	mux.HandleFunc("POST /api/projects/{name}/jupyter", s.openJupyter)
 	mux.HandleFunc("POST /api/projects/{name}/kernel/execute", s.executeNotebookCell)
 	mux.HandleFunc("POST /api/projects/{name}/kernel/interrupt", s.interruptNotebook)
 	mux.HandleFunc("POST /api/projects/{name}/kernel/restart", s.restartNotebook)
+	mux.HandleFunc("/jupyter/{id}/{path...}", s.proxyJupyter)
 
 	mux.HandleFunc("GET /api/projects/{name}/members", s.listMembers)
 	mux.HandleFunc("POST /api/projects/{name}/members", s.addMember)
@@ -267,6 +273,16 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	networks, _ := s.store.Networks(s.cfg.AccountID())
+	controllers, _ := s.store.NetworkControllers(s.cfg.ActiveNetwork)
+	var activeController any
+	if len(controllers) > 0 {
+		item := controllers[0]
+		wsURL := strings.Replace(item.Address, "https://", "wss://", 1)
+		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+		activeController = map[string]string{"id": item.ID, "name": item.Name,
+			"ws_url": strings.TrimRight(wsURL, "/") + "/ws?network=" +
+				url.QueryEscape(item.NetworkID) + "&token=" + url.QueryEscape(item.CollabToken)}
+	}
 	writeJSON(w, 200, map[string]any{
 		"cluster": map[string]string{
 			"id":   s.cfg.Cluster.ID,
@@ -289,6 +305,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		"git_available":  gitrepo.Available(),
 		"github":         map[string]bool{"connected": s.tokenStore().Connected()},
 		"update":         s.updater.Status(),
+		"controller":     activeController,
 	})
 }
 
@@ -627,11 +644,21 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		req.Workdir = s.projectDir(p)
 	}
 	if body.Machine != "" && body.Machine != s.cfg.Node.ID {
-		if req.ProjectID == "" {
+		if req.ProjectID == "" && body.Kind != "terminal" {
 			fail(w, 400, "Remote jobs must belong to a project so its files can be transferred.")
 			return
 		}
-		p, _, _ := s.project(body.Project)
+		var p store.Project
+		var archive []byte
+		if body.Project != "" {
+			p, _, _ = s.project(body.Project)
+			var archiveErr error
+			archive, archiveErr = mesh.ArchiveDir(s.projectDir(p))
+			if archiveErr != nil {
+				fail(w, 500, "Could not prepare project: "+archiveErr.Error())
+				return
+			}
+		}
 		node, err := s.store.NetworkNode(s.cfg.ActiveNetwork, body.Machine)
 		if err != nil {
 			fail(w, 404, "No such machine in this network.")
@@ -640,11 +667,6 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		client, err := s.clientForNode(s.cfg.ActiveNetwork, body.Machine)
 		if err != nil {
 			fail(w, 409, err.Error())
-			return
-		}
-		archive, err := mesh.ArchiveDir(s.projectDir(p))
-		if err != nil {
-			fail(w, 500, "Could not prepare project: "+err.Error())
 			return
 		}
 		environment := map[string]string{}
@@ -766,6 +788,31 @@ func (s *Server) stopJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "stopping"})
+}
+
+func (s *Server) jobInput(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Input string `json:"input"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	job, err := s.store.Job(r.PathValue("id"))
+	if err != nil || job.Kind != "terminal" {
+		fail(w, 404, "No such terminal job.")
+		return
+	}
+	if client, ok := s.remoteClient(job.ID); ok {
+		if err := client.JSON("POST", "/mesh/v1/jobs/"+job.ID+"/input", body, nil, true); err != nil {
+			fail(w, 409, err.Error())
+			return
+		}
+	} else if err := s.sup.Input(job.ID, body.Input); err != nil {
+		fail(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "written"})
 }
 
 // ------------------------------------------------------------- settings ----

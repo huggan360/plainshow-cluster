@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build check test vet fmt web clean install dist release run smoke
+.PHONY: all build check test vet fmt web clean install install-controller install-admin dist release run smoke
 
 all: build
 
@@ -106,7 +106,13 @@ release: check dist
 
 ## install: copy the binary into the install root's bin directory
 install: build
-	@./install.sh
+	@./install.sh node ./$(BINARY)
+
+install-controller: build
+	@./install.sh controller ./$(CONTROLLER_BINARY)
+
+install-admin: build
+	@./install.sh admin ./$(ADMIN_BINARY)
 
 ## run: build and start a throwaway node in ./.devnode
 run: build

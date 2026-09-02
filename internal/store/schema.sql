@@ -140,6 +140,19 @@ CREATE TABLE IF NOT EXISTS invitation (
 
 CREATE INDEX IF NOT EXISTS network_node_seen_idx ON network_node (network_id, last_seen DESC);
 
+CREATE TABLE IF NOT EXISTS network_controller (
+    network_id  TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    public_key  TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    address     TEXT NOT NULL,
+    collab_token TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (network_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS schema_migration (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL

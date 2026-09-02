@@ -43,6 +43,7 @@ type LogLine struct {
 type running struct {
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
+	stdin  io.WriteCloser
 	tail   []LogLine
 	seq    int
 	mu     sync.Mutex
@@ -162,6 +163,22 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 	// box. It runs with this machine's own privileges and under its own policy;
 	// sandboxing and resource limits arrive with the worker agent.
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", job.Command)
+	if job.Kind == "terminal" {
+		script, err := exec.LookPath("script")
+		if err != nil {
+			s.fail(job, "interactive terminals need the util-linux script command")
+			return
+		}
+		shell := strings.TrimSpace(job.Command)
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		if _, err := exec.LookPath(shell); err != nil {
+			s.fail(job, "terminal shell is unavailable: "+shell)
+			return
+		}
+		cmd = exec.CommandContext(ctx, script, "-qfec", shell+" -i", "/dev/null")
+	}
 	cmd.Dir = workdir
 	cmd.Env = append(os.Environ(),
 		"PSCLUSTER_JOB="+job.ID,
@@ -190,6 +207,11 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 		s.fail(job, err.Error())
 		return
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		s.fail(job, err.Error())
+		return
+	}
 
 	logPath := filepath.Join(s.layout.JobLogs(), job.ID+".log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
@@ -204,7 +226,7 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 		return
 	}
 
-	live := &running{cancel: cancel, cmd: cmd}
+	live := &running{cancel: cancel, cmd: cmd, stdin: stdin}
 	s.mu.Lock()
 	s.live[job.ID] = live
 	s.mu.Unlock()
@@ -216,7 +238,14 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); s.pump(live, job.ID, "stdout", stdout, logFile) }()
+	go func() {
+		defer wg.Done()
+		if job.Kind == "terminal" {
+			s.pumpChunks(live, job.ID, "stdout", stdout, logFile)
+		} else {
+			s.pump(live, job.ID, "stdout", stdout, logFile)
+		}
+	}()
 	go func() { defer wg.Done(); s.pump(live, job.ID, "stderr", stderr, logFile) }()
 	wg.Wait()
 
@@ -234,6 +263,38 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 	job.Error = msg
 	job.Ended = store.Now()
 	s.hub.Publish("job.state", job)
+}
+
+// pumpChunks emits terminal output without waiting for a newline. Shell
+// prompts and full-screen programs commonly do not write one.
+func (s *Supervisor) pumpChunks(live *running, jobID, stream string, r io.Reader, logFile *os.File) {
+	buffer := make([]byte, 4096)
+	for {
+		n, err := r.Read(buffer)
+		if n > 0 {
+			s.recordOutput(live, jobID, stream, string(buffer[:n]), logFile)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *Supervisor) recordOutput(live *running, jobID, stream, text string, logFile *os.File) {
+	live.mu.Lock()
+	live.seq++
+	line := LogLine{JobID: jobID, Seq: live.seq, Stream: stream, Text: text,
+		At: time.Now().UTC().Format(time.RFC3339Nano)}
+	live.tail = append(live.tail, line)
+	if len(live.tail) > maxTailLines {
+		live.tail = live.tail[len(live.tail)-maxTailLines:]
+	}
+	_, writeErr := fmt.Fprint(logFile, text)
+	live.mu.Unlock()
+	if writeErr != nil {
+		log.Printf("job %s: writing log: %v", jobID, writeErr)
+	}
+	s.hub.Publish("job.log", line)
 }
 
 // classify turns a Wait error into the job's terminal state.
@@ -322,6 +383,21 @@ func (s *Supervisor) Stop(id string) error {
 	}
 	live.cancel()
 	return nil
+}
+
+// Input writes keystrokes to a running terminal job.
+func (s *Supervisor) Input(id, input string) error {
+	s.mu.Lock()
+	live, ok := s.live[id]
+	s.mu.Unlock()
+	if !ok || live.stdin == nil {
+		return fmt.Errorf("terminal job %s is not running", id)
+	}
+	if len(input) > 64*1024 {
+		return errors.New("terminal input is too large")
+	}
+	_, err := io.WriteString(live.stdin, input)
+	return err
 }
 
 // Tail returns recent output for a job: the in-memory buffer for a live job,

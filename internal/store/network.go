@@ -224,6 +224,62 @@ type NetworkNode struct {
 	Created     string         `json:"created_at"`
 }
 
+// NetworkController is an optional always-reachable collaboration endpoint.
+// It is not a device and never appears in job placement.
+type NetworkController struct {
+	NetworkID   string `json:"network_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	PublicKey   string `json:"public_key,omitempty"`
+	Fingerprint string `json:"fingerprint"`
+	Address     string `json:"address"`
+	CollabToken string `json:"collab_token,omitempty"`
+	LastSeen    string `json:"last_seen"`
+	Created     string `json:"created_at"`
+}
+
+func (s *Store) UpsertNetworkController(item NetworkController) error {
+	_, err := s.db.Exec(`INSERT INTO network_controller
+        (network_id,id,name,public_key,fingerprint,address,collab_token,last_seen,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(network_id,id) DO UPDATE SET
+        name=excluded.name,public_key=excluded.public_key,fingerprint=excluded.fingerprint,
+        address=excluded.address,collab_token=excluded.collab_token,last_seen=excluded.last_seen`,
+		item.NetworkID, item.ID, item.Name, item.PublicKey, item.Fingerprint,
+		item.Address, item.CollabToken, item.LastSeen, Now())
+	return err
+}
+
+func (s *Store) NetworkControllers(networkID string) ([]NetworkController, error) {
+	rows, err := s.db.Query(`SELECT network_id,id,name,public_key,fingerprint,address,
+        collab_token,last_seen,created_at FROM network_controller WHERE network_id=? ORDER BY lower(name)`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []NetworkController{}
+	for rows.Next() {
+		var item NetworkController
+		if err := rows.Scan(&item.NetworkID, &item.ID, &item.Name, &item.PublicKey,
+			&item.Fingerprint, &item.Address, &item.CollabToken, &item.LastSeen, &item.Created); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) NetworkController(networkID, id string) (NetworkController, error) {
+	var item NetworkController
+	err := s.db.QueryRow(`SELECT network_id,id,name,public_key,fingerprint,address,
+        collab_token,last_seen,created_at FROM network_controller WHERE network_id=? AND id=?`,
+		networkID, id).Scan(&item.NetworkID, &item.ID, &item.Name, &item.PublicKey,
+		&item.Fingerprint, &item.Address, &item.CollabToken, &item.LastSeen, &item.Created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return item, ErrNotFound
+	}
+	return item, err
+}
+
 func (s *Store) UpsertNetworkNode(node NetworkNode) error {
 	policy, err := json.Marshal(node.Policy)
 	if err != nil {
