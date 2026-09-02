@@ -37,7 +37,7 @@ func cmdNetwork(args []string) error {
 			return err
 		}
 		if len(out.Networks) == 0 {
-			fmt.Println("\n  This node belongs to no networks.\n")
+			fmt.Print("\n  This node belongs to no networks.\n\n")
 			return nil
 		}
 		fmt.Printf("\n  %-20s %-18s %s\n", "NETWORK", "ID", "")
