@@ -154,6 +154,7 @@ func (s *Server) meshRoutes() http.Handler {
 	})
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
 	authed.HandleFunc("POST /mesh/v1/datasets/sync", s.acceptDatasetSync)
+	authed.HandleFunc("POST /mesh/v1/reach", s.acceptReachCheck)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}", s.remoteJob)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}/logs", s.remoteJobLogs)
 	authed.HandleFunc("POST /mesh/v1/jobs/{id}/stop", s.remoteJobStop)

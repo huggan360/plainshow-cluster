@@ -41,7 +41,8 @@ These are settled. Do not quietly reverse them.
    share one lifecycle, one log pipe, one stop button, one permission check.
    Resist adding a parallel mechanism for a new kind of work.
 6. **Be honest about distributed training over the internet.** Never imply
-   4090 + 4070 across two houses is one faster GPU. Measure and say so.
+   4090 + 4070 across two houses is one faster GPU. Measure and say so — and
+   refuse a run that cannot work rather than letting it hang (see below).
 
 ## Roles
 
@@ -147,6 +148,9 @@ Phases 0–5 are landed. What remains, in order:
 3. **Phase 7 — real-machine validation.** A genuine multi-GPU `torchrun` across
    two CUDA machines. The launcher is implemented and unit-tested; it has never
    run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
+   Note that a cross-house run will now be *refused* rather than hanging, so
+   validation needs two machines with a route between them — same network, a
+   VPN, or a forwarded port.
 4. **Phase 8 — release engineering.** Landed: `make dist` writes the assets the
    updater looks for plus `checksums.txt`, and pushing a `v*` tag runs
    `.github/workflows/release.yml`, which re-runs the gate, verifies the binary
@@ -165,6 +169,30 @@ bearer header. It grants nothing new — anyone who can read that file can alrea
 read the database beside it — but it keeps a headless machine manageable after
 it has an owner account, without loosening the rules the browser is held to.
 There is no browser on a GPU box to sign in with.
+
+## Training does not use the mesh — and why that matters
+
+Everything the cluster does goes over the mesh **except distributed training**.
+Ranks connect to each other over raw TCP that torch and NCCL open themselves, at
+`MASTER_ADDR:MASTER_PORT`. A tunnel cannot carry that: it is not our protocol
+and not our socket.
+
+So a worker behind NAT can receive jobs, notebooks, datasets and logs perfectly
+well while being unable to take part in a distributed run at all. Those are
+different questions and the product must not conflate them.
+
+Without a check, launching such a run looks completely normal, hangs in NCCL
+rendezvous for about ten minutes, and dies with an error about a socket — and
+the interface shows it as training the whole time. `rendezvousIssues` in
+`internal/api/training.go` asks every rank whether it can actually open a
+connection to rank 0 and refuses with an explanation naming the alternative
+(separate jobs, which work over any link). It guards **both** preflight and
+launch: preflight is advice, and a caller can skip it.
+
+One subtlety worth keeping: **"connection refused" counts as reachable.** The
+rendezvous port has nothing listening until the run starts, so a refusal proves
+the route exists. Treating it as failure would refuse every correctly configured
+cluster.
 
 ## How a machine behind NAT is reached
 

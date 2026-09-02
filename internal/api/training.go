@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -98,8 +99,43 @@ func (s *Server) trainingPreflight(w http.ResponseWriter, r *http.Request) {
 	plan, planErr := training.Build("preflight", body.Framework, body.Entry, body.ProcessesPerNode, nodes, filepath.Join(s.layout.Artifacts(), "preflight"))
 	if planErr != nil {
 		issues = append(issues, planErr.Error())
+	} else {
+		issues = append(issues, s.rendezvousIssues(nodes, plan)...)
 	}
 	writeJSON(w, 200, map[string]any{"ready": len(issues) == 0, "issues": issues, "plan": plan, "advice": training.Advise(body.Parameters, 4, body.BandwidthMbps, body.ObservedStepSeconds, len(nodes))})
+}
+
+// rendezvousIssues checks that every rank can actually reach the coordinating
+// rank, and says so in words a person can act on.
+//
+// This is the check whose absence produces the worst failure this product can
+// have. Distributed training does not use the mesh: ranks connect to each other
+// over raw TCP that torch opens itself, so a tunnel cannot carry it. Without
+// this, launching across two home networks starts normally, hangs in NCCL
+// rendezvous for ten minutes, and dies with an error about a socket. The run
+// looks like it is training the whole time.
+func (s *Server) rendezvousIssues(nodes []store.NetworkNode, plan training.Plan) []string {
+	if len(nodes) < 2 || plan.MasterAddress == "" {
+		return nil // a single rank talks to nobody
+	}
+	issues := []string{}
+	for _, node := range nodes {
+		if node.IsSelf || node.NodeID == plan.Ranks[0].Node.NodeID {
+			continue
+		}
+		ok, detail := s.rendezvousReachable(s.cfg.ActiveNetwork, node.NodeID,
+			plan.MasterAddress, plan.MasterPort)
+		if ok {
+			continue
+		}
+		issues = append(issues, fmt.Sprintf(
+			"%s cannot open a connection to %s:%d (%s). Ranks talk to each other "+
+				"directly, not through Plainshow, so distributed training needs a "+
+				"route between the machines — the same network, a VPN, or a "+
+				"forwarded port. Running them as separate jobs works over any link.",
+			node.Name, plan.MasterAddress, plan.MasterPort, detail))
+	}
+	return issues
 }
 
 func (s *Server) startTraining(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +167,15 @@ func (s *Server) startTraining(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.reservations.Release(runID)
 		fail(w, 400, err.Error())
+		return
+	}
+	// The same check the preflight runs, enforced here too. Preflight is
+	// advice; a caller can skip it, and launching a run that will hang in
+	// rendezvous for ten minutes is not something to leave to whether somebody
+	// pressed "Check first".
+	if issues := s.rendezvousIssues(nodes, plan); len(issues) > 0 {
+		s.reservations.Release(runID)
+		fail(w, 409, strings.Join(issues, " "))
 		return
 	}
 	run := store.TrainingRun{ID: runID, NetworkID: s.cfg.ActiveNetwork, ProjectID: project.ID, Framework: body.Framework, State: "preparing", Ranks: []store.TrainingRank{}}
