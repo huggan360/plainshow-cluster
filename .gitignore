@@ -1,8 +1,12 @@
-.env
-.env.*
-!.env.example
-node_modules/
-vendor/
+# Build output
+/pscluster
+/dist/
+
+# A development node created by `make run`
+/.devnode/
+/.smokenode/
+/.smokepid
+
+# Editors and OS noise
 .DS_Store
-*.log
-storage/logs/*
+*.swp

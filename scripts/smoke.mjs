@@ -1,0 +1,121 @@
+// End-to-end check against a running node.
+//
+// Usage:  make smoke
+//     or  PSCLUSTER_URL=http://127.0.0.1:9999 node scripts/smoke.mjs
+//
+// The Go tests cover the packages; this covers the wiring between them and the
+// exact HTTP shapes the interface depends on, which is where the bugs that
+// actually reach a browser live.
+
+const B = process.env.PSCLUSTER_URL || 'http://127.0.0.1:9971';
+let pass = 0, fail = 0;
+const ok = (name, cond, extra = '') => {
+  if (cond) { pass++; console.log(`  ✓ ${name}`); }
+  else { fail++; console.log(`  ✗ ${name} ${extra}`); }
+};
+/** waitFor polls until check() is truthy, so no assertion depends on a sleep
+ *  being long enough on a loaded machine. */
+const waitFor = async (check, timeoutMs = 15000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await check();
+    if (value) return value;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return null;
+};
+const j = async (p, o) => {
+  const r = await fetch(B + p, o && o.body ? { ...o, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o.body) } : o);
+  return { status: r.status, body: await r.json().catch(() => null) };
+};
+
+console.log('\nSTATIC');
+for (const [path, type] of [['/', 'text/html'], ['/app.js', 'javascript'], ['/app.css', 'css'],
+                            ['/fonts.css', 'css'], ['/lib/client.js', 'javascript'],
+                            ['/views/home.js', 'javascript'], ['/fonts/ibm-plex-mono-400.woff2', 'font']]) {
+  const r = await fetch(B + path);
+  ok(`serves ${path}`, r.ok && r.headers.get('content-type').includes(type),
+     `${r.status} ${r.headers.get('content-type')}`);
+}
+ok('SPA fallback for unknown route', (await fetch(B + '/anything')).ok);
+ok('unknown API endpoint 404s', (await j('/api/nope')).status === 404);
+
+console.log('\nOVERVIEW');
+const ov = (await j('/api/overview')).body;
+ok('cluster named', typeof ov.cluster.name === 'string' && ov.cluster.name.length > 0);
+ok('node roles', JSON.stringify(ov.node.roles) === '["master","worker"]');
+ok('self machine registered', ov.machines.length === 1 && ov.machines[0].is_self);
+ok('system probed', ov.system.cpu_cores > 0 && ov.system.ram_total_mb > 0);
+ok('git detected', ov.git_available === true);
+
+console.log('\nPROJECTS');
+const created = await j('/api/projects', { method: 'POST', body: { name: 'demo', description: 'smoke' } });
+ok('create returns 201 with timestamps', created.status === 201 && !!created.body.created_at, JSON.stringify(created.body));
+ok('duplicate name refused', (await j('/api/projects', { method: 'POST', body: { name: 'demo' } })).status === 409);
+ok('bad name refused', (await j('/api/projects', { method: 'POST', body: { name: '../evil' } })).status === 400);
+ok('starter files present', (await j('/api/projects/demo/tree')).body.length === 2);
+ok('missing project 404s', (await j('/api/projects/ghost/tree')).status === 404);
+
+console.log('\nFILES');
+ok('write', (await j('/api/projects/demo/file', { method: 'PUT', body: { path: 'a/b/deep.py', content: 'x=1\n' } })).status === 200);
+ok('read back', (await j('/api/projects/demo/file?path=a/b/deep.py')).body.content === 'x=1\n');
+ok('mkdir', (await j('/api/projects/demo/dir', { method: 'POST', body: { path: 'notebooks' } })).status === 201);
+ok('rename', (await j('/api/projects/demo/rename', { method: 'POST', body: { from: 'a/b/deep.py', to: 'a/b/renamed.py' } })).status === 200);
+ok('delete', (await j('/api/projects/demo/entry?path=a/b/renamed.py', { method: 'DELETE' })).status === 200);
+const esc = await j('/api/projects/demo/file?path=../../../etc/passwd');
+ok('traversal read refused', esc.status === 404 || esc.status === 400, JSON.stringify(esc.body));
+
+console.log('\nGIT');
+// Make a change to observe: the file operations above net out to nothing.
+await j('/api/projects/demo/file', { method: 'PUT', body: { path: 'changed.py', content: 'print(1)\n' } });
+const git = (await j('/api/projects/demo/git')).body;
+ok('branch main', git.branch === 'main');
+ok('initial commit exists', git.log.length === 1);
+ok('sees uncommitted changes', git.changes.length > 0);
+const c = await j('/api/projects/demo/commit', { method: 'POST', body: { message: 'smoke commit' } });
+ok('commit succeeds', c.body.committed === true);
+ok('history grew', (await j('/api/projects/demo/git')).body.log.length === 2);
+ok('nothing left to commit', (await j('/api/projects/demo/commit', { method: 'POST', body: { message: 'again' } })).body.committed === false);
+
+console.log('\nJOBS');
+const job = (await j('/api/jobs', { method: 'POST', body: { project: 'demo', command: 'echo hello; python3 -c "print(6*7)"' } })).body;
+const done = await waitFor(async () => {
+  const r = (await j(`/api/jobs/${job.id}`)).body;
+  return ['succeeded', 'failed', 'stopped'].includes(r.state) ? r : null;
+});
+ok('job succeeded', done && done.state === 'succeeded' && done.exit_code === 0, done && done.state);
+const logs = (await j(`/api/jobs/${job.id}/logs`)).body;
+ok('log captured', logs.map((l) => l.text).join('|') === 'hello|42', JSON.stringify(logs.map(l => l.text)));
+ok('empty command refused', (await j('/api/jobs', { method: 'POST', body: { project: 'demo', command: '  ' } })).status === 400);
+const failing = (await j('/api/jobs', { method: 'POST', body: { command: 'exit 3' } })).body;
+const failed = await waitFor(async () => {
+  const r = (await j(`/api/jobs/${failing.id}`)).body;
+  return r.state === 'failed' ? r : null;
+});
+ok('failure keeps exit code', failed && failed.exit_code === 3, failed && failed.exit_code);
+
+console.log('\nSTOP');
+const long = (await j('/api/jobs', { method: 'POST', body: { command: 'sleep 30' } })).body;
+// Wait until it is actually running before stopping it: stopping a job that has
+// not spawned yet is a different code path and not what this checks.
+const started = await waitFor(async () =>
+  (await j(`/api/jobs/${long.id}`)).body.state === 'running' || null);
+ok('job reaches running', started === true);
+ok('stop accepted', (await j(`/api/jobs/${long.id}/stop`, { method: 'POST' })).status === 200);
+const stopped = await waitFor(async () =>
+  (await j(`/api/jobs/${long.id}`)).body.state === 'stopped' || null);
+ok('job stopped', stopped === true);
+
+console.log('\nSETTINGS / POLICY');
+ok('terminal off by default', (await j('/api/settings')).body.worker.allow_terminal === false);
+await j('/api/settings', { method: 'PUT', body: { worker: { enabled: false, allow_jobs: true, allow_gpu: true, allow_terminal: false } } });
+ok('policy refuses work when disabled', (await j('/api/jobs', { method: 'POST', body: { command: 'echo nope' } })).status === 403);
+await j('/api/settings', { method: 'PUT', body: { worker: { enabled: true, allow_jobs: true, allow_gpu: true, allow_terminal: false } } });
+ok('policy restored', (await j('/api/jobs', { method: 'POST', body: { command: 'true' } })).status === 201);
+
+console.log('\nDELETE PROJECT');
+ok('delete project', (await j('/api/projects/demo', { method: 'DELETE' })).status === 200);
+ok('gone', (await j('/api/projects/demo/tree')).status === 404);
+
+console.log(`\n  ${pass} passed, ${fail} failed\n`);
+process.exit(fail ? 1 : 0);
