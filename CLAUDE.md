@@ -62,26 +62,65 @@ projects, accounts, machines, roles and worker policy. `worker` in the top-level
 config is a device-wide ceiling that a per-network policy can narrow but never
 exceed.
 
-## Deliberate deviations from the original architecture doc
+## The most important rule: bundle, do not rebuild
 
-Recorded so nobody "fixes" them by accident, and so the cost of each is known.
+**Plainshow Cluster is an interface over programs that already work.** It is not
+a distributed systems project. The value is the workspace — one simple place to
+create a project, edit it with someone, and run it on whichever machine has a
+free GPU — not the plumbing underneath, which mature software already does far
+better than we will.
 
-- **mTLS + Ed25519-signed requests instead of WireGuard/tsnet.** Simpler, no
-  dependency. NAT traversal is solved by inverting the direction rather than by
-  a VPN: a machine that cannot be dialled connects *out* to its coordinator and
-  work arrives back down that connection (`internal/tunnel`). **Remaining cost:**
-  peer-to-peer bulk transfer between two unreachable machines still has no
-  direct path, so datasets and checkpoints between two NATed workers go through
-  the coordinator instead of directly. That is the relay work still open.
-- **Server-authoritative operational transform instead of Yjs/CRDT.** All edits
-  serialise through one mutex on the master, so cross-client convergence does
-  not depend on the transform being provably correct. Verified: 400 randomly
-  interleaved edits with stale bases produced no corruption or divergence.
-  **Cost:** overlapping concurrent edits lose one side's *intention* (not data),
-  and there is no offline-first editing.
-- **A hand-written Python kernel instead of `jupyter_server`/`ipykernel`.**
-  Files are real `.ipynb` and open in Jupyter. **Cost:** no ipywidgets, no rich
-  MIME output, no completion or inspection.
+The same shape as the Plainshow web console: it does not implement a web server,
+a process manager or Git. It drives Apache, PM2 and git, and is the simple thing
+in front of them.
+
+So the default answer to "how do we do X" is **which existing program does X, and
+how do we drive it.** Writing our own is the exception, and it needs a reason
+beyond "it seemed easier at the time".
+
+What we legitimately build ourselves:
+
+- The web interface and the workspace experience.
+- The collaborative editor over a socket — this is small, specific to us, and
+  fine to own.
+- Project, job, dataset and membership modelling: the concepts users see.
+- Anything that is genuinely Plainshow's opinion rather than infrastructure.
+
+What we must not build ourselves — the list that has already been violated once:
+
+| Need | Use | Never write |
+|---|---|---|
+| Encrypted network, NAT traversal | **Tailscale** (Headscale to self-host) | VPN protocols, hole punching, key distribution, relays |
+| Notebook kernels | **jupyter_server / ipykernel** | A Python execution protocol |
+| Distributed training | **torchrun / NCCL** | A launcher of our own beyond rendering the command |
+| Version control | **git** | Anything resembling a merge algorithm |
+| Containers / environments | **Podman, uv** | An image or dependency resolver |
+| General compute, later | **Spark / Ray** | A scheduler beyond simple placement |
+
+## Debt: three places we rebuilt instead of bundling
+
+These are **not** approved designs. They are drift, recorded so they get paid
+down rather than copied. Each replaced something the original plan had already
+chosen correctly.
+
+1. **`internal/mesh` + `internal/tunnel` instead of Tailscale.** The whole
+   networking layer is ours: mTLS, signed requests, a reverse WebSocket tunnel.
+   It works for control traffic, and it **cannot** carry distributed training,
+   because NCCL is a separate process needing a real interface. Finishing it
+   properly means writing STUN, hole punching and a relay — weeks of work
+   reimplementing Tailscale badly. *Replace it:* depend on the tailscale daemon,
+   drive it with an auth key, read peer addresses from `tailscale status --json`.
+   Days, not weeks, and NCCL works across houses because the interface is real.
+2. **`internal/notebook` instead of `jupyter_server`.** A hand-written Python
+   kernel. Files are real `.ipynb`, but there are no ipywidgets, no rich MIME
+   output, no completion or inspection, and every one of those is free from the
+   real thing.
+3. **`internal/collab` operational transform.** This one is closest to
+   defensible — a collaborative editor over a socket is on the "we build it"
+   list — but Yjs was the original choice and would have been less code.
+
+When touching any of these, the question is not "how do I improve this" but
+"how do I delete it and drive the real thing instead".
 
 ## Working agreements
 
@@ -137,14 +176,15 @@ Phases 0–5 are landed. What remains, in order:
 1. **Reliability pass on what exists.** Done: the collaboration write path,
    the sign-in gate, `internal/api` tests, the peer port, and the CLI commands
    for networks, invites, joining, GitHub and updates.
-2. **Phase 6 — the always-on controller.** Half landed. The reverse tunnel
-   (`internal/tunnel`) means a worker on an ordinary home connection needs no
-   forwarded port: it dials out and holds the connection, and the coordinator
-   sends work down it. **Still open:** the coordinator itself must be reachable
-   by everyone, so one machine (or a cheap always-on box) still needs an
-   address. And bulk transfer between two unreachable peers has no direct path
-   yet — a relay that forwards encrypted bytes between two tunnels, so datasets
-   and checkpoints stop going through the coordinator's own process.
+2. **Phase 6 — networking, by adopting Tailscale.** Not by finishing ours.
+   Plainshow should require the tailscale daemon, bring it up with an auth key
+   during join, and read peer addresses from `tailscale status --json`. That
+   gives NAT traversal, key distribution, roaming and a relay fallback for
+   nothing, and — the part our tunnel cannot do — a real interface that torch
+   and NCCL can bind to, so distributed training works between houses.
+   `internal/mesh` and `internal/tunnel` then shrink to almost nothing: with
+   every machine reachable at a stable address, peers are just dialled.
+   Headscale, or Tailscale's free tier, covers the coordination server.
 3. **Phase 7 — real-machine validation.** A genuine multi-GPU `torchrun` across
    two CUDA machines. The launcher is implemented and unit-tested; it has never
    run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
