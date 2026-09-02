@@ -114,7 +114,7 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 	client := mesh.NewClient(invite.Endpoint, invite.Fingerprint, invite.NetworkID, s.device)
 	request := joinRequest{Token: invite.Token, NodeID: s.device.ID, Name: s.cfg.Node.Name,
 		PublicKey: base64.RawURLEncoding.EncodeToString(s.device.Public), Fingerprint: s.fingerprint,
-		Endpoint: body.Endpoint, Roles: joiningRoles(), Info: info, Policy: policyMap(s.cfg.Worker)}
+		Endpoint: body.Endpoint, Info: info, Policy: policyMap(s.cfg.Worker)}
 	var response joinResponse
 	if err := client.JSON("POST", "/mesh/v1/join/"+invite.NetworkID, request, &response, false); err != nil {
 		fail(w, 502, "Could not join the network: "+err.Error())
@@ -241,18 +241,11 @@ func (s *Server) updateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Enabled *bool                `json:"enabled"`
-		Roles   []config.Role        `json:"roles"`
 		Policy  *config.WorkerConfig `json:"policy"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
 		return
-	}
-	for _, role := range body.Roles {
-		if !role.Valid() {
-			fail(w, 400, "Unknown machine role.")
-			return
-		}
 	}
 	for i := range s.cfg.Memberships {
 		membership := &s.cfg.Memberships[i]
@@ -261,9 +254,6 @@ func (s *Server) updateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Enabled != nil {
 			membership.Enabled = *body.Enabled
-		}
-		if len(body.Roles) > 0 {
-			membership.Roles = body.Roles
 		}
 		if body.Policy != nil {
 			membership.Policy = *body.Policy

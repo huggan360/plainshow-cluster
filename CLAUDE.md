@@ -233,17 +233,16 @@ point of failure.
 
 ### A. Finish the peer model (≈3d)
 
-1. **Normalise stored roles.** `network_node.roles` rows written by older
+1. ~~**Normalise stored roles.**~~ Done. `network_node.roles` rows written by older
    versions still say `master`. Run them through `config.Normalise` on read so
    nothing downstream sees a role that no longer exists. *0.5d*
-2. **Drop roles from enrolment.** Joining should not ask what a machine is; it
+2. ~~**Drop roles from enrolment.**~~ Done. Joining no longer asks what a machine is; it
    is a device. Remove the role picker from `web/views/networks.js` and the
    roles argument from the join path. *0.5d*
-3. **All-to-all peer discovery.** Today a joining device learns about the
-   machine that invited it. Every device needs every other device's address, so
-   any pair can work together. Add a peers exchange on check-in: a device asks
-   any peer it knows for the current member list and merges. No coordinator,
-   converges, survives any single machine being off. *2d*
+3. ~~**All-to-all peer discovery.**~~ Done. Devices exchange their current peer
+   directories over authenticated mesh check-ins every 30 seconds. Merges keep
+   the freshest complete record, never overwrite the local device, and
+   converge without a coordinator when an offline peer returns.
 
 ### B. Controller Server (≈7d)
 

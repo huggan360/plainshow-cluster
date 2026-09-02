@@ -90,7 +90,7 @@ func usage() {
 	fmt.Printf(`%s %s
 
   pscluster init [--root DIR] [--name NAME] [--cluster NAME]
-                 [--roles master,worker] [--port N] [--peer-port N]
+                 [--port N] [--peer-port N]
                  [--bind ADDR] [--advertise HTTPS_URL]
       Create a node. Everything it stores lives under one directory.
 
@@ -238,21 +238,6 @@ func cmdInit(args []string) error {
 		cfg.Network.PeerPort = n
 	}
 	cfg.Network.Advertise = strings.TrimRight(f.get("advertise", cfg.Network.Advertise), "/")
-	if rs := f.get("roles", ""); rs != "" {
-		roles := []config.Role{}
-		for _, r := range strings.Split(rs, ",") {
-			role := config.Role(strings.TrimSpace(strings.ToLower(r)))
-			if !role.Valid() {
-				return fmt.Errorf("unknown role %q (valid: controller, master, worker)", r)
-			}
-			roles = append(roles, role)
-		}
-		if len(roles) == 0 {
-			return errors.New("--roles needs at least one of: controller, master, worker")
-		}
-		cfg.Node.Roles = roles
-	}
-
 	if err := l.EnsureDirs(); err != nil {
 		return err
 	}
@@ -456,6 +441,7 @@ func cmdServe(args []string) error {
 	defer stop()
 
 	srv.StartTelemetry(ctx, 3*time.Second)
+	srv.StartPeerDiscovery(ctx, 30*time.Second)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())
@@ -729,16 +715,6 @@ func configSet(c *config.Config, key, value string) error {
 			return fmt.Errorf("network.port expects 0-65535, got %q", value)
 		}
 		c.Network.Port = n
-	case "node.roles":
-		roles := []config.Role{}
-		for _, r := range strings.Split(value, ",") {
-			role := config.Role(strings.TrimSpace(strings.ToLower(r)))
-			if !role.Valid() {
-				return fmt.Errorf("unknown role %q", r)
-			}
-			roles = append(roles, role)
-		}
-		c.UpdateActiveMembership(func(m *config.MembershipConfig) { m.Roles = roles })
 	case "worker.enabled":
 		b, err := parseBool()
 		if err != nil {

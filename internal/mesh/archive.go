@@ -13,8 +13,8 @@ import (
 )
 
 // ArchiveDir makes a portable project snapshot. Git metadata is excluded: the
-// worker needs a runnable tree, while version history remains canonical on the
-// master and can be synchronised separately.
+// remote device needs a runnable tree, while version history remains in git
+// and can be synchronised separately.
 func ArchiveDir(root string) ([]byte, error) {
 	var out bytes.Buffer
 	gz := gzip.NewWriter(&out)

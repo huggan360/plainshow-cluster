@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -115,7 +117,6 @@ type joinRequest struct {
 	PublicKey   string         `json:"public_key"`
 	Fingerprint string         `json:"fingerprint"`
 	Endpoint    string         `json:"endpoint"`
-	Roles       []string       `json:"roles"`
 	Info        sysinfo.Info   `json:"info"`
 	Policy      map[string]any `json:"policy"`
 }
@@ -126,6 +127,10 @@ type joinResponse struct {
 	Nodes   []store.NetworkNode `json:"nodes"`
 }
 
+type peerExchange struct {
+	Nodes []store.NetworkNode `json:"nodes"`
+}
+
 // MeshHandler is the deliberately narrow API exposed on the encrypted peer
 // port. The browser interface and local administration API are never exposed
 // there.
@@ -133,6 +138,7 @@ func (s *Server) MeshHandler() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /mesh/v1/join/{network}", s.acceptJoin)
 	authed := http.NewServeMux()
+	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
 	authed.HandleFunc("POST /mesh/v1/datasets/sync", s.acceptDatasetSync)
 	authed.HandleFunc("POST /mesh/v1/reach", s.acceptReachCheck)
@@ -184,11 +190,8 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	if len(body.Roles) == 0 {
-		body.Roles = []string{"worker"}
-	}
 	if err := s.store.UpsertNetworkNode(store.NetworkNode{NetworkID: networkID, NodeID: body.NodeID,
-		Name: body.Name, Roles: body.Roles, OS: body.Info.OS, Arch: body.Info.Arch,
+		Name: body.Name, Roles: []string{string(config.RoleWorker)}, OS: body.Info.OS, Arch: body.Info.Arch,
 		PublicKey: body.PublicKey, Fingerprint: body.Fingerprint, Address: body.Endpoint,
 		Policy: body.Policy, Capacity: map[string]any{"cpu_cores": body.Info.CPUCores,
 			"ram_total_mb": body.Info.RAMTotalMB, "disk_total_gb": body.Info.DiskTotalGB,
@@ -204,6 +207,150 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.store.NetworkNodes(networkID)
 	s.hub.Publish("networks.changed", network)
 	writeJSON(w, 201, joinResponse{Network: network, Role: invitation.Role, Nodes: nodes})
+}
+
+// StartPeerDiscovery periodically exchanges each network's directory with
+// every reachable peer. There is no coordinator: any live edge carries new
+// device records across the network, and repeated exchanges converge after an
+// offline machine returns.
+func (s *Server) StartPeerDiscovery(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		every = 30 * time.Second
+	}
+	go func() {
+		s.syncPeersOnce(ctx)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.syncPeersOnce(ctx)
+			}
+		}
+	}()
+}
+
+func (s *Server) syncPeersOnce(ctx context.Context) {
+	networks, err := s.store.Networks(s.cfg.Node.ID)
+	if err != nil {
+		return
+	}
+	for _, network := range networks {
+		if ctx.Err() != nil {
+			return
+		}
+		s.syncNetworkPeers(ctx, network.ID)
+	}
+}
+
+func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
+	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
+	nodes, err := s.store.NetworkNodes(networkID)
+	if err != nil {
+		return
+	}
+	request := peerExchange{Nodes: nodes}
+	var wg sync.WaitGroup
+	for _, node := range nodes {
+		if node.NodeID == s.cfg.Node.ID || node.Address == "" || node.Fingerprint == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(node store.NetworkNode) {
+			defer wg.Done()
+			if ctx.Err() != nil {
+				return
+			}
+			client, err := s.clientForNode(networkID, node.NodeID)
+			if err != nil {
+				return
+			}
+			var response peerExchange
+			if err := client.JSON("POST", "/mesh/v1/peers/check-in", request, &response, true); err != nil {
+				return
+			}
+			s.mergePeerNodes(networkID, response.Nodes)
+		}(node)
+	}
+	wg.Wait()
+}
+
+func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
+	networkID := r.Header.Get("X-Plainshow-Network")
+	if !hasMembership(s.cfg, networkID) {
+		fail(w, 403, "This device is not active in that network.")
+		return
+	}
+	var exchange peerExchange
+	if err := decode(r, &exchange); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	s.mergePeerNodes(networkID, exchange.Nodes)
+	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
+	nodes, err := s.store.NetworkNodes(networkID)
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, peerExchange{Nodes: nodes})
+}
+
+// mergePeerNodes accepts only complete, newer records and never lets gossip
+// overwrite this machine's own row. A peer may have been offline for days, so
+// arrival order cannot be used as freshness.
+func (s *Server) mergePeerNodes(networkID string, candidates []store.NetworkNode) {
+	current, err := s.store.NetworkNodes(networkID)
+	if err != nil {
+		return
+	}
+	known := make(map[string]store.NetworkNode, len(current))
+	for _, node := range current {
+		known[node.NodeID] = node
+	}
+	for _, candidate := range candidates {
+		if candidate.NetworkID != networkID || candidate.NodeID == s.cfg.Node.ID || !validPeerRecord(candidate) {
+			continue
+		}
+		if old, ok := known[candidate.NodeID]; ok && !nodeRecordNewer(candidate.LastSeen, old.LastSeen) {
+			continue
+		}
+		candidate.Roles = []string{string(config.RoleWorker)}
+		candidate.IsSelf = false
+		if s.store.UpsertNetworkNode(candidate) == nil {
+			known[candidate.NodeID] = candidate
+		}
+	}
+}
+
+func validPeerRecord(node store.NetworkNode) bool {
+	if node.NodeID == "" || strings.TrimSpace(node.Name) == "" || node.LastSeen == "" {
+		return false
+	}
+	if _, err := time.Parse(time.RFC3339, node.LastSeen); err != nil {
+		return false
+	}
+	public, err := base64.RawURLEncoding.DecodeString(node.PublicKey)
+	if err != nil || len(public) != ed25519.PublicKeySize {
+		return false
+	}
+	fingerprint, err := base64.RawURLEncoding.DecodeString(node.Fingerprint)
+	if err != nil || len(fingerprint) != 32 {
+		return false
+	}
+	endpoint, err := url.Parse(node.Address)
+	return err == nil && endpoint.Scheme == "https" && endpoint.Host != ""
+}
+
+func nodeRecordNewer(candidate, current string) bool {
+	next, err := time.Parse(time.RFC3339, candidate)
+	if err != nil {
+		return false
+	}
+	previous, err := time.Parse(time.RFC3339, current)
+	return err != nil || next.After(previous)
 }
 
 type remoteJobRequest struct {
@@ -352,8 +499,6 @@ func policyMap(policy config.WorkerConfig) map[string]any {
 		"allow_gpu": policy.AllowGPU, "allow_terminal": policy.AllowTerminal,
 		"max_cpu": policy.MaxCPU, "max_ram_mb": policy.MaxRAMMB}
 }
-
-func joiningRoles() []string { return []string{string(config.RoleWorker)} }
 
 func (s *Server) clientForNode(networkID, nodeID string) (peerTransport, error) {
 	node, err := s.store.NetworkNode(networkID, nodeID)

@@ -18,16 +18,16 @@ export async function renderNetworks(host) {
                     'machines and permissions stay inside the selected network.'),
 				el('div', { style: 'display:flex;gap:8px' },
 					el('button', { class: 'btn', onclick: () => joinNetwork() }, 'Join by code'),
-					el('button', { class: 'btn btn--primary', onclick: () => createNetwork(draw) },
+					el('button', { class: 'btn btn--primary', onclick: () => createNetwork() },
 						'+ Create network'))),
-            el('div', { class: 'grid grid--2' }, ...data.networks.map((network) =>
-                networkCard(network, network.id === data.active, draw))));
+			el('div', { class: 'grid grid--2' }, ...data.networks.map((network) =>
+				networkCard(network, network.id === data.active))));
     };
     await draw();
     return null;
 }
 
-function networkCard(network, active, redraw) {
+function networkCard(network, active) {
     const details = el('div', {});
     const loadDetails = async () => {
         const [nodes, members] = await Promise.all([
@@ -73,9 +73,6 @@ function networkCard(network, active, redraw) {
                         location.reload();
                     },
                 }, 'Switch to') : null,
-                el('button', {
-                    class: 'btn btn--sm', onclick: () => configureMachine(network, redraw),
-				}, 'Configure machine'),
 				el('button', { class: 'btn btn--sm', onclick: () => createInvite(network) },
 					'Invite machine')),
             details);
@@ -133,43 +130,17 @@ function showInvite(invite) {
 	});
 }
 
-function createNetwork(redraw) {
+function createNetwork() {
     const name = el('input', { class: 'input', placeholder: 'Research lab' });
     modal({
         title: 'Create a network', confirmLabel: 'Create',
         body: () => el('div', {},
             el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Name'), name),
             el('p', { class: 'muted', style: 'font-size:12px;margin:12px 0 0' },
-                'You become the owner. This machine starts as its master and worker.')),
+                'You become the owner. This machine becomes the first device in the network.')),
         onConfirm: async (close) => {
             await api('/api/networks', { method: 'POST', body: { name: name.value } });
             close(); toast('Network created.'); location.reload();
-        },
-    });
-}
-
-async function configureMachine(network, redraw) {
-    const settings = await api('/api/settings');
-    const membership = settings.memberships.find((item) => item.id === network.id);
-    const roles = new Set(membership.roles);
-    const checks = {};
-    const roleRow = (role, description) => {
-        checks[role] = el('input', { type: 'checkbox', checked: roles.has(role) });
-        return el('label', { class: 'switch' },
-            el('span', { class: 'switch__text' }, el('strong', {}, role), el('span', {}, description)),
-            checks[role]);
-    };
-    modal({
-        title: `${network.name} · this machine`, confirmLabel: 'Save',
-        body: () => el('div', {},
-            roleRow('worker', 'Accept jobs within the local safety limits.'),
-        onConfirm: async (close) => {
-            const selected = Object.entries(checks).filter(([, input]) => input.checked).map(([role]) => role);
-            if (!selected.length) throw new Error('Choose at least one role.');
-            await api(`/api/networks/${encodeURIComponent(network.id)}/policy`, {
-                method: 'PUT', body: { roles: selected, policy: membership.policy },
-            });
-            close(); toast('Machine configuration saved.'); await redraw();
         },
     });
 }

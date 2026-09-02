@@ -60,3 +60,56 @@ func TestNetworkRoles(t *testing.T) {
 		t.Fatal("accepted unknown role")
 	}
 }
+
+// TestStoredRetiredRolesBecomeOrdinaryDevices covers the database half of the
+// role migration. Config normalisation alone does not touch peer rows learned
+// from an older machine.
+func TestStoredRetiredRolesBecomeOrdinaryDevices(t *testing.T) {
+	st := open(t)
+	cases := []struct {
+		id    string
+		roles []string
+	}{
+		{"old-master", []string{"master"}},
+		{"old-controller-worker", []string{"controller", "worker"}},
+		{"empty", nil},
+	}
+	for _, tc := range cases {
+		if err := st.UpsertNetworkNode(NetworkNode{
+			NetworkID: "network", NodeID: tc.id, Name: tc.id, Roles: tc.roles,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes, err := st.NetworkNodes("network")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != len(cases) {
+		t.Fatalf("got %d nodes, want %d", len(nodes), len(cases))
+	}
+	for _, node := range nodes {
+		if len(node.Roles) != 1 || node.Roles[0] != "worker" {
+			t.Errorf("%s roles = %v, want [worker]", node.NodeID, node.Roles)
+		}
+	}
+}
+
+func TestTouchNetworkNodeRequiresAnExistingNode(t *testing.T) {
+	st := open(t)
+	if err := st.UpsertNetworkNode(NetworkNode{
+		NetworkID: "network", NodeID: "device", Name: "device", LastSeen: "old",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TouchNetworkNode("network", "device", "new"); err != nil {
+		t.Fatal(err)
+	}
+	node, err := st.NetworkNode("network", "device")
+	if err != nil || node.LastSeen != "new" {
+		t.Fatalf("last seen = %q, %v", node.LastSeen, err)
+	}
+	if err := st.TouchNetworkNode("network", "missing", "new"); err != ErrNotFound {
+		t.Fatalf("missing node error = %v, want ErrNotFound", err)
+	}
+}

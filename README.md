@@ -69,7 +69,7 @@ Plainshow drives rather than reimplements.
 
 ```sh
 pscluster init [--root DIR] [--name NAME] [--cluster NAME]
-               [--roles master,worker] [--port N] [--bind ADDR]
+               [--port N] [--bind ADDR]
 pscluster serve [--root DIR]
 pscluster status [--root DIR]
 pscluster run [--project NAME] <command...>
@@ -111,12 +111,11 @@ pscluster config set worker.allow_terminal true
 A project is a directory under `<root>/projects/`. Creating one gives you a
 folder, a starter file and a git repository with an initial commit.
 
-Git is not the live-editing transport — that will be a CRDT over a socket, and
-per-keystroke commits would be unusable as both a sync protocol and a history.
-Git is what carries a project between machines that were not online at the same
-time: every node keeps a full clone, work continues while the master is
-unreachable, and divergence is reconciled by a real three-way merge rather than
-a last-writer-wins guess.
+Git is not the live-editing transport: per-keystroke commits would be unusable
+as both a sync protocol and a history. Git carries a project between machines
+that were not online at the same time. Every device keeps a full clone, so work
+continues while other devices are unreachable and divergence is reconciled by
+a real three-way merge rather than a last-writer-wins guess.
 
 ## Building
 
@@ -169,10 +168,9 @@ advisor. The interface uses the same visual language as the existing Plainshow
 console and is embedded in the binary.
 
 Machines on different networks find each other through **tailscale**, which
-Plainshow drives rather than reimplements: install it, and joining a network
-signs this machine into the tailnet and records the address it got. That address
-is what training uses too, so a link the cluster proves reachable is the link
-NCCL will run over.
+Plainshow drives rather than reimplements. When tailscale is connected,
+Plainshow records the address it got. That address is what training uses too,
+so a link the cluster proves reachable is the link NCCL will run over.
 
 A machine with no reachable address of its own — an ordinary desktop behind NAT,
 or behind carrier-grade NAT — is reached at its tailnet address. There is no
@@ -183,5 +181,6 @@ two-node integration runs; a real multi-GPU PyTorch run still needs validation
 on CUDA machines before the Phase 5 alpha is published.
 
 One installation can belong to several networks. Each membership has its own
-projects, accounts, machines, roles and worker policy, and the active network is
-selected from the top bar.
+projects, accounts, machines and worker policy, and the active network is
+selected from the top bar. Devices exchange their signed peer directories
+directly, so every reachable pair converges without a coordinator.

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/huggan360/plainshow-cluster/internal/config"
 )
 
 const (
@@ -243,11 +245,7 @@ func (s *Store) NetworkNodes(networkID string) ([]NetworkNode, error) {
 			&node.LastSeen, &node.Created); err != nil {
 			return nil, err
 		}
-		if roles != "" {
-			node.Roles = strings.Split(roles, ",")
-		} else {
-			node.Roles = []string{}
-		}
+		node.Roles = normaliseStoredRoles(roles)
 		node.Policy = map[string]any{}
 		_ = json.Unmarshal([]byte(policy), &node.Policy)
 		node.Capacity = map[string]any{}
@@ -255,6 +253,24 @@ func (s *Store) NetworkNodes(networkID string) ([]NetworkNode, error) {
 		out = append(out, node)
 	}
 	return out, rows.Err()
+}
+
+// normaliseStoredRoles keeps retired machine roles from escaping the storage
+// boundary. The rows themselves can have been written by an older binary, but
+// every current caller should see an ordinary device.
+func normaliseStoredRoles(raw string) []string {
+	stored := []config.Role{}
+	for _, role := range strings.Split(raw, ",") {
+		if role = strings.TrimSpace(role); role != "" {
+			stored = append(stored, config.Role(role))
+		}
+	}
+	normalised := config.Normalise(stored)
+	out := make([]string, 0, len(normalised))
+	for _, role := range normalised {
+		out = append(out, string(role))
+	}
+	return out
 }
 
 func (s *Store) NetworkNode(networkID, nodeID string) (NetworkNode, error) {
@@ -268,6 +284,24 @@ func (s *Store) NetworkNode(networkID, nodeID string) (NetworkNode, error) {
 		}
 	}
 	return NetworkNode{}, ErrNotFound
+}
+
+// TouchNetworkNode records a fresh self check-in without rewriting the
+// machine's identity or policy from a potentially stale snapshot.
+func (s *Store) TouchNetworkNode(networkID, nodeID, seen string) error {
+	result, err := s.db.Exec(`UPDATE network_node SET last_seen=?
+        WHERE network_id=? AND node_id=?`, seen, networkID, nodeID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) AssignProjectsToNetwork(networkID string) error {

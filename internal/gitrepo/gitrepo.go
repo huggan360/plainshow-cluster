@@ -4,8 +4,8 @@
 // socket, and per-keystroke commits would be unusable as both a sync protocol
 // and a history. Git is what carries a project between machines that were not
 // online at the same time: every node keeps a full clone, work continues while
-// the master is unreachable, and divergence is reconciled by a real three-way
-// merge instead of a last-writer-wins guess.
+// other devices are unreachable, and divergence is reconciled by a real
+// three-way merge instead of a last-writer-wins guess.
 //
 // This package is that foundation. It shells out to the git binary rather than
 // linking a library: git is already required on any machine running code, its
