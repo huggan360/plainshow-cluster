@@ -135,6 +135,11 @@ type NetworkConfig struct {
 	Port      int    `yaml:"port" json:"port"`
 	PeerPort  int    `yaml:"peer_port" json:"peer_port"`
 	Advertise string `yaml:"advertise" json:"advertise"`
+	// PeerBind is the address the encrypted peer port listens on. It has to be
+	// reachable by other machines, so it defaults to every interface — but only
+	// once this node actually shares a network with another. Set it to a single
+	// address to pin the peer port to one interface.
+	PeerBind string `yaml:"peer_bind" json:"peer_bind"`
 }
 
 // WorkerConfig is the machine owner's policy. It is authoritative and local:
@@ -382,6 +387,9 @@ func (c *Config) applyFallbacks() {
 	}
 	if c.Network.Bind == "" {
 		c.Network.Bind = d.Network.Bind
+	}
+	if c.Network.PeerBind == "" {
+		c.Network.PeerBind = d.Network.PeerBind
 	}
 	if c.Update.Repository == "" {
 		c.Update.Repository = d.Update.Repository

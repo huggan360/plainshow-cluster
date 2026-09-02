@@ -130,9 +130,10 @@ scripts/           checks a compiler cannot do
 
 Phases 0–5 are landed. What remains, in order:
 
-1. **Reliability pass on what exists.** Collab persistence cost, `internal/api`
-   has no unit tests, the CLI has no commands for networks, invites, GitHub or
-   updates while the API does.
+1. **Reliability pass on what exists.** Mostly done: the collaboration write
+   path, the sign-in gate and `internal/api` tests have landed. Still open —
+   **the CLI has no commands for networks, invites, GitHub or updates** while
+   the API has all of them, so those flows are browser-only.
 2. **Phase 6 — the always-on controller.** A stateless coordinator that gives
    NAT traversal: rendezvous (peers publish endpoints and fetch keys), relay
    (forward encrypted bytes when direct fails), and a signed directory record
@@ -162,6 +163,21 @@ Phases 0–5 are landed. What remains, in order:
 - **SQLite has no `ADD COLUMN IF NOT EXISTS`.** Schema changes go through
   `store.migrate()`, which checks `PRAGMA table_info` rather than a version
   counter, so it is safe to re-run.
+- **SQL is not checked by the compiler.** A query naming a column that does not
+  exist builds happily and fails when it runs, which may be at node startup.
+  Every new query gets a test that executes it.
+- **`UPDATE` matching no row returns no error.** Check `RowsAffected` when the
+  row is supposed to exist, or the caller is told a write succeeded that did
+  nothing. This is what made claiming a node silently do nothing.
+- **The collaboration write path runs once per keystroke.** It is one small
+  insert plus one document upsert in a single transaction, and
+  `TestKeystrokeCostDoesNotGrowWithHistory` fails if that stops being flat.
+  Roughly 14 ms per edit on a Raspberry Pi's SD card, dominated by fsync; if
+  that needs to come down, `synchronous=NORMAL` under WAL is the tuning to
+  reach for, and it stays crash-safe.
+- **The peer port only opens when a peer exists or a join code is outstanding**,
+  and it is polled every two seconds rather than checked once, because an
+  invite created on a running node has to open it.
 
 ## Picking this up
 

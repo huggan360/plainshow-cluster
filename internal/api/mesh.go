@@ -22,12 +22,28 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 )
 
+// ListenAndServeMesh starts the encrypted peer port.
+//
+// It opens nothing while this machine is alone. A single-machine install has no
+// peers to talk to, so a port on every interface would be surface with no
+// purpose — and most installs stay that way. The listener starts when the node
+// first shares a network with somebody, which is also when it is first needed.
 func (s *Server) ListenAndServeMesh(ctx context.Context, certificate tls.Certificate) error {
+	// Wait rather than give up. Creating a join code on a running node has to
+	// open the port, and checking only at startup would leave the first invite
+	// on a fresh install unable to be redeemed.
+	if err := s.waitUntilMeshNeeded(ctx); err != nil {
+		return nil
+	}
 	port := s.cfg.Network.PeerPort
 	if port == 0 {
 		port = 10000
 	}
-	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
+	bind := s.cfg.Network.PeerBind
+	if bind == "" {
+		bind = "0.0.0.0"
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(port)))
 	if err != nil {
 		return fmt.Errorf("mesh port %d is not available: %w", port, err)
 	}
@@ -44,6 +60,51 @@ func (s *Server) ListenAndServeMesh(ctx context.Context, certificate tls.Certifi
 		return err
 	}
 	return nil
+}
+
+// meshNeeded reports whether any network this node belongs to has another
+// machine in it, or is expecting one.
+//
+// It fails open: if the question cannot be answered the listener starts, since
+// a node that silently will not accept peers is worse than an open port.
+// waitUntilMeshNeeded blocks until this node has a peer or expects one.
+//
+// It returns an error only when the node is shutting down. The poll is cheap
+// (two indexed counts) and stops for good the moment it succeeds, so this costs
+// nothing once a cluster has more than one machine.
+func (s *Server) waitUntilMeshNeeded(ctx context.Context) error {
+	if s.meshNeeded() {
+		return nil
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if s.meshNeeded() {
+				return nil
+			}
+		}
+	}
+}
+
+func (s *Server) meshNeeded() bool {
+	for _, membership := range s.cfg.Memberships {
+		nodes, err := s.store.NetworkNodes(membership.ID)
+		if err != nil {
+			return true
+		}
+		if len(nodes) > 1 {
+			return true
+		}
+		pending, err := s.store.HasPendingInvitation(membership.ID)
+		if err != nil || pending {
+			return true
+		}
+	}
+	return false
 }
 
 type joinRequest struct {

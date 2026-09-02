@@ -188,3 +188,19 @@ CREATE TABLE IF NOT EXISTS training_run (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+-- Collaborative edits, one row per operation.
+--
+-- These used to live as a JSON array inside collab_document, rewritten in full
+-- on every keystroke. That cost grew with the document's history: about 5 ms
+-- per edit early on and over 30 ms after a thousand, heading for 100 ms at the
+-- retention cap. An append-only log makes a keystroke one small insert whatever
+-- the history looks like.
+CREATE TABLE IF NOT EXISTS collab_operation (
+    network_id TEXT    NOT NULL,
+    project_id TEXT    NOT NULL,
+    path       TEXT    NOT NULL,
+    revision   INTEGER NOT NULL,
+    payload    TEXT    NOT NULL,
+    PRIMARY KEY (network_id, project_id, path, revision)
+);

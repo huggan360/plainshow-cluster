@@ -301,6 +301,17 @@ func (s *Store) CreateInvitation(invite Invitation) error {
 	return err
 }
 
+// HasPendingInvitation reports whether a join code is outstanding for a
+// network. A machine is expected, so the peer port has to be open for it.
+func (s *Store) HasPendingInvitation(networkID string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`
+        SELECT count(*) FROM invitation
+        WHERE network_id = ? AND uses < max_uses AND expires_at > ?`,
+		networkID, Now()).Scan(&n)
+	return n > 0, err
+}
+
 // ConsumeInvitation atomically spends one use of a join token.
 func (s *Store) ConsumeInvitation(networkID, tokenHash string) (Invitation, error) {
 	tx, err := s.db.Begin()
