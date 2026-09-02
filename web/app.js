@@ -12,11 +12,17 @@ import { renderMachines } from './views/machines.js';
 import { renderSettings } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
 import { renderNotebooks } from './views/notebooks.js';
+import { renderNetworks } from './views/networks.js';
+import { renderDatasets } from './views/datasets.js';
+import { renderTrain } from './views/train.js';
 
 const ROUTES = [
     { id: 'home', label: 'Home', icon: '⌂', render: renderHome },
+    { id: 'networks', label: 'Networks', icon: '◎', render: renderNetworks },
     { id: 'workspace', label: 'Workspace', icon: '◫', render: renderWorkspace },
     { id: 'notebooks', label: 'Notebooks', icon: '▦', render: renderNotebooks },
+	{ id: 'datasets', label: 'Datasets', icon: '◈', render: renderDatasets },
+	{ id: 'train', label: 'Train', icon: '△', render: renderTrain },
     { id: 'jobs', label: 'Jobs', icon: '▤', render: renderJobs },
     { id: 'machines', label: 'Machines', icon: '▣', render: renderMachines },
     { id: 'github', label: 'GitHub', icon: '⑂', render: renderGitHub },
@@ -94,6 +100,19 @@ function shell(overview) {
                         class: 'mono', id: 'conn-label', style: 'font-size:10px',
                     }, 'offline')))));
 
+    const networkPicker = el('select', {
+        class: 'input input--mono',
+        style: 'width:auto;min-width:150px;padding:7px 30px 7px 10px;font-size:10px',
+        'aria-label': 'Active network',
+        onchange: async (event) => {
+            event.target.disabled = true;
+            await fetch(`/api/networks/${encodeURIComponent(event.target.value)}/active`, { method: 'PUT' });
+            location.reload();
+        },
+    }, ...(overview.networks || []).map((network) => el('option', {
+        value: network.id, selected: network.id === overview.active_network,
+    }, network.name)));
+
     const main = el('div', { class: 'main' },
         el('header', { class: 'top' },
             el('button', {
@@ -103,7 +122,7 @@ function shell(overview) {
             }, '☰'),
             el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
-            el('span', { class: 'chip' }, overview.cluster.name)),
+            networkPicker),
         el('div', { id: 'view' }));
 
     return [rail, main];

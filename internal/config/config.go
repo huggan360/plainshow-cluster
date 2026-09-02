@@ -65,11 +65,24 @@ func (r Role) Valid() bool {
 // Config is the full settings document for a node. Every field has a working
 // default; an empty file is a valid configuration.
 type Config struct {
-	Node    NodeConfig    `yaml:"node" json:"node"`
-	Cluster ClusterConfig `yaml:"cluster" json:"cluster"`
-	Network NetworkConfig `yaml:"network" json:"network"`
-	Worker  WorkerConfig  `yaml:"worker" json:"worker"`
-	Update  UpdateConfig  `yaml:"update" json:"update"`
+	Node          NodeConfig         `yaml:"node" json:"node"`
+	Cluster       ClusterConfig      `yaml:"cluster" json:"cluster"` // legacy primary network
+	Memberships   []MembershipConfig `yaml:"memberships" json:"memberships"`
+	ActiveNetwork string             `yaml:"active_network" json:"active_network"`
+	Network       NetworkConfig      `yaml:"network" json:"network"`
+	Worker        WorkerConfig       `yaml:"worker" json:"worker"` // device-wide safety ceiling
+	Update        UpdateConfig       `yaml:"update" json:"update"`
+}
+
+// MembershipConfig describes how this device participates in one independent
+// cluster network. A single installation may carry many memberships.
+type MembershipConfig struct {
+	ID          string       `yaml:"id" json:"id"`
+	Name        string       `yaml:"name" json:"name"`
+	Roles       []Role       `yaml:"roles" json:"roles"`
+	Enabled     bool         `yaml:"enabled" json:"enabled"`
+	Coordinator []string     `yaml:"coordinator,omitempty" json:"coordinator"`
+	Policy      WorkerConfig `yaml:"policy" json:"policy"`
 }
 
 // UpdateConfig controls how this node keeps itself current.
@@ -120,6 +133,7 @@ type ClusterConfig struct {
 type NetworkConfig struct {
 	Bind      string `yaml:"bind" json:"bind"`
 	Port      int    `yaml:"port" json:"port"`
+	PeerPort  int    `yaml:"peer_port" json:"peer_port"`
 	Advertise string `yaml:"advertise" json:"advertise"`
 }
 
@@ -137,7 +151,7 @@ type WorkerConfig struct {
 
 // HasRole reports whether the node carries role r.
 func (c *Config) HasRole(r Role) bool {
-	for _, k := range c.Node.Roles {
+	for _, k := range c.ActiveMembership().Roles {
 		if k == r {
 			return true
 		}
@@ -147,11 +161,74 @@ func (c *Config) HasRole(r Role) bool {
 
 // RoleNames renders the node's roles as plain strings.
 func (c *Config) RoleNames() []string {
-	out := make([]string, 0, len(c.Node.Roles))
-	for _, r := range c.Node.Roles {
+	membership := c.ActiveMembership()
+	out := make([]string, 0, len(membership.Roles))
+	for _, r := range membership.Roles {
 		out = append(out, string(r))
 	}
 	return out
+}
+
+// ActiveMembership returns the selected network membership. Legacy configs
+// appear as one implicit membership until they are next saved.
+func (c *Config) ActiveMembership() MembershipConfig {
+	for _, membership := range c.Memberships {
+		if membership.ID == c.ActiveNetwork {
+			return membership
+		}
+	}
+	if len(c.Memberships) > 0 {
+		return c.Memberships[0]
+	}
+	return MembershipConfig{
+		ID: c.Cluster.ID, Name: c.Cluster.Name, Roles: c.Node.Roles,
+		Enabled: true, Policy: c.Worker,
+	}
+}
+
+// EnsureMemberships migrates the original single-cluster configuration.
+func (c *Config) EnsureMemberships() {
+	if len(c.Memberships) == 0 {
+		c.Memberships = []MembershipConfig{{
+			ID: c.Cluster.ID, Name: c.Cluster.Name,
+			Roles: append([]Role(nil), c.Node.Roles...), Enabled: true, Policy: c.Worker,
+		}}
+	}
+	if c.ActiveNetwork == "" {
+		c.ActiveNetwork = c.Memberships[0].ID
+	}
+	active := c.ActiveMembership()
+	c.Cluster = ClusterConfig{ID: active.ID, Name: active.Name}
+	c.Node.Roles = append([]Role(nil), active.Roles...)
+}
+
+// SetActiveNetwork selects a membership and mirrors it into legacy fields.
+func (c *Config) SetActiveNetwork(id string) bool {
+	for _, membership := range c.Memberships {
+		if membership.ID != id {
+			continue
+		}
+		c.ActiveNetwork = id
+		c.Cluster = ClusterConfig{ID: membership.ID, Name: membership.Name}
+		c.Node.Roles = append([]Role(nil), membership.Roles...)
+		return true
+	}
+	return false
+}
+
+// UpdateActiveMembership changes this device's settings for the selected
+// network and keeps the compatibility fields in sync.
+func (c *Config) UpdateActiveMembership(update func(*MembershipConfig)) {
+	c.EnsureMemberships()
+	for i := range c.Memberships {
+		if c.Memberships[i].ID != c.ActiveNetwork {
+			continue
+		}
+		update(&c.Memberships[i])
+		c.Cluster = ClusterConfig{ID: c.Memberships[i].ID, Name: c.Memberships[i].Name}
+		c.Node.Roles = append([]Role(nil), c.Memberships[i].Roles...)
+		return
+	}
 }
 
 // Defaults returns a configuration with every field populated for this host.
@@ -167,7 +244,7 @@ func Defaults() *Config {
 			Roles: []Role{RoleMaster, RoleWorker},
 		},
 		Cluster: ClusterConfig{ID: NewID(), Name: "cluster"},
-		Network: NetworkConfig{Bind: "127.0.0.1", Port: 0},
+		Network: NetworkConfig{Bind: "127.0.0.1", Port: 0, PeerPort: 10000},
 		Worker: WorkerConfig{
 			Enabled:       true,
 			AllowJobs:     true,
@@ -222,6 +299,8 @@ func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "psclu
 // GitHubToken is where this node keeps its GitHub credential. It is inside the
 // install root like everything else, and readable only by the owner.
 func (l Layout) GitHubToken() string { return filepath.Join(l.Root, "keys", "github.token") }
+func (l Layout) DeviceKey() string   { return filepath.Join(l.Root, "keys", "device.key") }
+func (l Layout) DeviceCert() string  { return filepath.Join(l.Root, "keys", "device.crt") }
 func (l Layout) PIDFile() string     { return filepath.Join(l.Root, "run", "pscluster.pid") }
 
 // Dirs lists every directory the node expects to exist.
@@ -313,11 +392,13 @@ func (c *Config) applyFallbacks() {
 	if c.Update.CheckEvery == "" {
 		c.Update.CheckEvery = d.Update.CheckEvery
 	}
+	c.EnsureMemberships()
 }
 
 // Save writes the configuration atomically, so an interrupted write can never
 // leave a node with a truncated config.
 func Save(l Layout, c *Config) error {
+	c.EnsureMemberships()
 	out, err := yaml.Marshal(c)
 	if err != nil {
 		return err

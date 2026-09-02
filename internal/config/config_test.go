@@ -18,7 +18,7 @@ func TestLayoutStaysUnderOneRoot(t *testing.T) {
 		t.Fatalf("NewLayout: %v", err)
 	}
 	paths := append(l.Dirs(),
-		l.ConfigFile(), l.Database(), l.PIDFile())
+		l.ConfigFile(), l.Database(), l.DeviceKey(), l.PIDFile())
 
 	for _, p := range paths {
 		if p != l.Root && !strings.HasPrefix(p, l.Root+string(filepath.Separator)) {
@@ -74,6 +74,30 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if !got.HasRole(RoleMaster) || !got.HasRole(RoleWorker) || got.HasRole(RoleController) {
 		t.Errorf("roles round-tripped wrongly: %v", got.RoleNames())
+	}
+	if len(got.Memberships) != 1 || got.ActiveNetwork != got.Cluster.ID {
+		t.Errorf("single-cluster config did not migrate to memberships: %+v", got.Memberships)
+	}
+}
+
+func TestMultipleNetworkMemberships(t *testing.T) {
+	cfg := Defaults()
+	cfg.EnsureMemberships()
+	first := cfg.Memberships[0]
+	second := MembershipConfig{
+		ID: "friends", Name: "Friends", Roles: []Role{RoleWorker},
+		Enabled: true, Policy: cfg.Worker,
+	}
+	cfg.Memberships = append(cfg.Memberships, second)
+	if !cfg.SetActiveNetwork(second.ID) {
+		t.Fatal("could not select second network")
+	}
+	if cfg.Cluster.Name != "Friends" || cfg.HasRole(RoleMaster) || !cfg.HasRole(RoleWorker) {
+		t.Fatalf("wrong active membership: %+v", cfg.ActiveMembership())
+	}
+	cfg.UpdateActiveMembership(func(m *MembershipConfig) { m.Name = "Lab" })
+	if cfg.ActiveMembership().Name != "Lab" || cfg.Memberships[0].ID != first.ID {
+		t.Fatalf("membership update escaped its network: %+v", cfg.Memberships)
 	}
 }
 
@@ -159,6 +183,7 @@ func TestJSONFieldNames(t *testing.T) {
 		"network": {"bind", "port", "advertise"},
 		"worker": {"enabled", "allow_jobs", "allow_gpu", "allow_terminal",
 			"max_cpu", "max_ram_mb"},
+		"update": {"enabled", "repository", "channel", "check_every", "automatic"},
 	}
 	for block, keys := range want {
 		body, ok := got[block]

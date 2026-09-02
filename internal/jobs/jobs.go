@@ -75,6 +75,7 @@ type Request struct {
 	Title     string
 	Command   string
 	Workdir   string
+	Env       map[string]string
 }
 
 // ErrPolicy is returned when the machine's own settings forbid the work.
@@ -133,13 +134,18 @@ func (s *Supervisor) Start(req Request) (store.Job, error) {
 	}
 	s.hub.Publish("job.created", job)
 
-	go s.exec(job)
+	go s.exec(job, req.Env)
 	return job, nil
 }
 
+// Check applies the worker's authoritative policy without starting anything.
+// Distributed launchers use it during their prepare phase so no rank starts
+// until every selected machine has admitted the same run.
+func (s *Supervisor) Check(req Request) error { return s.admit(req) }
+
 // exec runs the process and streams its output. It always reaches a terminal
 // state, whatever goes wrong.
-func (s *Supervisor) exec(job store.Job) {
+func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -164,6 +170,12 @@ func (s *Supervisor) exec(job store.Job) {
 		"PSCLUSTER_ROOT="+s.layout.Root,
 		"PYTHONUNBUFFERED=1",
 	)
+	for key, value := range environment {
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
+			continue
+		}
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	// A process group lets a stop signal reach the whole tree, not just the
 	// shell: killing "sh -c python train.py" alone would orphan python.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

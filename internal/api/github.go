@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/huggan360/plainshow-cluster/internal/github"
@@ -162,7 +161,7 @@ func (s *Server) githubRepositories(w http.ResponseWriter, r *http.Request) {
 // projectRepo returns the repository a project mirrors, preferring the live git
 // remote over the stored value so the two cannot silently disagree.
 func (s *Server) projectRepo(p store.Project) string {
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name)).RemoteRepository()
+	repo := gitrepo.Open(s.projectDir(p)).RemoteRepository()
 	if repo != "" {
 		return repo
 	}
@@ -223,12 +222,12 @@ func (s *Server) linkRepository(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	if err := repo.SetRemote(repoName); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	if err := s.store.SetProjectRepository(p.Name, repoName); err != nil {
+	if err := s.store.SetProjectRepositoryID(p.ID, repoName); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -248,12 +247,12 @@ func (s *Server) unlinkRepository(w http.ResponseWriter, r *http.Request) {
 	// Only the link is removed. Nothing is deleted on GitHub, and the local
 	// history stays exactly as it is. Both the database memo and git's live
 	// remote must be cleared because projectRepo deliberately trusts the latter.
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	if err := repo.RemoveRemote(); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	if err := s.store.SetProjectRepository(p.Name, ""); err != nil {
+	if err := s.store.SetProjectRepositoryID(p.ID, ""); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -280,7 +279,7 @@ func (s *Server) gitPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	// Commit anything outstanding first: pushing a project with unsaved work
 	// still on disk is never what someone means by "push".
 	if _, err := repo.Commit("Update from " + s.cfg.Node.Name); err != nil {
@@ -312,7 +311,7 @@ func (s *Server) gitPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	// Local work is committed before merging, so a merge never has to reason
 	// about a dirty working tree and nothing can be lost to a checkout.
 	if _, err := repo.Commit("Local work on " + s.cfg.Node.Name); err != nil {
@@ -335,7 +334,7 @@ func (s *Server) gitAbortMerge(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "No such project.")
 		return
 	}
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	if !repo.InMerge() {
 		fail(w, 409, "There is no merge in progress.")
 		return
@@ -371,7 +370,7 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "That repository name cannot be used as a project name. Give one explicitly.")
 		return
 	}
-	if _, err := s.store.ProjectByName(name); err == nil {
+	if _, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, name); err == nil {
 		fail(w, 409, fmt.Sprintf("A project called %q already exists.", name))
 		return
 	}
@@ -382,20 +381,21 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(s.layout.Projects(), name)
+	p := store.Project{ID: newID(), NetworkID: s.cfg.ActiveNetwork,
+		Name: name, Repository: body.Repository}
+	dir := s.projectDir(p)
 	if err := gitrepo.Clone(token, body.Repository, dir); err != nil {
 		os.RemoveAll(dir)
 		fail(w, 400, err.Error())
 		return
 	}
 
-	p := store.Project{ID: newID(), Name: name, Repository: body.Repository}
 	if err := s.store.CreateProject(&p); err != nil {
 		os.RemoveAll(dir)
 		fail(w, 500, err.Error())
 		return
 	}
-	_ = s.store.SetProjectRepository(name, body.Repository)
+	_ = s.store.SetProjectRepositoryID(p.ID, body.Repository)
 	s.seedOwner(p)
 
 	s.hub.Publish("project.created", p)

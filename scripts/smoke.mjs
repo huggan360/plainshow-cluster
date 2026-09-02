@@ -42,6 +42,7 @@ ok('unknown API endpoint 404s', (await j('/api/nope')).status === 404);
 
 console.log('\nOVERVIEW');
 const ov = (await j('/api/overview')).body;
+const defaultNetwork = ov.active_network;
 ok('cluster named', typeof ov.cluster.name === 'string' && ov.cluster.name.length > 0);
 ok('node roles', JSON.stringify(ov.node.roles) === '["master","worker"]');
 ok('self machine registered', ov.machines.length === 1 && ov.machines[0].is_self);
@@ -97,6 +98,10 @@ ok('kernel keeps state between cells', cell2.body.outputs.some((o) => o.type ===
 ok('kernel restart succeeds',
   (await j('/api/projects/demo/kernel/restart', { method: 'POST' })).status === 200);
 
+console.log('\nCOLLABORATION');
+const shared = await j('/api/projects/demo/collab?path=main.py');
+ok('shared document opens with revision', shared.status === 200 && shared.body.revision === 0 && shared.body.content.includes('Hello'));
+
 console.log('\nGIT');
 // Make a change to observe: the file operations above net out to nothing.
 await j('/api/projects/demo/file', { method: 'PUT', body: { path: 'changed.py', content: 'print(1)\n' } });
@@ -125,6 +130,26 @@ const failed = await waitFor(async () => {
   return r.state === 'failed' ? r : null;
 });
 ok('failure keeps exit code', failed && failed.exit_code === 3, failed && failed.exit_code);
+
+console.log('\nDATASETS / TRAINING');
+const allSettings = (await j('/api/settings')).body;
+const datasetSource = `${allSettings.paths.projects}/${defaultNetwork}/demo`;
+const dataset = await j('/api/datasets', { method: 'POST', body: { name: 'smoke-data', version: 'v1', source: datasetSource } });
+ok('dataset registered and hashed', dataset.status === 201 && dataset.body.file_count > 0 && dataset.body.root_hash.length === 64, JSON.stringify(dataset.body));
+const datasets = (await j('/api/datasets')).body;
+ok('dataset has local placement', datasets[0].placements.some((p) => p.state === 'ready'));
+const advice = await j('/api/training/advisor', { method: 'POST', body: { parameters: 1000000000, bandwidth_mbps: 100, observed_step_seconds: 1, machines: ['a', 'b'] } });
+ok('bandwidth advisor warns honestly', advice.body.communication_percent > 50 && advice.body.verdict.includes('dominates'));
+const selfID = ov.node.id;
+const preflight = await j('/api/training/preflight', { method: 'POST', body: { project: 'demo', framework: 'shell', entry: 'echo rank-$PLAINSHOW_RANK', machines: [selfID] } });
+ok('training preflight builds rank plan', preflight.status === 200 && preflight.body.ready && preflight.body.plan.ranks.length === 1, JSON.stringify(preflight.body));
+const train = await j('/api/training/run', { method: 'POST', body: { project: 'demo', framework: 'shell', entry: 'echo rank-$PLAINSHOW_RANK', machines: [selfID], dataset: dataset.body.id } });
+ok('gang training launch accepted', train.status === 201 && train.body.ranks.length === 1, JSON.stringify(train.body));
+const trained = await waitFor(async () => {
+  const runs = (await j('/api/training')).body;
+  return runs.find((run) => run.id === train.body.id && ['succeeded', 'failed'].includes(run.state));
+});
+ok('training run completes as one lifecycle', trained && trained.state === 'succeeded', trained && trained.state);
 
 console.log('\nSTOP');
 const long = (await j('/api/jobs', { method: 'POST', body: { command: 'sleep 30' } })).body;
@@ -155,6 +180,25 @@ ok('invalid update repository refused', (await j('/api/settings', {
 console.log('\nDELETE PROJECT');
 ok('delete project', (await j('/api/projects/demo', { method: 'DELETE' })).status === 200);
 ok('gone', (await j('/api/projects/demo/tree')).status === 404);
+
+console.log('\nMULTIPLE NETWORKS');
+const beforeNetworks = (await j('/api/networks')).body;
+ok('initial installation has one network', beforeNetworks.networks.length === 1);
+const secondNetwork = await j('/api/networks', {
+  method: 'POST', body: { name: 'Friends lab' },
+});
+ok('create and activate a second network', secondNetwork.status === 201 &&
+  (await j('/api/networks')).body.active === secondNetwork.body.id);
+ok('projects are scoped to the active network', (await j('/api/projects')).body.length === 0);
+ok('same project name is valid in another network',
+  (await j('/api/projects', { method: 'POST', body: { name: 'demo' } })).status === 201);
+ok('network has this device',
+  (await j(`/api/networks/${secondNetwork.body.id}/nodes`)).body.length === 1);
+ok('network has its owner account',
+  (await j(`/api/networks/${secondNetwork.body.id}/members`)).body[0].role === 'owner');
+ok('switch back to original network',
+  (await j(`/api/networks/${defaultNetwork}/active`, { method: 'PUT' })).status === 200);
+ok('second network project is hidden after switching', (await j('/api/projects')).body.length === 0);
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

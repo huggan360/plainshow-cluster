@@ -1,7 +1,7 @@
 // Workspace — projects, files, the editor, and running what you just wrote.
 
 import { el, mount, ago, bytes, fileIcon, stateDot } from '../lib/ui.js';
-import { api, on, toast, modal, navigate, refresh, state } from '../lib/client.js';
+import { api, on, onConnection, send, isLive, toast, modal, navigate, refresh, state } from '../lib/client.js';
 import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
@@ -98,6 +98,7 @@ function newProject(after) {
 // --------------------------------------------------------- project view ----
 
 async function renderProject(host, name, initialPath) {
+	const availableDatasets = await api('/api/datasets');
     const page = el('div', { class: 'page' });
     mount(host, page);
 
@@ -107,7 +108,13 @@ async function renderProject(host, name, initialPath) {
         content: '',
         dirty: false,
         saving: false,
+		projectId: state.overview.projects.find((project) => project.name === name)?.id || '',
+		networkId: state.overview.active_network,
+		revision: 0,
+		nextBase: 0,
     };
+	const clientId = sessionStorage.getItem('plainshow.client') || crypto.randomUUID();
+	sessionStorage.setItem('plainshow.client', clientId);
 
     const treeBox = el('div', { class: 'tree' });
     const editorBox = el('div', { class: 'editor' });
@@ -177,7 +184,15 @@ async function renderProject(host, name, initialPath) {
     }
 
     input.addEventListener('input', () => {
-        ctx.content = input.value;
+		const before = ctx.content;
+		const after = input.value;
+		const edit = textEdit(before, after);
+		ctx.content = after;
+		if (ctx.path && edit) {
+			send('collab.op', { network_id: ctx.networkId, project_id: ctx.projectId,
+				project: name, path: ctx.path, client_id: clientId,
+				sequence: Date.now(), base_revision: ctx.nextBase++, ...edit }, true);
+		}
         setDirty(true);
         paint();
     });
@@ -213,10 +228,12 @@ async function renderProject(host, name, initialPath) {
     async function openFile(path) {
         if (ctx.dirty && !window.confirm('You have unsaved changes. Discard them?')) return;
         try {
-            const file = await api(
-                `/api/projects/${encodeURIComponent(name)}/file?path=${encodeURIComponent(path)}`);
+			const file = await api(
+				`/api/projects/${encodeURIComponent(name)}/collab?path=${encodeURIComponent(path)}`);
             ctx.path = path;
             ctx.content = file.content;
+			ctx.revision = file.revision;
+			ctx.nextBase = file.revision;
             input.value = file.content;
             pathLabel.textContent = path;
             setDirty(false);
@@ -226,6 +243,7 @@ async function renderProject(host, name, initialPath) {
             treeBox.querySelectorAll('.tree__item').forEach((node) => {
                 node.classList.toggle('tree__item--on', node.title === path);
             });
+			sendPresence();
         } catch (err) {
             toast(err.message, 'err');
         }
@@ -235,12 +253,9 @@ async function renderProject(host, name, initialPath) {
         if (!ctx.path || ctx.saving) return;
         ctx.saving = true;
         saveBtn.disabled = true;
-        try {
-            await api(`/api/projects/${encodeURIComponent(name)}/file`, {
-                method: 'PUT', body: { path: ctx.path, content: input.value },
-            });
+		try {
             setDirty(false);
-            toast(`Saved ${ctx.path}.`);
+			toast(isLive() ? `Synced ${ctx.path}.` : `${ctx.path} is queued and will sync when reconnected.`);
             await loadGit();
         } catch (err) {
             toast(err.message, 'err');
@@ -249,6 +264,15 @@ async function renderProject(host, name, initialPath) {
             saveBtn.disabled = !ctx.dirty;
         }
     }
+
+	function sendPresence() {
+		if (!ctx.path) return;
+		send('collab.presence', { network_id: ctx.networkId, project_id: ctx.projectId,
+			project: name, path: ctx.path, client_id: clientId,
+			name: state.overview.node.name, from: input.selectionStart, to: input.selectionEnd });
+	}
+	input.addEventListener('keyup', sendPresence);
+	input.addEventListener('click', sendPresence);
 
     mount(editorBox,
         el('div', { class: 'editor__bar' },
@@ -270,6 +294,12 @@ async function renderProject(host, name, initialPath) {
     const cmd = el('input', {
         class: 'input input--mono', placeholder: 'python main.py', value: 'python3 main.py',
     });
+	const machineSelect = el('select', { class: 'select' },
+		...state.overview.machines.filter((machine) => machine.roles.includes('worker')).map((machine) =>
+			el('option', { value: machine.node_id || machine.id },
+				`${machine.name}${machine.is_self ? ' · this machine' : ' · remote'}`)));
+	const datasetSelect = el('select', { class: 'select' }, el('option', { value: '' }, 'No dataset'),
+		...availableDatasets.map((dataset) => el('option', { value: dataset.id }, `${dataset.name} · ${dataset.version}`)));
     const runBtn = el('button', { class: 'btn btn--primary', onclick: run }, 'Run');
     const stopBtn = el('button', { class: 'btn btn--danger hide', onclick: stop }, 'Stop');
 
@@ -281,7 +311,9 @@ async function renderProject(host, name, initialPath) {
             `$ ${command}`));
         try {
             currentJob = await api('/api/jobs', {
-                method: 'POST', body: { project: name, command, title: command },
+                method: 'POST', body: { project: name, command, title: command,
+					machine_id: machineSelect.value,
+					datasets: datasetSelect.value ? [datasetSelect.value] : [] },
             });
             runBtn.classList.add('hide');
             stopBtn.classList.remove('hide');
@@ -339,8 +371,9 @@ async function renderProject(host, name, initialPath) {
                             el('label', { class: 'field__label' }, 'Command'), cmd),
                         el('div', { class: 'field', style: 'flex:0 0 150px;min-width:150px' },
                             el('label', { class: 'field__label' }, 'Run on'),
-                            el('select', { class: 'select', disabled: true },
-                                el('option', {}, state.overview.node.name))),
+							machineSelect),
+						el('div', { class: 'field', style: 'flex:0 0 180px;min-width:160px' },
+							el('label', { class: 'field__label' }, 'Dataset'), datasetSelect),
                         runBtn, stopBtn),
                     el('div', { style: 'margin-top:12px' }, outputBox)),
                 el('div', { class: 'panel' },
@@ -382,15 +415,49 @@ async function renderProject(host, name, initialPath) {
     });
 
     const offTree = on('tree.changed', (e) => { if (e.project === name) loadTree(); });
+	const offCollab = on('collab.op', (op) => {
+		if (op.project_id !== ctx.projectId || op.path !== ctx.path) return;
+		ctx.revision = Math.max(ctx.revision, op.revision);
+		ctx.nextBase = Math.max(ctx.nextBase, op.revision);
+		if (op.client_id === clientId) { if (ctx.dirty) setDirty(false); return; }
+		const chars = Array.from(ctx.content);
+		chars.splice(op.from, op.to - op.from, ...Array.from(op.insert));
+		ctx.content = chars.join(''); input.value = ctx.content; paint();
+	});
+	const offReject = on('collab.reject', async (rejected) => {
+		if (rejected.client_id !== clientId || rejected.project_id !== ctx.projectId || rejected.path !== ctx.path) return;
+		toast(`${rejected.error} Reloading the shared document.`, 'err'); await openFile(ctx.path);
+	});
+	const presence = new Map();
+	const presenceBox = el('span', { class: 'presence' });
+	pathLabel.after(presenceBox);
+	const offPresence = on('collab.presence', (peer) => {
+		if (peer.client_id === clientId || peer.project_id !== ctx.projectId || peer.path !== ctx.path) return;
+		presence.set(peer.client_id, peer.name || 'Collaborator');
+		mount(presenceBox, ...[...presence.values()].map((person) => el('span', { class: 'chip chip--cyan' }, person)));
+	});
+	const offlineStrip = el('div', { class: 'offline-strip hide' }, 'Offline · edits are saved here and will sync when reconnected');
+	page.prepend(offlineStrip);
+	const offConnection = onConnection((connected) => offlineStrip.classList.toggle('hide', connected));
 
     // Warn before losing unsaved work to a reload or a closed tab.
     const beforeUnload = (e) => { if (ctx.dirty) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', beforeUnload);
 
     return () => {
-        offLog(); offState(); offTree();
+		offLog(); offState(); offTree(); offCollab(); offReject(); offPresence(); offConnection();
         window.removeEventListener('beforeunload', beforeUnload);
     };
+}
+
+function textEdit(before, after) {
+	const a = Array.from(before), b = Array.from(after);
+	let from = 0;
+	while (from < a.length && from < b.length && a[from] === b[from]) from += 1;
+	let aEnd = a.length, bEnd = b.length;
+	while (aEnd > from && bEnd > from && a[aEnd - 1] === b[bEnd - 1]) { aEnd -= 1; bEnd -= 1; }
+	if (from === aEnd && from === bEnd) return null;
+	return { from, to: aEnd, insert: b.slice(from, bEnd).join('') };
 }
 
 // ------------------------------------------------------------- dialogues ---

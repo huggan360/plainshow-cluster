@@ -64,6 +64,26 @@ let socket = null;
 let attempts = 0;
 let live = false;
 const connectionListeners = new Set();
+const outboxKey = 'plainshow.cluster.outbox.v1';
+let outbox = [];
+try { outbox = JSON.parse(localStorage.getItem(outboxKey) || '[]'); } catch { outbox = []; }
+
+export function isLive() { return live; }
+
+/** send carries browser-originated collaboration and presence messages. Text
+ * edits are retained in localStorage while offline and replayed in order. */
+export function send(topic, data, durable = false) {
+    const message = { topic, data };
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+        return true;
+    }
+    if (durable) {
+        outbox.push(message);
+        localStorage.setItem(outboxKey, JSON.stringify(outbox));
+    }
+    return false;
+}
 
 /** onConnection observes whether the event stream is up. */
 export function onConnection(handler) {
@@ -86,6 +106,10 @@ export function connect() {
         if (attempts > 0) toast('Reconnected to the node.');
         attempts = 0;
         setLive(true);
+        const pending = outbox;
+        outbox = [];
+        localStorage.setItem(outboxKey, '[]');
+        pending.forEach((message) => socket.send(JSON.stringify(message)));
     };
     socket.onmessage = (event) => {
         let msg;

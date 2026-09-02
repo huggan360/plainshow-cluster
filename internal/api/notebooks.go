@@ -92,7 +92,7 @@ func (s *Server) createNotebook(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
-	_ = s.store.TouchProject(p.Name)
+	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("tree.changed", map[string]string{"project": p.Name, "path": notebookPath})
 	writeJSON(w, 201, map[string]string{"path": notebookPath})
 }

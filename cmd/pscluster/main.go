@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -20,9 +22,12 @@ import (
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/api"
+	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/dataset"
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
+	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/store"
@@ -75,7 +80,8 @@ func usage() {
 	fmt.Printf(`%s %s
 
   pscluster init [--root DIR] [--name NAME] [--cluster NAME]
-                 [--roles master,worker] [--port N] [--bind ADDR]
+                 [--roles master,worker] [--port N] [--peer-port N]
+                 [--bind ADDR] [--advertise HTTPS_URL]
       Create a node. Everything it stores lives under one directory.
 
   pscluster serve [--root DIR]
@@ -159,7 +165,20 @@ func openNode(f flags) (config.Layout, *config.Config, error) {
 		return l, nil, fmt.Errorf("no node at %s\n\n  create one:  pscluster init --root %s", l.Root, l.Root)
 	}
 	cfg, err := config.Load(l)
-	return l, cfg, err
+	if err != nil {
+		return l, nil, err
+	}
+	device, err := identity.LoadOrCreate(l.DeviceKey())
+	if err != nil {
+		return l, nil, fmt.Errorf("load device identity: %w", err)
+	}
+	if cfg.Node.ID != device.ID {
+		cfg.Node.ID = device.ID
+	}
+	if err := config.Save(l, cfg); err != nil {
+		return l, nil, err
+	}
+	return l, cfg, nil
 }
 
 // ----------------------------------------------------------------- init ----
@@ -185,6 +204,14 @@ func cmdInit(args []string) error {
 		}
 		cfg.Network.Port = n
 	}
+	if p := f.get("peer-port", ""); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("--peer-port must be a number between 1 and 65535, got %q", p)
+		}
+		cfg.Network.PeerPort = n
+	}
+	cfg.Network.Advertise = strings.TrimRight(f.get("advertise", cfg.Network.Advertise), "/")
 	if rs := f.get("roles", ""); rs != "" {
 		roles := []config.Role{}
 		for _, r := range strings.Split(rs, ",") {
@@ -203,6 +230,16 @@ func cmdInit(args []string) error {
 	if err := l.EnsureDirs(); err != nil {
 		return err
 	}
+	device, err := identity.LoadOrCreate(l.DeviceKey())
+	if err != nil {
+		return fmt.Errorf("create device identity: %w", err)
+	}
+	cfg.Node.ID = device.ID
+	cfg.EnsureMemberships()
+	_, fingerprint, err := identity.TLSCertificate(device, l.DeviceCert())
+	if err != nil {
+		return fmt.Errorf("create mesh certificate: %w", err)
+	}
 	if err := config.Save(l, cfg); err != nil {
 		return err
 	}
@@ -212,8 +249,11 @@ func cmdInit(args []string) error {
 		return err
 	}
 	defer st.Close()
-
 	info := sysinfo.Probe(l.Root)
+	if err := syncNetworks(st, cfg, device, fingerprint, info); err != nil {
+		return err
+	}
+
 	if err := st.UpsertMachine(store.Machine{
 		ID: cfg.Node.ID, Name: cfg.Node.Name, Roles: cfg.RoleNames(),
 		OS: info.OS, Arch: info.Arch, IsSelf: true, LastSeen: store.Now(),
@@ -235,6 +275,61 @@ func cmdInit(args []string) error {
 	fmt.Printf("\n  Everything this node stores is under that one directory.\n")
 	fmt.Printf("\n  Start it:  pscluster serve --root %s\n\n", l.Root)
 	return nil
+}
+
+// syncNetworks projects config memberships into the relational model. Config
+// is the local machine's authority; the database is the queryable directory
+// shared with the interface and, later, remote peers.
+func syncNetworks(st *store.Store, cfg *config.Config, device *identity.Device, fingerprint string, info sysinfo.Info) error {
+	account := store.Account{
+		ID: cfg.Node.ID, Username: cfg.Node.Name, DisplayName: cfg.Node.Name,
+		PublicKey: base64.RawURLEncoding.EncodeToString(device.Public),
+	}
+	if err := st.UpsertAccount(account); err != nil {
+		return err
+	}
+	for _, membership := range cfg.Memberships {
+		if err := st.UpsertNetwork(store.Network{
+			ID: membership.ID, Name: membership.Name, OwnerAccountID: account.ID,
+		}); err != nil {
+			return err
+		}
+		if err := st.AddNetworkMember(membership.ID, account.ID, store.NetworkOwner); err != nil {
+			return err
+		}
+		policyRaw, _ := json.Marshal(membership.Policy)
+		policy := map[string]any{}
+		_ = json.Unmarshal(policyRaw, &policy)
+		roles := make([]string, 0, len(membership.Roles))
+		for _, role := range membership.Roles {
+			roles = append(roles, string(role))
+		}
+		if err := st.UpsertNetworkNode(store.NetworkNode{
+			NetworkID: membership.ID, NodeID: cfg.Node.ID, Name: cfg.Node.Name,
+			Roles: roles, OS: info.OS, Arch: info.Arch,
+			PublicKey: account.PublicKey, Fingerprint: fingerprint,
+			Address: meshEndpoint(cfg), Policy: policy,
+			Capacity: map[string]any{
+				"cpu_cores": info.CPUCores, "ram_total_mb": info.RAMTotalMB,
+				"disk_total_gb": info.DiskTotalGB, "gpus": info.GPUs,
+			},
+			IsSelf: true, LastSeen: store.Now(),
+		}); err != nil {
+			return err
+		}
+	}
+	return st.AssignProjectsToNetwork(cfg.ActiveNetwork)
+}
+
+func meshEndpoint(cfg *config.Config) string {
+	if endpoint := strings.TrimSpace(cfg.Network.Advertise); endpoint != "" {
+		return strings.TrimRight(endpoint, "/")
+	}
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "localhost"
+	}
+	return "https://" + host + ":" + strconv.Itoa(cfg.Network.PeerPort)
 }
 
 func humanMB(mb int) string {
@@ -273,6 +368,13 @@ func cmdServe(args []string) error {
 	if b := f.get("bind", ""); b != "" {
 		cfg.Network.Bind = b
 	}
+	if p := f.get("peer-port", ""); p != "" {
+		n, convErr := strconv.Atoi(p)
+		if convErr != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("--peer-port must be a number between 1 and 65535, got %q", p)
+		}
+		cfg.Network.PeerPort = n
+	}
 	if err := l.EnsureDirs(); err != nil {
 		return err
 	}
@@ -282,6 +384,18 @@ func cmdServe(args []string) error {
 		return err
 	}
 	defer st.Close()
+	device, err := identity.LoadOrCreate(l.DeviceKey())
+	if err != nil {
+		return err
+	}
+	info := sysinfo.Probe(l.Root)
+	certificate, fingerprint, err := identity.TLSCertificate(device, l.DeviceCert())
+	if err != nil {
+		return fmt.Errorf("load mesh certificate: %w", err)
+	}
+	if err := syncNetworks(st, cfg, device, fingerprint, info); err != nil {
+		return err
+	}
 
 	// A job cannot still be running if the daemon supervising it is not, so
 	// anything left mid-flight by an unclean shutdown is closed out honestly.
@@ -289,7 +403,6 @@ func cmdServe(args []string) error {
 		log.Printf("recovered %d job(s) interrupted by a previous shutdown", n)
 	}
 
-	info := sysinfo.Probe(l.Root)
 	_ = st.UpsertMachine(store.Machine{
 		ID: cfg.Node.ID, Name: cfg.Node.Name, Roles: cfg.RoleNames(),
 		OS: info.OS, Arch: info.Arch, IsSelf: true, LastSeen: store.Now(),
@@ -299,9 +412,10 @@ func cmdServe(args []string) error {
 	sup := jobs.NewSupervisor(st, hub, l, cfg)
 	notebooks := notebook.NewManager()
 	defer notebooks.Close()
+	collaboration := collab.New(st)
+	datasets := dataset.New(l, st)
 	up := updater.New(cfg, l, hub)
-
-	srv := api.New(cfg, l, st, hub, sup, notebooks, up, web.Assets)
+	srv := api.New(cfg, l, st, hub, sup, notebooks, collaboration, datasets, up, device, fingerprint, web.Assets)
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
@@ -322,8 +436,9 @@ func cmdServe(args []string) error {
 		fmt.Printf("  Ctrl-C to stop.\n\n")
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() { errCh <- srv.ListenAndServe(ctx, ready) }()
+	go func() { errCh <- srv.ListenAndServeMesh(ctx, certificate) }()
 
 	select {
 	case err := <-errCh:
@@ -438,12 +553,15 @@ func cmdRun(args []string) error {
 	command := strings.Join(f.rest, " ")
 	req := jobs.Request{Kind: "script", Command: command, Workdir: l.Root}
 	if name := f.get("project", ""); name != "" {
-		p, err := st.ProjectByName(name)
+		p, err := st.ProjectByNameInNetwork(cfg.ActiveNetwork, name)
 		if err != nil {
 			return fmt.Errorf("no project called %q", name)
 		}
 		req.ProjectID, req.Project = p.ID, p.Name
-		req.Workdir = filepath.Join(l.Projects(), p.Name)
+		req.Workdir = filepath.Join(l.Projects(), p.NetworkID, p.Name)
+		if _, statErr := os.Stat(req.Workdir); errors.Is(statErr, os.ErrNotExist) {
+			req.Workdir = filepath.Join(l.Projects(), p.Name)
+		}
 	}
 
 	sub := hub.Subscribe()
@@ -568,7 +686,7 @@ func configSet(c *config.Config, key, value string) error {
 		}
 		c.Node.Name = value
 	case "cluster.name":
-		c.Cluster.Name = value
+		c.UpdateActiveMembership(func(m *config.MembershipConfig) { m.Name = value })
 	case "network.bind":
 		c.Network.Bind = value
 	case "network.port":
@@ -586,7 +704,7 @@ func configSet(c *config.Config, key, value string) error {
 			}
 			roles = append(roles, role)
 		}
-		c.Node.Roles = roles
+		c.UpdateActiveMembership(func(m *config.MembershipConfig) { m.Roles = roles })
 	case "worker.enabled":
 		b, err := parseBool()
 		if err != nil {

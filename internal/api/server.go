@@ -19,39 +19,57 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/dataset"
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
+	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
+	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/training"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
 
 // Server holds everything a request might need.
 type Server struct {
-	cfg       *config.Config
-	layout    config.Layout
-	store     *store.Store
-	hub       *events.Hub
-	sup       *jobs.Supervisor
-	notebooks *notebook.Manager
-	updater   *updater.Updater
-	web       fs.FS
+	cfg           *config.Config
+	layout        config.Layout
+	store         *store.Store
+	hub           *events.Hub
+	sup           *jobs.Supervisor
+	notebooks     *notebook.Manager
+	collab        *collab.Manager
+	datasets      *dataset.Manager
+	updater       *updater.Updater
+	device        *identity.Device
+	fingerprint   string
+	remoteMu      sync.RWMutex
+	remoteClients map[string]*mesh.Client
+	remoteLogs    map[string][]jobs.LogLine
+	reservations  *training.Reservations
+	web           fs.FS
 }
 
 // New builds a server. web is the embedded interface, rooted at its index.html.
 func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
-	sup *jobs.Supervisor, notebooks *notebook.Manager, up *updater.Updater, web fs.FS) *Server {
+	sup *jobs.Supervisor, notebooks *notebook.Manager, collaboration *collab.Manager,
+	datasets *dataset.Manager, up *updater.Updater,
+	device *identity.Device, fingerprint string, web fs.FS) *Server {
 	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
-		notebooks: notebooks, updater: up, web: web}
+		notebooks: notebooks, collab: collaboration, datasets: datasets, updater: up, device: device, fingerprint: fingerprint,
+		remoteClients: make(map[string]*mesh.Client), remoteLogs: make(map[string][]jobs.LogLine),
+		reservations: training.NewReservations(), web: web}
 }
 
 // Handler builds the route table.
@@ -61,13 +79,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/overview", s.getOverview)
 	mux.HandleFunc("GET /api/sysinfo", s.getSysinfo)
 	mux.HandleFunc("GET /api/machines", s.getMachines)
+	mux.HandleFunc("GET /api/networks", s.listNetworks)
+	mux.HandleFunc("POST /api/networks", s.createNetwork)
+	mux.HandleFunc("PUT /api/networks/{id}/active", s.activateNetwork)
+	mux.HandleFunc("GET /api/networks/{id}/nodes", s.networkNodes)
+	mux.HandleFunc("GET /api/networks/{id}/members", s.networkMembers)
+	mux.HandleFunc("PUT /api/networks/{id}/policy", s.updateNetworkPolicy)
+	mux.HandleFunc("POST /api/networks/{id}/invites", s.createNetworkInvite)
+	mux.HandleFunc("POST /api/networks/join", s.joinNetwork)
 
 	mux.HandleFunc("GET /api/projects", s.listProjects)
+	mux.HandleFunc("GET /api/datasets", s.listDatasets)
+	mux.HandleFunc("POST /api/datasets", s.registerDataset)
+	mux.HandleFunc("POST /api/datasets/{id}/materialize", s.materializeDataset)
+	mux.HandleFunc("GET /api/training", s.listTrainingRuns)
+	mux.HandleFunc("POST /api/training/preflight", s.trainingPreflight)
+	mux.HandleFunc("POST /api/training/advisor", s.trainingAdvice)
+	mux.HandleFunc("POST /api/training/run", s.startTraining)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("DELETE /api/projects/{name}", s.deleteProject)
 	mux.HandleFunc("GET /api/projects/{name}/tree", s.projectTree)
 	mux.HandleFunc("GET /api/projects/{name}/file", s.readFile)
 	mux.HandleFunc("PUT /api/projects/{name}/file", s.writeFile)
+	mux.HandleFunc("GET /api/projects/{name}/collab", s.openCollabDocument)
 	mux.HandleFunc("POST /api/projects/{name}/dir", s.createDir)
 	mux.HandleFunc("POST /api/projects/{name}/rename", s.renameEntry)
 	mux.HandleFunc("DELETE /api/projects/{name}/entry", s.deleteEntry)
@@ -171,22 +205,34 @@ func fsError(w http.ResponseWriter, err error) {
 
 // project resolves the named project to a rooted filesystem view.
 func (s *Server) project(name string) (store.Project, projectfs.Project, error) {
-	p, err := s.store.ProjectByName(name)
+	p, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, name)
 	if err != nil {
 		return p, projectfs.Project{}, err
 	}
-	return p, projectfs.New(filepath.Join(s.layout.Projects(), p.Name)), nil
+	return p, projectfs.New(s.projectDir(p)), nil
+}
+
+func (s *Server) projectDir(p store.Project) string {
+	scoped := filepath.Join(s.layout.Projects(), p.NetworkID, p.Name)
+	if _, err := os.Stat(scoped); err == nil {
+		return scoped
+	}
+	legacy := filepath.Join(s.layout.Projects(), p.Name)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return scoped
 }
 
 // ------------------------------------------------------------- overview ----
 
 func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
-	machines, err := s.store.Machines()
+	machines, err := s.store.NetworkNodes(s.cfg.ActiveNetwork)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	projects, err := s.store.Projects()
+	projects, err := s.store.ProjectsInNetwork(s.cfg.ActiveNetwork)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -201,6 +247,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	networks, _ := s.store.Networks(s.cfg.Node.ID)
 	writeJSON(w, 200, map[string]any{
 		"cluster": map[string]string{
 			"id":   s.cfg.Cluster.ID,
@@ -212,15 +259,17 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 			"roles": s.cfg.RoleNames(),
 			"root":  s.layout.Root,
 		},
-		"version":       version.Version,
-		"machines":      machines,
-		"projects":      projects,
-		"active_jobs":   active,
-		"recent_jobs":   recent,
-		"system":        sysinfo.Probe(s.layout.Root),
-		"git_available": gitrepo.Available(),
-		"github":        map[string]bool{"connected": s.tokenStore().Connected()},
-		"update":        s.updater.Status(),
+		"version":        version.Version,
+		"networks":       networks,
+		"active_network": s.cfg.ActiveNetwork,
+		"machines":       machines,
+		"projects":       projects,
+		"active_jobs":    active,
+		"recent_jobs":    recent,
+		"system":         sysinfo.Probe(s.layout.Root),
+		"git_available":  gitrepo.Available(),
+		"github":         map[string]bool{"connected": s.tokenStore().Connected()},
+		"update":         s.updater.Status(),
 	})
 }
 
@@ -229,7 +278,7 @@ func (s *Server) getSysinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getMachines(w http.ResponseWriter, r *http.Request) {
-	machines, err := s.store.Machines()
+	machines, err := s.store.NetworkNodes(s.cfg.ActiveNetwork)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -240,7 +289,7 @@ func (s *Server) getMachines(w http.ResponseWriter, r *http.Request) {
 // ------------------------------------------------------------- projects ----
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.store.Projects()
+	projects, err := s.store.ProjectsInNetwork(s.cfg.ActiveNetwork)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -262,18 +311,19 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Project names use letters, numbers, dashes and underscores, and cannot start with a dot.")
 		return
 	}
-	if _, err := s.store.ProjectByName(body.Name); err == nil {
+	if _, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, body.Name); err == nil {
 		fail(w, 409, fmt.Sprintf("A project called %q already exists.", body.Name))
 		return
 	}
 
-	dir := filepath.Join(s.layout.Projects(), body.Name)
+	p := store.Project{ID: config.NewID(), NetworkID: s.cfg.ActiveNetwork,
+		Name: body.Name, Description: body.Description}
+	dir := s.projectDir(p)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not create the project directory: %v", err))
 		return
 	}
 
-	p := store.Project{ID: config.NewID(), Name: body.Name, Description: body.Description}
 	if err := s.store.CreateProject(&p); err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -307,11 +357,11 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	// Remove files first: if that fails the row survives, so the project is
 	// still visible and can be retried rather than silently orphaned on disk.
-	if err := os.RemoveAll(filepath.Join(s.layout.Projects(), p.Name)); err != nil {
+	if err := os.RemoveAll(s.projectDir(p)); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not remove the project files: %v", err))
 		return
 	}
-	if err := s.store.DeleteProject(p.Name); err != nil {
+	if err := s.store.DeleteProjectID(p.ID); err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
@@ -371,7 +421,9 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
-	_ = s.store.TouchProject(name)
+	if p, _, err := s.project(name); err == nil {
+		_ = s.store.TouchProjectID(p.ID)
+	}
 	s.hub.Publish("file.saved", map[string]string{"project": name, "path": body.Path})
 	writeJSON(w, 200, map[string]string{"status": "saved"})
 }
@@ -451,7 +503,7 @@ func (s *Server) gitState(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	changes, err := repo.Status()
 	if err != nil {
 		fail(w, 500, err.Error())
@@ -497,7 +549,7 @@ func (s *Server) gitCommit(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	repo := gitrepo.Open(filepath.Join(s.layout.Projects(), p.Name))
+	repo := gitrepo.Open(s.projectDir(p))
 	committed, err := repo.Commit(body.Message)
 	if err != nil {
 		fail(w, 400, err.Error())
@@ -525,10 +577,12 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Project string `json:"project"`
-		Command string `json:"command"`
-		Kind    string `json:"kind"`
-		Title   string `json:"title"`
+		Project  string   `json:"project"`
+		Command  string   `json:"command"`
+		Kind     string   `json:"kind"`
+		Title    string   `json:"title"`
+		Machine  string   `json:"machine_id"`
+		Datasets []string `json:"datasets"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
@@ -551,7 +605,96 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		}
 		req.ProjectID = p.ID
 		req.Project = p.Name
-		req.Workdir = filepath.Join(s.layout.Projects(), p.Name)
+		req.Workdir = s.projectDir(p)
+	}
+	if body.Machine != "" && body.Machine != s.cfg.Node.ID {
+		if req.ProjectID == "" {
+			fail(w, 400, "Remote jobs must belong to a project so its files can be transferred.")
+			return
+		}
+		p, _, _ := s.project(body.Project)
+		node, err := s.store.NetworkNode(s.cfg.ActiveNetwork, body.Machine)
+		if err != nil {
+			fail(w, 404, "No such machine in this network.")
+			return
+		}
+		client, err := s.clientForNode(s.cfg.ActiveNetwork, body.Machine)
+		if err != nil {
+			fail(w, 409, err.Error())
+			return
+		}
+		archive, err := mesh.ArchiveDir(s.projectDir(p))
+		if err != nil {
+			fail(w, 500, "Could not prepare project: "+err.Error())
+			return
+		}
+		environment := map[string]string{}
+		datasetPaths := []string{}
+		for _, datasetID := range body.Datasets {
+			dataset, err := s.store.Dataset(datasetID)
+			if err != nil || dataset.NetworkID != s.cfg.ActiveNetwork {
+				fail(w, 404, "A requested dataset does not exist in this network.")
+				return
+			}
+			chunks, err := s.datasets.Export(dataset)
+			if err != nil {
+				fail(w, 500, "Could not read dataset: "+err.Error())
+				return
+			}
+			var ready struct {
+				Path string `json:"path"`
+			}
+			if err := client.JSON("POST", "/mesh/v1/datasets/sync", datasetSyncRequest{Dataset: dataset, Manifest: dataset.Manifest, Chunks: chunks}, &ready, true); err != nil {
+				fail(w, 502, "Could not prepare dataset on worker: "+err.Error())
+				return
+			}
+			datasetPaths = append(datasetPaths, ready.Path)
+			_ = s.store.SetDatasetPlacement(store.DatasetPlacement{DatasetID: dataset.ID, NodeID: node.NodeID, State: "ready", BytesDone: dataset.SizeBytes})
+		}
+		if len(datasetPaths) > 0 {
+			environment["PLAINSHOW_DATASET_DIR"] = datasetPaths[0]
+			environment["PLAINSHOW_DATASET_DIRS"] = strings.Join(datasetPaths, ":")
+		}
+		var remote store.Job
+		err = client.JSON("POST", "/mesh/v1/jobs", remoteJobRequest{ProjectID: p.ID,
+			Project: p.Name, Description: p.Description, Kind: body.Kind, Title: body.Title,
+			Command: body.Command, Archive: archive, Environment: environment}, &remote, true)
+		if err != nil {
+			fail(w, 502, "Worker refused the job: "+err.Error())
+			return
+		}
+		remote.ProjectID, remote.Project = p.ID, p.Name
+		remote.MachineID, remote.Machine = node.NodeID, node.Name
+		_ = s.store.UpsertMachine(store.Machine{ID: node.NodeID, Name: node.Name, Roles: node.Roles,
+			OS: node.OS, Arch: node.Arch, Address: node.Address, LastSeen: store.Now()})
+		if err := s.store.CreateRemoteJob(remote); err != nil {
+			fail(w, 500, err.Error())
+			return
+		}
+		s.remoteMu.Lock()
+		s.remoteClients[remote.ID] = client
+		s.remoteLogs[remote.ID] = []jobs.LogLine{}
+		s.remoteMu.Unlock()
+		go s.monitorRemoteJob(s.cfg.ActiveNetwork, node.NodeID, client, remote)
+		writeJSON(w, 201, remote)
+		return
+	}
+	if len(body.Datasets) > 0 {
+		paths := []string{}
+		for _, id := range body.Datasets {
+			dataset, err := s.store.Dataset(id)
+			if err != nil || dataset.NetworkID != s.cfg.ActiveNetwork {
+				fail(w, 404, "A requested dataset does not exist in this network.")
+				return
+			}
+			target := filepath.Join(s.layout.Datasets(), "materialized", id)
+			if err := s.datasets.Materialize(dataset, target); err != nil {
+				fail(w, 500, err.Error())
+				return
+			}
+			paths = append(paths, target)
+		}
+		req.Env = map[string]string{"PLAINSHOW_DATASET_DIR": paths[0], "PLAINSHOW_DATASET_DIRS": strings.Join(paths, ":")}
 	}
 
 	job, err := s.sup.Start(req)
@@ -583,10 +726,22 @@ func (s *Server) getJobLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if lines, ok := s.remoteTail(id, limit); ok {
+		writeJSON(w, 200, lines)
+		return
+	}
 	writeJSON(w, 200, s.sup.Tail(id, limit))
 }
 
 func (s *Server) stopJob(w http.ResponseWriter, r *http.Request) {
+	if client, ok := s.remoteClient(r.PathValue("id")); ok {
+		if err := client.JSON("POST", "/mesh/v1/jobs/"+r.PathValue("id")+"/stop", nil, nil, true); err != nil {
+			fail(w, 409, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "stopping"})
+		return
+	}
 	if err := s.sup.Stop(r.PathValue("id")); err != nil {
 		fail(w, 409, err.Error())
 		return
@@ -598,13 +753,15 @@ func (s *Server) stopJob(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"node":    s.cfg.Node,
-		"cluster": s.cfg.Cluster,
-		"network": s.cfg.Network,
-		"worker":  s.cfg.Worker,
-		"update":  s.cfg.Update,
-		"root":    s.layout.Root,
-		"version": version.Version,
+		"node":           s.cfg.Node,
+		"cluster":        s.cfg.Cluster,
+		"memberships":    s.cfg.Memberships,
+		"active_network": s.cfg.ActiveNetwork,
+		"network":        s.cfg.Network,
+		"worker":         s.cfg.Worker,
+		"update":         s.cfg.Update,
+		"root":           s.layout.Root,
+		"version":        version.Version,
 		"paths": map[string]string{
 			"config":    s.layout.ConfigFile(),
 			"database":  s.layout.Database(),
@@ -686,17 +843,19 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 
 	// A dead peer is only detectable by a failed write or a missed pong, so
 	// read deadlines are refreshed by pongs and the writer pings periodically.
-	conn.SetReadLimit(4096)
+	conn.SetReadLimit(2 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	})
 	go func() {
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
 				sub.Close()
 				return
 			}
+			s.handleClientEvent(raw)
 		}
 	}()
 

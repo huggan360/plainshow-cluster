@@ -142,11 +142,24 @@ web/               the interface, embedded
 scripts/           checks a compiler cannot do
 ```
 
-## Status
+## Current alpha status
 
-Working today: single machine, projects, file tree, editor, running commands
-with live output, job history, host and GPU telemetry, git history, worker
-policy.
+Working now: the complete single-machine workspace, persistent Python
+notebooks, GitHub project/team flows, multiple independent network memberships,
+single-use join codes, pinned TLS and Ed25519-authenticated peer requests,
+project transfer, remote jobs with live logs, revisioned collaborative editing
+with offline replay, immutable content-addressed datasets, worker placement,
+gang reservations, PyTorch `torchrun` plans, checkpoints, and a bandwidth
+advisor. The interface uses the same visual language as the existing Plainshow
+console and is embedded in the binary.
 
-Next: joining a second machine over an encrypted overlay network, then real-time
-collaborative editing, then notebooks, datasets and distributed training.
+The encrypted direct connection works on a LAN, VPN, or with an address that
+both machines can reach. Fully automatic traversal between arbitrary home
+networks still needs the deferred always-on controller/relay phase. The
+distributed launcher is implemented and its lifecycle is tested with local and
+two-node integration runs; a real multi-GPU PyTorch run still needs validation
+on CUDA machines before the Phase 5 alpha is published.
+
+One installation can belong to several networks. Each membership has its own
+projects, accounts, machines, roles and worker policy, and the active network is
+selected from the top bar.

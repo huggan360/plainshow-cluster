@@ -65,6 +65,11 @@ func (s *Store) migrate() error {
 		// interface can show it without shelling out to git; the live remote
 		// still wins when the two disagree.
 		{"project", "repository", "TEXT NOT NULL DEFAULT ''"},
+		{"project", "network_id", "TEXT NOT NULL DEFAULT ''"},
+		{"network_node", "os", "TEXT NOT NULL DEFAULT ''"},
+		{"network_node", "arch", "TEXT NOT NULL DEFAULT ''"},
+		{"network_node", "capacity", "TEXT NOT NULL DEFAULT '{}'"},
+		{"network_node", "fingerprint", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, c := range columns {
 		has, err := s.hasColumn(c.table, c.column)
@@ -79,7 +84,47 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("%s: %w", stmt, err)
 		}
 	}
-	return nil
+	if err := s.migrateProjectScope(); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS project_network_idx
+        ON project (network_id, updated_at DESC)`)
+	return err
+}
+
+func (s *Store) migrateProjectScope() error {
+	const migration = "project-network-scope-v1"
+	var exists int
+	if err := s.db.QueryRow(`SELECT count(*) FROM schema_migration WHERE name=?`, migration).Scan(&exists); err != nil {
+		return err
+	}
+	if exists != 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`CREATE TABLE project_scoped (
+            id TEXT PRIMARY KEY, network_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '', repository TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(network_id, name))`,
+		`INSERT INTO project_scoped
+            (id,network_id,name,description,repository,created_at,updated_at)
+            SELECT id,network_id,name,description,repository,created_at,updated_at FROM project`,
+		`DROP TABLE project`,
+		`ALTER TABLE project_scoped RENAME TO project`,
+		`INSERT INTO schema_migration(name,applied_at) VALUES ('project-network-scope-v1', datetime('now'))`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // hasColumn reports whether a table already carries a column.
@@ -181,6 +226,7 @@ func (s *Store) Machines() ([]Machine, error) {
 // Project is a directory of code with a name.
 type Project struct {
 	ID          string `json:"id"`
+	NetworkID   string `json:"network_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Repository  string `json:"repository"`
@@ -194,16 +240,16 @@ func (s *Store) CreateProject(p *Project) error {
 	now := Now()
 	p.Created, p.Updated = now, now
 	_, err := s.db.Exec(`
-        INSERT INTO project (id, name, description, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Description, now, now)
+        INSERT INTO project (id, network_id, name, description, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)`,
+		p.ID, p.NetworkID, p.Name, p.Description, now, now)
 	return err
 }
 
 // Projects lists all projects, most recently touched first.
 func (s *Store) Projects() ([]Project, error) {
 	rows, err := s.db.Query(`
-        SELECT id, name, description, repository, created_at, updated_at
+		SELECT id, network_id, name, description, repository, created_at, updated_at
         FROM project ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -213,8 +259,29 @@ func (s *Store) Projects() ([]Project, error) {
 	out := []Project{}
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Repository,
+		if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository,
 			&p.Created, &p.Updated); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ProjectsInNetwork lists projects belonging to one independent network.
+func (s *Store) ProjectsInNetwork(networkID string) ([]Project, error) {
+	rows, err := s.db.Query(`
+        SELECT id, network_id, name, description, repository, created_at, updated_at
+        FROM project WHERE network_id=? ORDER BY updated_at DESC`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Project{}
+	for rows.Next() {
+		var p Project
+		if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description,
+			&p.Repository, &p.Created, &p.Updated); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -226,9 +293,21 @@ func (s *Store) Projects() ([]Project, error) {
 func (s *Store) ProjectByName(name string) (Project, error) {
 	var p Project
 	err := s.db.QueryRow(`
-        SELECT id, name, description, repository, created_at, updated_at
-        FROM project WHERE name = ?`, name).
-		Scan(&p.ID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
+		SELECT id, network_id, name, description, repository, created_at, updated_at
+		FROM project WHERE name = ?`, name).
+		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
+}
+
+func (s *Store) ProjectByNameInNetwork(networkID, name string) (Project, error) {
+	var p Project
+	err := s.db.QueryRow(`
+        SELECT id, network_id, name, description, repository, created_at, updated_at
+        FROM project WHERE network_id=? AND name=?`, networkID, name).
+		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -241,10 +320,21 @@ func (s *Store) TouchProject(name string) error {
 	return err
 }
 
+func (s *Store) TouchProjectID(id string) error {
+	_, err := s.db.Exec(`UPDATE project SET updated_at = ? WHERE id = ?`, Now(), id)
+	return err
+}
+
 // SetProjectRepository records which GitHub repository a project mirrors.
 func (s *Store) SetProjectRepository(name, repository string) error {
 	_, err := s.db.Exec(`UPDATE project SET repository = ?, updated_at = ? WHERE name = ?`,
 		repository, Now(), name)
+	return err
+}
+
+func (s *Store) SetProjectRepositoryID(id, repository string) error {
+	_, err := s.db.Exec(`UPDATE project SET repository = ?, updated_at = ? WHERE id = ?`,
+		repository, Now(), id)
 	return err
 }
 
@@ -259,6 +349,14 @@ func (s *Store) DeleteProject(name string) error {
 		return err
 	}
 	_, err = s.db.Exec(`DELETE FROM project WHERE name = ?`, name)
+	return err
+}
+
+func (s *Store) DeleteProjectID(id string) error {
+	if _, err := s.db.Exec(`DELETE FROM member WHERE project_id = ?`, id); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM project WHERE id = ?`, id)
 	return err
 }
 
@@ -307,6 +405,25 @@ func (s *Store) CreateJob(j Job) error {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, -1, ?)`,
 		j.ID, j.ProjectID, j.MachineID, j.Kind, j.Title, j.Command,
 		j.Workdir, JobQueued, Now())
+	return err
+}
+
+// CreateRemoteJob records a job whose process is supervised by another node.
+// Its ID is allocated by that worker so subsequent status and log requests use
+// one stable identifier on both sides of the mesh.
+func (s *Store) CreateRemoteJob(j Job) error {
+	_, err := s.db.Exec(`INSERT INTO job
+        (id,project_id,machine_id,kind,title,command,workdir,state,exit_code,created_at,started_at,ended_at,error)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.ProjectID, j.MachineID,
+		j.Kind, j.Title, j.Command, j.Workdir, j.State, j.ExitCode, j.Created,
+		j.Started, j.Ended, j.Error)
+	return err
+}
+
+// SyncRemoteJob refreshes the lifecycle fields mirrored from its worker.
+func (s *Store) SyncRemoteJob(j Job) error {
+	_, err := s.db.Exec(`UPDATE job SET state=?,exit_code=?,error=?,started_at=?,ended_at=? WHERE id=?`,
+		j.State, j.ExitCode, j.Error, j.Started, j.Ended, j.ID)
 	return err
 }
 
