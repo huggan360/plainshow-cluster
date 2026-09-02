@@ -11,10 +11,12 @@ import { renderJobs } from './views/jobs.js';
 import { renderMachines } from './views/machines.js';
 import { renderSettings } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
+import { renderNotebooks } from './views/notebooks.js';
 
 const ROUTES = [
     { id: 'home', label: 'Home', icon: '⌂', render: renderHome },
     { id: 'workspace', label: 'Workspace', icon: '◫', render: renderWorkspace },
+    { id: 'notebooks', label: 'Notebooks', icon: '▦', render: renderNotebooks },
     { id: 'jobs', label: 'Jobs', icon: '▤', render: renderJobs },
     { id: 'machines', label: 'Machines', icon: '▣', render: renderMachines },
     { id: 'github', label: 'GitHub', icon: '⑂', render: renderGitHub },

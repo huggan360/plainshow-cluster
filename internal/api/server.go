@@ -27,6 +27,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
+	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
@@ -36,20 +37,21 @@ import (
 
 // Server holds everything a request might need.
 type Server struct {
-	cfg     *config.Config
-	layout  config.Layout
-	store   *store.Store
-	hub     *events.Hub
-	sup     *jobs.Supervisor
-	updater *updater.Updater
-	web     fs.FS
+	cfg       *config.Config
+	layout    config.Layout
+	store     *store.Store
+	hub       *events.Hub
+	sup       *jobs.Supervisor
+	notebooks *notebook.Manager
+	updater   *updater.Updater
+	web       fs.FS
 }
 
 // New builds a server. web is the embedded interface, rooted at its index.html.
 func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
-	sup *jobs.Supervisor, up *updater.Updater, web fs.FS) *Server {
+	sup *jobs.Supervisor, notebooks *notebook.Manager, up *updater.Updater, web fs.FS) *Server {
 	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
-		updater: up, web: web}
+		notebooks: notebooks, updater: up, web: web}
 }
 
 // Handler builds the route table.
@@ -77,6 +79,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /api/jobs/{id}/logs", s.getJobLogs)
 	mux.HandleFunc("POST /api/jobs/{id}/stop", s.stopJob)
+
+	mux.HandleFunc("POST /api/projects/{name}/notebooks", s.createNotebook)
+	mux.HandleFunc("GET /api/projects/{name}/kernel", s.notebookStatus)
+	mux.HandleFunc("POST /api/projects/{name}/kernel/execute", s.executeNotebookCell)
+	mux.HandleFunc("POST /api/projects/{name}/kernel/interrupt", s.interruptNotebook)
+	mux.HandleFunc("POST /api/projects/{name}/kernel/restart", s.restartNotebook)
 
 	mux.HandleFunc("GET /api/projects/{name}/members", s.listMembers)
 	mux.HandleFunc("POST /api/projects/{name}/members", s.addMember)

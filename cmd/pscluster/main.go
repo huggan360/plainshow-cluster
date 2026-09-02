@@ -24,6 +24,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
+	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
@@ -296,9 +297,11 @@ func cmdServe(args []string) error {
 
 	hub := events.NewHub()
 	sup := jobs.NewSupervisor(st, hub, l, cfg)
+	notebooks := notebook.NewManager()
+	defer notebooks.Close()
 	up := updater.New(cfg, l, hub)
 
-	srv := api.New(cfg, l, st, hub, sup, up, web.Assets)
+	srv := api.New(cfg, l, st, hub, sup, notebooks, up, web.Assets)
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)

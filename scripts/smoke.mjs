@@ -78,6 +78,25 @@ ok('delete', (await j('/api/projects/demo/entry?path=a/b/renamed.py', { method: 
 const esc = await j('/api/projects/demo/file?path=../../../etc/passwd');
 ok('traversal read refused', esc.status === 404 || esc.status === 400, JSON.stringify(esc.body));
 
+console.log('\nNOTEBOOKS');
+const notebook = await j('/api/projects/demo/notebooks', {
+  method: 'POST', body: { path: 'notebooks/experiment.ipynb' },
+});
+ok('create standard notebook', notebook.status === 201 && notebook.body.path.endsWith('.ipynb'));
+const notebookFile = (await j(`/api/projects/demo/file?path=${encodeURIComponent(notebook.body.path)}`)).body;
+ok('notebook is nbformat 4', JSON.parse(notebookFile.content).nbformat === 4);
+ok('Python kernel is available', (await j('/api/projects/demo/kernel')).body.available === true);
+const cell1 = await j('/api/projects/demo/kernel/execute', {
+  method: 'POST', body: { code: 'answer = 6 * 7\nprint("set")' },
+});
+ok('notebook cell runs', cell1.status === 200 && cell1.body.outputs.some((o) => o.text === 'set'));
+const cell2 = await j('/api/projects/demo/kernel/execute', {
+  method: 'POST', body: { code: 'answer' },
+});
+ok('kernel keeps state between cells', cell2.body.outputs.some((o) => o.type === 'result' && o.text === '42'));
+ok('kernel restart succeeds',
+  (await j('/api/projects/demo/kernel/restart', { method: 'POST' })).status === 200);
+
 console.log('\nGIT');
 // Make a change to observe: the file operations above net out to nothing.
 await j('/api/projects/demo/file', { method: 'PUT', body: { path: 'changed.py', content: 'print(1)\n' } });
