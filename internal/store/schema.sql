@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS account (
     created_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS login_session (
+    token_hash TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS network (
     id               TEXT PRIMARY KEY,
     name             TEXT NOT NULL,
