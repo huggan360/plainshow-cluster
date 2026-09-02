@@ -20,6 +20,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 	"github.com/huggan360/plainshow-cluster/internal/tunnel"
 )
 
@@ -334,6 +335,25 @@ func (s *Server) remoteJobStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "stopping"})
+}
+
+// advertisedEndpoint is the address other machines should use to reach this
+// one.
+//
+// A tailnet address wins whenever there is one: it is stable, it works from
+// any network without a forwarded port, and it is the same address torch and
+// NCCL will use, so what the mesh proves reachable is what training will
+// actually use. Without tailscale this falls back to whatever the host
+// configured, which only works where the machines can already reach each other.
+func advertisedEndpointFor(cfg *config.Config, status tailnet.Status) string {
+	if status.Running && status.Self.Address != "" {
+		port := cfg.Network.PeerPort
+		if port == 0 {
+			port = 10000
+		}
+		return "https://" + net.JoinHostPort(status.Self.Address, strconv.Itoa(port))
+	}
+	return advertisedEndpoint(cfg)
 }
 
 func advertisedEndpoint(cfg *config.Config) string {

@@ -103,14 +103,9 @@ These are **not** approved designs. They are drift, recorded so they get paid
 down rather than copied. Each replaced something the original plan had already
 chosen correctly.
 
-1. **`internal/mesh` + `internal/tunnel` instead of Tailscale.** The whole
-   networking layer is ours: mTLS, signed requests, a reverse WebSocket tunnel.
-   It works for control traffic, and it **cannot** carry distributed training,
-   because NCCL is a separate process needing a real interface. Finishing it
-   properly means writing STUN, hole punching and a relay — weeks of work
-   reimplementing Tailscale badly. *Replace it:* depend on the tailscale daemon,
-   drive it with an auth key, read peer addresses from `tailscale status --json`.
-   Days, not weeks, and NCCL works across houses because the interface is real.
+1. **`internal/mesh` + `internal/tunnel` instead of Tailscale.** *Being paid
+   down now.* `internal/tailnet` drives the daemon and this machine already
+   advertises its tailnet address when it has one. See the migration below.
 2. **`internal/notebook` instead of `jupyter_server`.** A hand-written Python
    kernel. Files are real `.ipynb`, but there are no ipywidgets, no rich MIME
    output, no completion or inspection, and every one of those is free from the
@@ -176,7 +171,7 @@ Phases 0–5 are landed. What remains, in order:
 1. **Reliability pass on what exists.** Done: the collaboration write path,
    the sign-in gate, `internal/api` tests, the peer port, and the CLI commands
    for networks, invites, joining, GitHub and updates.
-2. **Phase 6 — networking, by adopting Tailscale.** Not by finishing ours.
+2. **Phase 6 — finish the Tailscale migration.** Steps 1 and 2 below are done. Not by finishing ours.
    Plainshow should require the tailscale daemon, bring it up with an auth key
    during join, and read peer addresses from `tailscale status --json`. That
    gives NAT traversal, key distribution, roaming and a relay fallback for
@@ -233,6 +228,45 @@ One subtlety worth keeping: **"connection refused" counts as reachable.** The
 rendezvous port has nothing listening until the run starts, so a refusal proves
 the route exists. Treating it as failure would refuse every correctly configured
 cluster.
+
+## The Tailscale migration — what is done and what is next
+
+We drive the daemon; we do not embed it. `internal/tailnet` shells out to
+`tailscale status --json` and `tailscale up`, and that is the entire integration
+surface. Nothing of Tailscale's is vendored, and Plainshow keeps its own
+identity, enrolment and permissions — we take the one thing it is better at.
+
+It has to be the real daemon rather than a library in this binary: torch and
+NCCL open their own sockets in their own processes and need an interface the
+kernel knows about. An in-process network stack would carry Plainshow's traffic
+and nothing else, which was never the traffic that was stuck.
+
+**Done**
+
+1. `internal/tailnet` — probe, status, peers, relayed-or-direct, `up` with an
+   auth key. Parsing is tested against real `tailscale status --json` shape.
+2. `GET /api/tailnet`, and joining advertises the tailnet address when there is
+   one, so the address the mesh proves reachable is the address training uses.
+
+**Next, in order**
+
+3. **Carry an auth key in the join code.** `mesh.Invite` gains an optional
+   tailscale auth key; `pscluster join` calls `tailnet.Up` before enrolling.
+   Joining a Plainshow network and joining its tailnet become one step.
+4. **Delete `internal/tunnel`.** It exists only to reach machines that cannot be
+   dialled. Once every machine has a tailnet address that stops being true, and
+   `clientForNode` goes back to simply dialling the peer. Remove the registry,
+   the dialer, the trusted-marker path in `mesh.Authenticate`, and `StartTunnels`.
+   **Do not delete it before step 3 ships** — until then it is the only way a
+   NATed worker is reachable at all.
+5. **Simplify `internal/mesh`.** Keep mTLS and request signing: they are cheap
+   and mean a stolen tailnet position still proves nothing. Drop everything that
+   exists to work around unreachability.
+6. **Relayed-link warning in the training preflight.** `tailnet` already reports
+   which peers are relayed. A relayed link is somebody else's bandwidth, and the
+   existing bandwidth advice should say so before a run starts.
+
+Steps 3–6 are roughly a week. The codebase gets smaller at every step.
 
 ## How a machine behind NAT is reached
 

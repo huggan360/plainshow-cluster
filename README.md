@@ -163,6 +163,12 @@ gang reservations, PyTorch `torchrun` plans, checkpoints, and a bandwidth
 advisor. The interface uses the same visual language as the existing Plainshow
 console and is embedded in the binary.
 
+Machines on different networks find each other through **tailscale**, which
+Plainshow drives rather than reimplements: install it, and joining a network
+signs this machine into the tailnet and records the address it got. That address
+is what training uses too, so a link the cluster proves reachable is the link
+NCCL will run over.
+
 A machine with no reachable address — an ordinary desktop behind NAT, or behind
 carrier-grade NAT — connects out to its coordinator and keeps that connection
 open, and work arrives back down it. No forwarded port, nothing configured on a

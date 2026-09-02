@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 )
 
 func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +49,7 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Endpoint == "" {
-		body.Endpoint = advertisedEndpoint(s.cfg)
+		body.Endpoint = advertisedEndpointFor(s.cfg, tailnet.Probe(r.Context()))
 	}
 	if body.Role == "" {
 		body.Role = store.NetworkMember
@@ -106,7 +108,7 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Endpoint == "" {
-		body.Endpoint = advertisedEndpoint(s.cfg)
+		body.Endpoint = advertisedEndpointFor(s.cfg, tailnet.Probe(r.Context()))
 	}
 	info := sysinfo.Probe(s.layout.Root)
 	client := mesh.NewClient(invite.Endpoint, invite.Fingerprint, invite.NetworkID, s.device)
@@ -324,8 +326,9 @@ func (s *Server) recordLocalMembership(membership config.MembershipConfig) error
 	return s.store.UpsertNetworkNode(store.NetworkNode{
 		NetworkID: membership.ID, NodeID: s.cfg.Node.ID, Name: s.cfg.Node.Name,
 		Roles: roles, OS: info.OS, Arch: info.Arch, PublicKey: public,
-		Fingerprint: s.fingerprint, Address: advertisedEndpoint(s.cfg),
-		Policy: policy, IsSelf: true, LastSeen: store.Now(),
+		Fingerprint: s.fingerprint,
+		Address:     advertisedEndpointFor(s.cfg, tailnet.Probe(context.Background())),
+		Policy:      policy, IsSelf: true, LastSeen: store.Now(),
 		Capacity: map[string]any{
 			"cpu_cores": info.CPUCores, "ram_total_mb": info.RAMTotalMB,
 			"disk_total_gb": info.DiskTotalGB, "gpus": info.GPUs,

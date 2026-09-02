@@ -101,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
 	mux.HandleFunc("GET /api/sysinfo", s.getSysinfo)
 	mux.HandleFunc("GET /api/machines", s.getMachines)
+	mux.HandleFunc("GET /api/tailnet", s.getTailnet)
 	mux.HandleFunc("GET /api/networks", s.listNetworks)
 	mux.HandleFunc("POST /api/networks", s.createNetwork)
 	mux.HandleFunc("PUT /api/networks/{id}/active", s.activateNetwork)
