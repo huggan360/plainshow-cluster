@@ -42,7 +42,9 @@ jobs:
         run: |
           set -eu
           version="${GITHUB_REF_NAME#v}"
-          for asset in pscluster-linux-amd64 pscluster-linux-arm64 checksums.txt; do
+          for asset in pscluster-linux-amd64 pscluster-linux-arm64 \
+                       pscluster-controller-linux-amd64 pscluster-controller-linux-arm64 \
+                       checksums.txt; do
             test -s "dist/$asset" || { echo "missing dist/$asset"; exit 1; }
           done
           # The binary must report the tag it was built from, or a node will
@@ -61,6 +63,8 @@ jobs:
           files: |
             dist/pscluster-linux-amd64
             dist/pscluster-linux-arm64
+            dist/pscluster-controller-linux-amd64
+            dist/pscluster-controller-linux-arm64
             dist/checksums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true

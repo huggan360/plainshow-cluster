@@ -81,6 +81,10 @@ pscluster join CODE [--endpoint URL]
 pscluster github [status | connect | disconnect]
 pscluster update [check | status | apply]
 pscluster version
+
+pscluster-controller init [--root DIR] [--name NAME] [--bind ADDR] [--port N]
+pscluster-controller serve [--root DIR]
+pscluster-controller status [--root DIR]
 ```
 
 The commands after `config` talk to this machine's own running daemon, so a
@@ -137,6 +141,10 @@ ThreadSanitizer refuses to start, which is why it is not part of `make check`.
 The interface is hand-written ES modules and CSS, embedded into the binary. What
 is served is exactly what is in `web/`. Typefaces are bundled too, so a node with
 no internet access renders identically to one with it.
+
+`make build` also produces `pscluster-controller`, the optional HTTPS service
+for live collaboration and cross-network overview. It has a separate root,
+identity, certificate and configuration, and it cannot run node jobs.
 
 ## Layout
 

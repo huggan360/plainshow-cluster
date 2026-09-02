@@ -1,9 +1,12 @@
 # Plainshow Cluster
 #
-# One binary. `make` builds it, `make check` is what CI runs.
+# `make` builds the device and the optional controller server. `make check` is
+# what CI runs.
 
-BINARY  := pscluster
-PKG     := ./cmd/pscluster
+BINARY            := pscluster
+PKG               := ./cmd/pscluster
+CONTROLLER_BINARY := pscluster-controller
+CONTROLLER_PKG    := ./cmd/pscluster-controller
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
@@ -14,10 +17,11 @@ LDFLAGS := -s -w \
 
 all: build
 
-## build: compile the binary for this machine
+## build: compile the device and controller binaries for this machine
 build: web
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
-	@echo "built ./$(BINARY)  $(VERSION)"
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(CONTROLLER_BINARY) $(CONTROLLER_PKG)
+	@echo "built ./$(BINARY) and ./$(CONTROLLER_BINARY)  $(VERSION)"
 
 ## web: verify the interface's module graph before embedding it
 web:
@@ -75,7 +79,9 @@ dist: web
 	@rm -rf dist && mkdir -p dist
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-amd64 $(PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
-	@cd dist && sha256sum $(BINARY)-* > checksums.txt
+	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-amd64 $(CONTROLLER_PKG)
+	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-arm64 $(CONTROLLER_PKG)
+	@cd dist && sha256sum *-linux-* > checksums.txt
 	@echo
 	@ls -lh dist/
 	@echo
@@ -103,4 +109,4 @@ run: build
 	./$(BINARY) serve --root ./.devnode
 
 clean:
-	rm -rf $(BINARY) dist .devnode .smokenode .smokepid
+	rm -rf $(BINARY) $(CONTROLLER_BINARY) dist .devnode .smokenode .smokepid

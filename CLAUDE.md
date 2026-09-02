@@ -48,8 +48,13 @@ These are settled. Do not quietly reverse them.
 
 Three things, and only one of them is required.
 
-**Account.** You register once. The account is your identity across every
-network you belong to, and it is what a device is enrolled *as*.
+**Account.** You register once with the Plainshow Account Server. It is the one
+intentional central authority in the system: a small service backed by SQLite,
+hosted on the Plainshow Raspberry Pi and deployed at a configured public URL
+(`clusteradmin.plainshow.se` for the main environment). It also provides a
+minimal global statistics and account-administration page. Networks and compute
+remain peer-to-peer; centralising login must not put project data, jobs, or peer
+traffic through this server.
 
 **Network.** A set of devices and people who work together. Anybody can create
 one; joining is a single-use code. A device can belong to several, and each
@@ -66,6 +71,13 @@ online — a web server, a VPS, a Pi — running a second, smaller program. It h
 the WebSocket that makes live collaborative editing possible, and serves a web
 overview of the networks it is attached to. It is configured with which networks
 it serves. It is **not** a device role and it runs no jobs.
+
+**Account Server** *(separate program, required for shared accounts).* One small
+global service stores accounts and session/registration metadata in its own
+SQLite database. This is an explicit exception to the no-canonical-holder
+design for account identity only. It never stores project files, datasets,
+artifacts, job payloads, or network traffic, and it is not the live-editing
+controller.
 
 ### Where project state lives
 
@@ -249,9 +261,9 @@ point of failure.
 A second binary, `cmd/pscluster-controller`. It runs no jobs and stores no
 project data. Live editing is the feature it adds; git works without it.
 
-4. **The binary and its config.** Which networks it serves, its own identity
-   keypair, listen address, TLS. Reuse `internal/config` layout rules — one
-   directory, nothing compiled in. *1d*
+4. ~~**The binary and its config.**~~ Done. `pscluster-controller` has its own
+   one-root config, identity keypair, pinned TLS certificate and HTTPS listener.
+   It creates none of the node's project, dataset, artifact, or job state.
 5. **Attaching to a network.** A network admin mints a controller token; the
    controller presents it and enrols as a non-device member. Devices learn the
    controller's address the same way they learn each other's. *1d*
@@ -263,13 +275,17 @@ project data. Live editing is the feature it adds; git works without it.
    networks: devices, jobs, projects. Reuses `web/` with a different data
    source. *2d*
 
-### C. Accounts across devices (≈3d)
+### C. Accounts across devices (revised: central account authority)
 
-8. **Account is a keypair, not a row.** Today the first person to open a node
-   claims it. Make an account an identity the person carries, so the same
-   account on a second device is the same person. *2d*
-9. **Sign in on a new device with an existing account** rather than creating a
-   fresh owner. *1d*
+8. **Plainshow Account Server.** Build a separate, lightweight service with its
+   own root and SQLite database for global accounts, registration, login, and
+   aggregate environment statistics. Its public URL is deployment config, not
+   compiled into the clients. The main deployment is
+   `clusteradmin.plainshow.se` on the Plainshow Raspberry Pi.
+9. **Nodes sign in through the Account Server.** Replace per-node account setup
+   with the central identity, while keeping a cached signed session so an
+   Account Server outage prevents new logins but does not stop existing jobs,
+   peer communication, or local git work.
 
 ### D. Networking (≈2.5d)
 
