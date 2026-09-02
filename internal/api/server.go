@@ -58,6 +58,7 @@ type Server struct {
 	remoteClients map[string]*mesh.Client
 	remoteLogs    map[string][]jobs.LogLine
 	reservations  *training.Reservations
+	localToken    string
 	web           fs.FS
 }
 
@@ -71,6 +72,10 @@ func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
 		remoteClients: make(map[string]*mesh.Client), remoteLogs: make(map[string][]jobs.LogLine),
 		reservations: training.NewReservations(), web: web}
 }
+
+// UseLocalToken lets the command line authenticate as the machine's owner
+// against its own daemon.
+func (s *Server) UseLocalToken(token string) { s.localToken = token }
 
 // Handler builds the route table.
 func (s *Server) Handler() http.Handler {

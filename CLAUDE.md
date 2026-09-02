@@ -130,10 +130,9 @@ scripts/           checks a compiler cannot do
 
 Phases 0–5 are landed. What remains, in order:
 
-1. **Reliability pass on what exists.** Mostly done: the collaboration write
-   path, the sign-in gate and `internal/api` tests have landed. Still open —
-   **the CLI has no commands for networks, invites, GitHub or updates** while
-   the API has all of them, so those flows are browser-only.
+1. **Reliability pass on what exists.** Done: the collaboration write path,
+   the sign-in gate, `internal/api` tests, the peer port, and the CLI commands
+   for networks, invites, joining, GitHub and updates.
 2. **Phase 6 — the always-on controller.** A stateless coordinator that gives
    NAT traversal: rendezvous (peers publish endpoints and fetch keys), relay
    (forward encrypted bytes when direct fails), and a signed directory record
@@ -144,6 +143,18 @@ Phases 0–5 are landed. What remains, in order:
    run on real GPUs. Expect to find CUDA/driver mismatch handling is wrong.
 4. **Phase 8 — release engineering.** Tagged releases with per-platform assets
    and checksums so the updater has something to update from; signed builds.
+
+## How the command line reaches the daemon
+
+`pscluster network`, `invite`, `join`, `github` and `update` drive the same HTTP
+API the browser does, rather than reaching into the database behind the running
+daemon's back. One implementation of joining a network, not two that drift.
+
+They authenticate with a token in `<root>/keys/cli.token` (0600), sent as a
+bearer header. It grants nothing new — anyone who can read that file can already
+read the database beside it — but it keeps a headless machine manageable after
+it has an owner account, without loosening the rules the browser is held to.
+There is no browser on a GPU box to sign in with.
 
 ## Traps found the hard way
 

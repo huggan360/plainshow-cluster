@@ -296,3 +296,77 @@ func TestAuthStatusShapes(t *testing.T) {
 		t.Error("the status response leaks the password hash")
 	}
 }
+
+// TestLocalTokenReachesTheAPI covers the command line's way in. Without it, a
+// headless machine becomes unmanageable the moment it gets an owner account —
+// there is no browser on a GPU box to sign in with.
+func TestLocalTokenReachesTheAPI(t *testing.T) {
+	srv, h := newTestServer(t)
+	srv.UseLocalToken("local-token-value")
+	post(t, h, "/api/auth/setup", `{"username":"hugo","password":"a-long-enough-password"}`, nil, nil)
+
+	if rec := get(t, h, "/api/protected", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a bare request was allowed: %d", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
+	req.Header.Set("Authorization", "Bearer local-token-value")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("the local token was refused: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWrongLocalTokenRefused(t *testing.T) {
+	srv, h := newTestServer(t)
+	srv.UseLocalToken("local-token-value")
+	post(t, h, "/api/auth/setup", `{"username":"hugo","password":"a-long-enough-password"}`, nil, nil)
+
+	for _, wrong := range []string{
+		"local-token-valu", "local-token-value-extra", "", "Bearer", "local-token-valuE",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
+		req.Header.Set("Authorization", "Bearer "+wrong)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("token %q was accepted: %d", wrong, rec.Code)
+		}
+	}
+}
+
+// TestLocalTokenWritesNeedNoOrigin: the command line is not a browser and sends
+// no Origin, so the cross-origin rule must not lock it out of its own daemon.
+func TestLocalTokenWritesNeedNoOrigin(t *testing.T) {
+	srv, h := newTestServer(t)
+	srv.UseLocalToken("local-token-value")
+	post(t, h, "/api/auth/setup", `{"username":"hugo","password":"a-long-enough-password"}`, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/protected", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer local-token-value")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("a command-line write was refused: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestNoLocalTokenMeansNoBypass: a server that was never given a token must not
+// accept an empty one.
+func TestNoLocalTokenMeansNoBypass(t *testing.T) {
+	_, h := newTestServer(t)
+	post(t, h, "/api/auth/setup", `{"username":"hugo","password":"a-long-enough-password"}`, nil, nil)
+
+	for _, header := range []string{"Bearer ", "Bearer", ""} {
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Authorization %q got in with no token configured: %d", header, rec.Code)
+		}
+	}
+}

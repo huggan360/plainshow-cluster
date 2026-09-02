@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -53,6 +54,19 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
+		// The command line presents the install root's local token instead of
+		// a session. Reading that file already implies read access to the
+		// database beside it, so this widens nothing — it just keeps the CLI
+		// working once the node has an owner, without loosening the rules the
+		// browser is held to.
+		if s.localToken != "" {
+			if presented, ok := bearerToken(r); ok &&
+				subtle.ConstantTimeCompare([]byte(presented), []byte(s.localToken)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		cookie, err := r.Cookie(sessionCookie)
 		if err != nil {
 			fail(w, http.StatusUnauthorized, "Sign in to continue.")
@@ -76,6 +90,16 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), authContextKey{}, account)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// bearerToken reads an Authorization: Bearer header.
+func bearerToken(r *http.Request) (string, bool) {
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(header[len(prefix):]), true
 }
 
 func safeMethod(method string) bool {

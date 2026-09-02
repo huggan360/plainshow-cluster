@@ -69,8 +69,18 @@ pscluster serve [--root DIR]
 pscluster status [--root DIR]
 pscluster run [--project NAME] <command...>
 pscluster config [show | get KEY | set KEY VALUE | path | root]
+
+pscluster network [list | use ID]
+pscluster invite [--role member] [--network ID]
+pscluster join CODE [--endpoint URL]
+pscluster github [status | connect | disconnect]
+pscluster update [check | status | apply]
 pscluster version
 ```
+
+The commands after `config` talk to this machine's own running daemon, so a
+headless worker can be joined and managed without a browser. They authenticate
+with a token inside the install root that only the owner can read.
 
 Nothing about a particular machine is compiled in. `init` probes rather than
 assumes: it picks the first free port upward from 9999, reads the hostname, and

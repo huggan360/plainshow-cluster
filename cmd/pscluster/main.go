@@ -60,6 +60,16 @@ func main() {
 		err = cmdRun(rest)
 	case "config":
 		err = cmdConfig(rest)
+	case "network", "networks":
+		err = cmdNetwork(rest)
+	case "invite":
+		err = cmdInvite(rest)
+	case "join":
+		err = cmdJoin(rest)
+	case "github":
+		err = cmdGitHub(rest)
+	case "update":
+		err = cmdUpdate(rest)
 	case "version", "--version", "-v":
 		fmt.Printf("%s %s (%s, %s)\n", version.Product, version.Version, version.Commit, config.Platform())
 	case "help", "--help", "-h":
@@ -95,6 +105,22 @@ func usage() {
 
   pscluster config [--root DIR] [get KEY | set KEY VALUE | path]
       Read or change settings.
+
+  pscluster network [list | use ID]
+      Show the networks this machine belongs to, or switch the active one.
+
+  pscluster invite [--role member] [--network ID]
+      Create a single-use join code for another machine.
+
+  pscluster join CODE [--endpoint URL]
+      Join a network with a code from another machine.
+
+  pscluster github [status | connect | disconnect]
+      Connect a GitHub account. connect reads the token from the terminal,
+      or from standard input when piped.
+
+  pscluster update [check | status | apply]
+      See whether a newer build is published, and install it.
 
   pscluster version
 
@@ -416,6 +442,14 @@ func cmdServe(args []string) error {
 	datasets := dataset.New(l, st)
 	up := updater.New(cfg, l, hub)
 	srv := api.New(cfg, l, st, hub, sup, notebooks, collaboration, datasets, up, device, fingerprint, web.Assets)
+
+	// The command line reaches this daemon with the install root's local token,
+	// which keeps it working once the node has an owner account.
+	if token, err := config.EnsureCLIToken(l); err != nil {
+		log.Printf("local token unavailable, the command line will not reach this node: %v", err)
+	} else {
+		srv.UseLocalToken(token)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
