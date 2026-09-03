@@ -5,7 +5,7 @@
 // binds to loopback, which is what makes the first run possible; this screen is
 // how it stops being that.
 
-import { el, mount } from '../lib/ui.js';
+import { el, mount, plainshowLogo } from '../lib/ui.js';
 import { api } from '../lib/client.js';
 
 /**
@@ -78,11 +78,7 @@ function card(firstRun, status, done, switchMode) {
     return el('main', { class: 'login-page' },
         el('div', { class: 'frame login-card' }, el('div', { class: 'frame__in' },
             el('div', { class: 'brand', style: 'padding:0 0 26px' },
-                el('span', { class: 'brand__mark' }),
-                el('span', {},
-                    el('span', { class: 'brand__word' },
-                        el('b', {}, 'plain'), el('span', {}, 'show')),
-                    el('span', { class: 'brand__sub' }, 'cluster'))),
+				plainshowLogo('cluster')),
 
             el('p', { class: 'page__eyebrow' },
 				status.central ? 'Plainshow account' : (firstRun ? 'First run' : 'Secure workspace')),

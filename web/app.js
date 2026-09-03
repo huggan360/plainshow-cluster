@@ -3,7 +3,7 @@
 // Everything shared with the views lives in lib/client.js, so the module graph
 // runs one way: app -> views -> client.
 
-import { el, mount, initials } from './lib/ui.js';
+import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized, toast } from './lib/client.js';
 import { renderHome } from './views/home.js';
 import { renderWorkspace } from './views/workspace.js';
@@ -85,11 +85,7 @@ function shell(overview) {
 
     const rail = el('aside', { class: 'rail', id: 'rail' },
         el('div', { class: 'brand' },
-            el('span', { class: 'brand__mark' }),
-            el('span', {},
-                el('span', { class: 'brand__word' },
-                    el('b', {}, 'plain'), el('span', {}, 'show')),
-                el('span', { class: 'brand__sub' }, 'cluster'))),
+			plainshowLogo('cluster')),
         el('nav', { class: 'nav' },
             el('p', { class: 'nav__label' }, 'Cluster'),
             ...ROUTES.map((r) => el('a', {

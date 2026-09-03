@@ -79,6 +79,13 @@ continue.
   file. External file replacement clears stale collaboration history, and
   operation sequences are monotonic so rapid edits cannot be mistaken for
   duplicate relay delivery.
+- Both node and enterprise interfaces now use the exact production PlainShow
+  folded-ribbon icon from `/opt/plainshow/public/brand/plainshow-icon.webp`,
+  embedded in every binary and guarded by its production SHA-256 in
+  `internal/brand/icon_test.go`. The old gradient-square and green-diamond
+  placeholders are gone. The enterprise page was rebuilt around the real
+  Plainshow typography, gradient wordmark, framed metrics, panels and responsive
+  spacing; it shares the node's bundled fonts and remains usable offline.
 
 ## Production deployment
 
@@ -119,8 +126,9 @@ this root is enterprise administrator/key-recovery access.
 - Enterprise HTTP registration/membership and a two-client collaboration relay
   are covered by `internal/accountserver/server_test.go`.
 - Duplicate collaboration delivery and controller authentication are tested.
-- `make smoke`: 75 passed, 0 failed, including streamed project upload,
-  download and collaboration-state refresh after external replacement.
+- `make smoke`: 76 passed, 0 failed, including the production brand asset,
+  streamed project upload, download and collaboration-state refresh after
+  external replacement.
 - All three local programs built successfully.
 - All three component installers were exercised against disposable roots.
 - Public HTTP, HTTPS, static assets, health and the Apache WebSocket route were

@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/huggan360/plainshow-cluster/internal/auth"
+	"github.com/huggan360/plainshow-cluster/internal/brand"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 )
 
@@ -47,6 +48,7 @@ func NewServer(config *Config, store *Store, web fs.FS) *Server {
 // administration endpoints.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /brand/plainshow-icon.webp", brand.ServeIcon)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
 	mux.HandleFunc("POST /api/auth/register", s.register)
 	mux.HandleFunc("POST /api/auth/login", s.login)
@@ -508,6 +510,9 @@ func securityHeaders(next http.Handler) http.Handler {
 func (s *Server) staticHandler() http.Handler {
 	files := http.FileServer(http.FS(s.web))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".css") || strings.HasSuffix(r.URL.Path, ".js") {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		if r.URL.Path == "/" {
 			raw, err := fs.ReadFile(s.web, "index.html")
 			if err != nil {
@@ -515,6 +520,7 @@ func (s *Server) staticHandler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
 			_, _ = w.Write(raw)
 			return
 		}

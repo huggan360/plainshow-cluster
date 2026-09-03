@@ -25,6 +25,12 @@ func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 	if index.Code != http.StatusOK || index.Body.String() != "admin" {
 		t.Fatalf("admin index = %d %q", index.Code, index.Body.String())
 	}
+	iconRequest := httptest.NewRequest(http.MethodGet, "/brand/plainshow-icon.webp", nil)
+	icon := httptest.NewRecorder()
+	server.ServeHTTP(icon, iconRequest)
+	if icon.Code != http.StatusOK || icon.Header().Get("Content-Type") != "image/webp" || icon.Body.Len() != 12510 {
+		t.Fatalf("brand icon = %d %q %d bytes", icon.Code, icon.Header().Get("Content-Type"), icon.Body.Len())
+	}
 
 	register := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
 		`{"username":"hugo","display_name":"Hugo","password":"a-long-enough-password","bootstrap_token":"bootstrap"}`))

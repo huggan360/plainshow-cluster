@@ -229,7 +229,9 @@ project transfer, remote jobs with live logs, revisioned collaborative editing
 with offline replay, immutable content-addressed datasets, worker placement,
 gang reservations, PyTorch `torchrun` plans, checkpoints, and a bandwidth
 advisor. The interface uses the same visual language as the existing Plainshow
-console and is embedded in the binary.
+console and is embedded in the binary. That includes the official folded-ribbon
+mark, Space Grotesk/IBM Plex Mono typography and the production gradient
+wordmark; no branding or typeface is fetched from the internet at runtime.
 
 The workspace is a lightweight Cowork IDE rather than a file viewer. It opens
 the starter file automatically, provides syntax-coloured editing with shared

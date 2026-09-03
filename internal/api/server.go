@@ -27,6 +27,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/huggan360/plainshow-cluster/internal/brand"
 	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/dataset"
@@ -92,6 +93,7 @@ func (s *Server) UseLocalToken(token string) { s.localToken = token }
 // Handler builds the route table.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /brand/plainshow-icon.webp", brand.ServeIcon)
 
 	mux.HandleFunc("GET /api/overview", s.getOverview)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)

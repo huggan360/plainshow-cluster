@@ -127,6 +127,20 @@ export function initials(name) {
         .map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '?';
 }
 
+/** plainshowLogo is the production mark and wordmark used by plainshow.se. */
+export function plainshowLogo(subtitle = '') {
+    return el('span', { class: 'brand-logo', 'aria-label': `PlainShow${subtitle ? ` ${subtitle}` : ''}` },
+        el('img', {
+            class: 'brand-logo__icon', src: '/brand/plainshow-icon.webp', alt: '',
+            'aria-hidden': 'true', decoding: 'async',
+        }),
+        el('span', { class: 'brand-logo__copy', 'aria-hidden': 'true' },
+            el('span', { class: 'brand-logo__word' },
+                el('span', { class: 'brand-logo__plain' }, 'plain'),
+                el('span', { class: 'brand-logo__show' }, 'show')),
+            subtitle ? el('span', { class: 'brand-logo__sub' }, subtitle) : null));
+}
+
 /** icon returns the character used for a file or folder in the tree. */
 export function fileIcon(name, isDir) {
     if (isDir) return '▸';
