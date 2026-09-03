@@ -90,8 +90,8 @@ HTTP redirects to HTTPS, the public health endpoint and embedded page return
 success through Cloudflare, and an attempted WebSocket upgrade reaches the relay
 and is correctly rejected without a network token. The dedicated ECDSA Let's
 Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
-The deployed program reports revision `3b29fde` on Linux arm64. No account has
-been created yet, so the human handoff is:
+The deployed Linux arm64 program includes the `3b29fde` admin-index and log
+ordering fixes. No account has been created yet, so the human handoff is:
 
 ```sh
 sudo cat /opt/plainshow-cluster-admin/bootstrap.txt
@@ -114,6 +114,10 @@ this root is enterprise administrator/key-recovery access.
 - All three component installers were exercised against disposable roots.
 - Public HTTP, HTTPS, static assets, health and the Apache WebSocket route were
   exercised against `clusteradmin.plainshow.se` after deployment.
+- A real-process integration with one disposable account server and two node
+  daemons registered two global accounts, minted/consumed an invitation,
+  completed the pinned-TLS peer join, transferred the management key and
+  reported two members/two devices in the enterprise registry.
 
 No dependency was installed during this pass. This Pi does not have
 `jupyter_server`, so smoke covered the actionable unavailable-tool path.

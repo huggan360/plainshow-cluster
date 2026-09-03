@@ -247,7 +247,7 @@ All product paths below are implemented. The unchecked items require external
 hardware or a published release; they are release validation, not missing
 programs.
 
-### A. Finish the peer model (≈3d)
+### A. Completed peer model
 
 1. ~~**Normalise stored roles.**~~ Done. `network_node.roles` rows written by older
    versions still say `master`. Run them through `config.Normalise` on read so
@@ -260,7 +260,7 @@ programs.
    the freshest complete record, never overwrite the local device, and
    converge without a coordinator when an offline peer returns.
 
-### B. Controller Server (≈7d)
+### B. Completed Controller Server
 
 A second binary, `cmd/pscluster-controller`. It runs no jobs and stores no
 project data. Live editing is the feature it adds; git works without it.
@@ -299,7 +299,7 @@ project data. Live editing is the feature it adds; git works without it.
    Join requests prove the global account to the receiving peer, while device
    keys remain independent identities.
 
-### D. Networking (≈2.5d)
+### D. Completed networking
 
 10. ~~**Auth key in the join code.**~~ `mesh.Invite` carries an optional tailscale
     auth key; `join` calls `tailnet.Up` first. One step instead of two. *1d*
@@ -310,7 +310,7 @@ project data. Live editing is the feature it adds; git works without it.
     request signing, enrollment and task/data APIs remain; the reachability
     workaround and tunnel stack are gone.
 
-### E. Features never built (≈6d)
+### E. Completed runtime features
 
 13. ~~**Terminal.**~~ Implemented as a `terminal` job using a PTY from util-linux
     `script`, with streamed output, input, remote placement, stop handling and
@@ -319,9 +319,9 @@ project data. Live editing is the feature it adds; git works without it.
     Plainshow launches and reverse-proxies the machine's installed Jupyter
     Server, gaining its kernels, widgets, rich MIME output and completions.
 
-### F. Release readiness (≈11d)
+### F. External release gates
 
-15. **`internal/api` coverage.** Core network, account authority, registry,
+15. ~~**`internal/api` coverage.**~~ Core network, account authority, registry,
     collaboration, reachability and job paths have automated coverage. Add
     regressions for failures discovered during hardware testing rather than
     delaying the runnable build for a coverage percentage.
