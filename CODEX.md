@@ -85,6 +85,20 @@ a root-readable file until the first global administrator is registered. Remove
 that file after registration. The systemd service is
 `plainshow-cluster-admin.service`.
 
+Deployment is complete. Both `plainshow-cluster-admin` and Apache are active,
+HTTP redirects to HTTPS, the public health endpoint and embedded page return
+success through Cloudflare, and an attempted WebSocket upgrade reaches the relay
+and is correctly rejected without a network token. The dedicated ECDSA Let's
+Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
+The deployed program reports revision `3b29fde` on Linux arm64. No account has
+been created yet, so the human handoff is:
+
+```sh
+sudo cat /opt/plainshow-cluster-admin/bootstrap.txt
+# Open https://clusteradmin.plainshow.se and register the first account.
+# Then remove bootstrap.txt; it is no longer useful after consumption.
+```
+
 Back up `admin.yaml`, `accounts.db`, `accounts.db-wal` and `accounts.db-shm`
 together while stopped, or use SQLite's online backup facility. Possession of
 this root is enterprise administrator/key-recovery access.
@@ -97,6 +111,9 @@ this root is enterprise administrator/key-recovery access.
 - Duplicate collaboration delivery and controller authentication are tested.
 - `make smoke`: 71 passed, 0 failed.
 - All three local programs built successfully.
+- All three component installers were exercised against disposable roots.
+- Public HTTP, HTTPS, static assets, health and the Apache WebSocket route were
+  exercised against `clusteradmin.plainshow.se` after deployment.
 
 No dependency was installed during this pass. This Pi does not have
 `jupyter_server`, so smoke covered the actionable unavailable-tool path.

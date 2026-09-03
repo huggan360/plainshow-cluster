@@ -229,6 +229,11 @@ Assessed by running it, not by reading commit messages.
 | Enterprise master | accounts, network/key registry, controller relay and admin statistics implemented |
 | Install hardening and docs | three component installer and deployment documentation implemented |
 
+The main enterprise service is deployed on this Pi at
+`https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
+`127.0.0.1:10002`. Its systemd unit is enabled. The first administrator still
+needs to register using the protected bootstrap output described in `CODEX.md`.
+
 Remaining work is validation and release operation rather than missing product
 programs. The highest-risk gate is still the real two-CUDA-machine run.
 Everything above could be verified on the development Pi; a multi-GPU

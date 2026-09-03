@@ -174,6 +174,12 @@ The production Apache template is
 `accounts.db-shm` and `admin.yaml` together while the service is stopped, or use
 SQLite's online backup tooling.
 
+On the main Pi deployment, open `https://clusteradmin.plainshow.se` and create
+the first account using the one-time token from
+`sudo cat /opt/plainshow-cluster-admin/bootstrap.txt`. That first account is the
+global administrator. Delete the bootstrap file after the account exists; the
+token is removed from SQLite automatically when it is consumed.
+
 ## Layout
 
 ```
