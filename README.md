@@ -149,6 +149,12 @@ sudo make install-controller  # optional collaboration controller
 sudo PSCLUSTER_ADMIN_URL=https://clusteradmin.example make install-admin
 ```
 
+A GitHub release is self-contained: download `install.sh`, `checksums.txt` and
+the binary matching the machine, verify with
+`sha256sum --ignore-missing -c checksums.txt`, then run for example
+`sudo ./install.sh node ./pscluster-linux-amd64`. Use
+`controller` or `admin` as the first argument for those components.
+
 `make race` runs the suite under the race detector. It needs a kernel with a
 48-bit VMA; some arm64 boards (including the Raspberry Pi 5) report 47 and
 ThreadSanitizer refuses to start, which is why it is not part of `make check`.

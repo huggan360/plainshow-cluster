@@ -45,7 +45,7 @@ jobs:
           for asset in pscluster-linux-amd64 pscluster-linux-arm64 \
                        pscluster-controller-linux-amd64 pscluster-controller-linux-arm64 \
                        pscluster-admin-linux-amd64 pscluster-admin-linux-arm64 \
-                       checksums.txt; do
+                       install.sh checksums.txt; do
             test -s "dist/$asset" || { echo "missing dist/$asset"; exit 1; }
           done
           # The binary must report the tag it was built from, or a node will
@@ -68,6 +68,7 @@ jobs:
             dist/pscluster-controller-linux-arm64
             dist/pscluster-admin-linux-amd64
             dist/pscluster-admin-linux-arm64
+            dist/install.sh
             dist/checksums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true

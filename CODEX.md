@@ -69,6 +69,8 @@ continue.
   `make install*` targets, atomic binary replacement, one-root state, PATH link
   and systemd unit.
 - Release assets/workflow for Linux amd64 and arm64 for all three binaries.
+  Each release also carries the tested `install.sh` and includes it in
+  `checksums.txt`, so installing does not require a source checkout.
 
 ## Production deployment
 

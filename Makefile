@@ -86,7 +86,8 @@ dist: web
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-arm64 $(CONTROLLER_PKG)
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-amd64 $(ADMIN_PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-arm64 $(ADMIN_PKG)
-	@cd dist && sha256sum *-linux-* > checksums.txt
+	@cp install.sh dist/install.sh && chmod 755 dist/install.sh
+	@cd dist && sha256sum *-linux-* install.sh > checksums.txt
 	@echo
 	@ls -lh dist/
 	@echo
