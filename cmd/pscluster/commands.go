@@ -61,8 +61,23 @@ func cmdNetwork(args []string) error {
 		fmt.Printf("Active network is now %s.\n", f.rest[1])
 		return nil
 
+	case "key":
+		if len(f.rest) < 2 {
+			return errors.New("usage: pscluster network key <id>\n\n  The key is read without echo, or from standard input when piped.")
+		}
+		key, err := readSecret("Network management key: ")
+		if err != nil {
+			return err
+		}
+		if err := d.call("PUT", "/api/networks/"+f.rest[1]+"/management-key",
+			map[string]string{"management_key": strings.TrimSpace(key)}, nil); err != nil {
+			return err
+		}
+		fmt.Printf("Management key updated for %s.\n", f.rest[1])
+		return nil
+
 	default:
-		return fmt.Errorf("unknown network command %q (list, use)", action)
+		return fmt.Errorf("unknown network command %q (list, use, key)", action)
 	}
 }
 

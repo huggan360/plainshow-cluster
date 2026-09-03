@@ -122,13 +122,14 @@ type AccountConfig struct {
 // MembershipConfig describes how this device participates in one independent
 // cluster network. A single installation may carry many memberships.
 type MembershipConfig struct {
-	ID          string       `yaml:"id" json:"id"`
-	Name        string       `yaml:"name" json:"name"`
-	Roles       []Role       `yaml:"roles" json:"roles"`
-	AccountRole string       `yaml:"account_role,omitempty" json:"account_role"`
-	Enabled     bool         `yaml:"enabled" json:"enabled"`
-	Coordinator []string     `yaml:"coordinator,omitempty" json:"coordinator"`
-	Policy      WorkerConfig `yaml:"policy" json:"policy"`
+	ID            string       `yaml:"id" json:"id"`
+	Name          string       `yaml:"name" json:"name"`
+	Roles         []Role       `yaml:"roles" json:"roles"`
+	AccountRole   string       `yaml:"account_role,omitempty" json:"account_role"`
+	ManagementKey string       `yaml:"management_key" json:"-"`
+	Enabled       bool         `yaml:"enabled" json:"enabled"`
+	Coordinator   []string     `yaml:"coordinator,omitempty" json:"coordinator"`
+	Policy        WorkerConfig `yaml:"policy" json:"policy"`
 }
 
 // UpdateConfig controls how this node keeps itself current.
@@ -259,6 +260,9 @@ func (c *Config) EnsureMemberships() {
 		if c.Memberships[i].AccountRole == "" {
 			c.Memberships[i].AccountRole = "owner"
 		}
+		if c.Memberships[i].ManagementKey == "" {
+			c.Memberships[i].ManagementKey = NewSecret()
+		}
 	}
 	if c.ActiveNetwork == "" {
 		c.ActiveNetwork = c.Memberships[0].ID
@@ -336,6 +340,18 @@ func NewID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return "0000000000000000"
+	}
+	return hex.EncodeToString(b)
+}
+
+// NewSecret returns a high-entropy URL-safe credential for a network or
+// controller. Unlike NewID it is an authorization secret, not just an identifier.
+func NewSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// A predictable authorization key is worse than refusing to start. The
+		// operating system RNG is a hard dependency for device identities too.
+		panic("plainshow: operating system random source is unavailable: " + err.Error())
 	}
 	return hex.EncodeToString(b)
 }

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
+	"github.com/huggan360/plainshow-cluster/internal/accountserver"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
@@ -125,9 +126,10 @@ type joinRequest struct {
 }
 
 type joinResponse struct {
-	Network store.Network       `json:"network"`
-	Role    string              `json:"role"`
-	Nodes   []store.NetworkNode `json:"nodes"`
+	Network       store.Network       `json:"network"`
+	Role          string              `json:"role"`
+	ManagementKey string              `json:"management_key"`
+	Nodes         []store.NetworkNode `json:"nodes"`
 }
 
 type peerExchange struct {
@@ -187,6 +189,22 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "The joining device supplied an invalid identity.")
 		return
 	}
+	network, err := s.store.NetworkByID(networkID)
+	if err != nil {
+		fail(w, 404, "No such network.")
+		return
+	}
+	managementKey := ""
+	for _, membership := range s.cfg.Memberships {
+		if membership.ID == networkID {
+			managementKey = membership.ManagementKey
+			break
+		}
+	}
+	if managementKey == "" {
+		fail(w, 500, "This network has no management key; restart the node to migrate its configuration.")
+		return
+	}
 	if s.usesCentralAccounts() {
 		client, clientErr := accountclient.New(s.cfg.Account.Server)
 		if clientErr != nil {
@@ -201,6 +219,27 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body.Account = centralAccount(central)
+		hostToken, tokenErr := config.LoadAccountToken(s.layout)
+		if tokenErr != nil || hostToken == "" {
+			fail(w, 409, "This device must sign in again before it can admit accounts to the network.")
+			return
+		}
+		hostMember, memberErr := s.store.NetworkMember(networkID, s.cfg.AccountID())
+		if memberErr != nil {
+			fail(w, 403, "This device account cannot administer the network.")
+			return
+		}
+		if _, syncErr := client.SyncNetwork(ctx, hostToken, accountserver.NetworkRegistration{
+			ID: network.ID, Name: network.Name, ManagementKey: managementKey, Role: hostMember.Role,
+		}); syncErr != nil {
+			fail(w, 502, "The enterprise network registry refused this invitation: "+syncErr.Error())
+			return
+		}
+		if grantErr := client.GrantNetworkMember(ctx, hostToken, networkID, managementKey,
+			body.Account.ID, invitation.Role); grantErr != nil {
+			fail(w, 502, "The enterprise network registry refused the joining account: "+grantErr.Error())
+			return
+		}
 	} else if body.Account.ID == "" || body.Account.Username == "" {
 		// Older nodes used their device key as the local account identity.
 		body.Account = store.Account{ID: body.NodeID, Username: body.Name,
@@ -231,14 +270,10 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	network, err := s.store.NetworkByID(networkID)
-	if err != nil {
-		fail(w, 404, "No such network.")
-		return
-	}
 	nodes, _ := s.store.NetworkNodes(networkID)
 	s.hub.Publish("networks.changed", network)
-	writeJSON(w, 201, joinResponse{Network: network, Role: accountRole, Nodes: nodes})
+	writeJSON(w, 201, joinResponse{Network: network, Role: accountRole,
+		ManagementKey: managementKey, Nodes: nodes})
 }
 
 // StartPeerDiscovery periodically exchanges each network's directory with

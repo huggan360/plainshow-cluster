@@ -34,6 +34,18 @@ type SessionResponse struct {
 	Account       accountserver.Account `json:"account"`
 }
 
+// NetworkResponse connects a peer network to the enterprise management plane
+// and its single collaboration controller.
+type NetworkResponse struct {
+	Network    accountserver.EnterpriseNetwork `json:"network"`
+	Controller struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Address     string `json:"address"`
+		CollabToken string `json:"collab_token"`
+	} `json:"controller"`
+}
+
 // New validates a configured account-server URL. Plain HTTP is accepted only
 // on loopback so development does not weaken production credentials.
 func New(endpoint string) (*Client, error) {
@@ -84,6 +96,24 @@ func (c *Client) Session(ctx context.Context, token string) (accountserver.Accou
 // CheckIn sends aggregate device counts, never project or job contents.
 func (c *Client) CheckIn(ctx context.Context, token string, input accountserver.NodeCheckIn) error {
 	return c.call(ctx, http.MethodPost, "/api/nodes/check-in", token, input, nil)
+}
+
+// SyncNetwork proves possession of a network key and obtains the enterprise
+// collaboration-controller credential.
+func (c *Client) SyncNetwork(ctx context.Context, token string,
+	input accountserver.NetworkRegistration) (NetworkResponse, error) {
+	var out NetworkResponse
+	err := c.call(ctx, http.MethodPost, "/api/networks/sync", token, input, &out)
+	return out, err
+}
+
+// GrantNetworkMember records the account authenticated by a consumed peer
+// invitation in the enterprise registry.
+func (c *Client) GrantNetworkMember(ctx context.Context, token, networkID,
+	managementKey, accountID, role string) error {
+	return c.call(ctx, http.MethodPost, "/api/networks/"+url.PathEscape(networkID)+"/members",
+		token, map[string]string{"management_key": managementKey,
+			"account_id": accountID, "role": role}, nil)
 }
 
 func (c *Client) call(ctx context.Context, method, path, token string, input, output any) error {

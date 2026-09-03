@@ -55,6 +55,11 @@ func (s *Server) controllerCheckIn(ctx context.Context) {
 		snapshot := controller.Snapshot{NetworkID: membership.ID,
 			SourceID: s.cfg.Node.ID, Nodes: nodes, Projects: projects, Jobs: jobs}
 		for _, item := range controllers {
+			if item.Fingerprint == "" || item.PublicKey == "" {
+				// The enterprise controller is fed through the account server's
+				// authenticated check-in, not the standalone controller mesh API.
+				continue
+			}
 			client := mesh.NewClient(item.Address, item.Fingerprint, membership.ID, s.device)
 			_ = client.JSON("POST", "/mesh/v1/snapshot/"+membership.ID, snapshot, nil, true)
 		}

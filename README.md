@@ -3,10 +3,10 @@
 Turn a set of ordinary computers into one collaborative AI development and
 training environment.
 
-This is the node: a single binary that serves a web workspace where you create
-projects, edit code, run it, and watch the output live. Today it runs one
-machine completely. The networking, collaboration and distributed-training
-layers build on top of it.
+The node is a single binary serving a web workspace where you create projects,
+edit code, run it on any joined machine, and watch output live. The enterprise
+service supplies shared accounts, network-key recovery and live collaboration;
+project data and compute still move directly between nodes.
 
 ```
 git clone https://github.com/huggan360/plainshow-cluster.git
@@ -55,11 +55,16 @@ setting, and nothing remote can widen it.
 **Git is the source of truth for projects**, and every device keeps a full
 clone. Two people can work while disconnected and reconcile with a real merge.
 
-**Live collaborative editing needs the Plainshow Controller Server** — a second,
-smaller program you run on a machine that is already online, configured with
-which networks it serves. It holds the editing socket and a web overview. It is
-optional: without it you get git-based collaboration, which works with nobody
-online but you.
+**The Plainshow enterprise service is the one intentional master service.** In
+the main environment it runs at `clusteradmin.plainshow.se` on the Raspberry Pi.
+Its SQLite database stores global accounts, membership roles, network recovery
+keys and aggregate device health. The same process is the default live-editing
+WebSocket controller. It never runs jobs or stores projects, commands, logs,
+datasets, artifacts or peer addresses.
+
+`pscluster-controller` remains available when a network wants a separate,
+self-hosted collaboration relay. Without either controller, Git collaboration
+continues to work offline.
 
 Machines on different networks find each other through **tailscale**, which
 Plainshow drives rather than reimplements.
@@ -75,7 +80,7 @@ pscluster status [--root DIR]
 pscluster run [--project NAME] <command...>
 pscluster config [show | get KEY | set KEY VALUE | path | root]
 
-pscluster network [list | use ID]
+pscluster network [list | use ID | key ID]
 pscluster invite [--role member] [--network ID]
 pscluster join CODE [--endpoint URL]
 pscluster controller invite [--network ID]
@@ -87,6 +92,7 @@ pscluster-controller init [--root DIR] [--name NAME] [--bind ADDR] [--port N]
 pscluster-controller serve [--root DIR]
 pscluster-controller attach CODE --advertise HTTPS_URL
 pscluster-controller status [--root DIR]
+pscluster-controller reset-admin-token [--root DIR]
 
 pscluster-admin init [--root DIR] [--public-url HTTPS_URL]
 pscluster-admin serve [--root DIR]
@@ -151,15 +157,22 @@ The interface is hand-written ES modules and CSS, embedded into the binary. What
 is served is exactly what is in `web/`. Typefaces are bundled too, so a node with
 no internet access renders identically to one with it.
 
-`make build` also produces `pscluster-controller`, the optional HTTPS service
-for live collaboration and cross-network overview. It has a separate root,
-identity, certificate and configuration, and it cannot run node jobs.
+`make build` also produces `pscluster-controller`, the optional standalone HTTPS
+service for live collaboration and cross-network overview. It has a separate
+root, identity, certificate and configuration, and it cannot run node jobs.
 
-It also produces `pscluster-admin`, the central account authority and global
-statistics page. The service uses a dedicated SQLite database and binds to
-loopback for a public TLS reverse proxy. Its configured URL in the main
-Plainshow environment is `https://clusteradmin.plainshow.se`; that hostname is
-deployment configuration rather than a client-side constant.
+It also produces `pscluster-admin`, the enterprise account authority, network
+registry, default collaboration relay and global statistics page. The service
+uses a dedicated SQLite database and binds to loopback for a public TLS reverse
+proxy. Its configured URL in the main Plainshow environment is
+`https://clusteradmin.plainshow.se`; that hostname is deployment configuration
+rather than a client-side constant.
+
+The production Apache template is
+`deploy/clusteradmin.plainshow.se.conf`. The admin root is
+`/opt/plainshow-cluster-admin`; back up `accounts.db`, `accounts.db-wal`,
+`accounts.db-shm` and `admin.yaml` together while the service is stopped, or use
+SQLite's online backup tooling.
 
 ## Layout
 

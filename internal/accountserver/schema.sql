@@ -36,10 +36,21 @@ CREATE TABLE IF NOT EXISTS node (
 );
 
 CREATE TABLE IF NOT EXISTS network (
-    id         TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    last_seen  TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    id               TEXT PRIMARY KEY,
+    name             TEXT NOT NULL,
+    owner_account_id TEXT NOT NULL DEFAULT '',
+    management_key   TEXT NOT NULL DEFAULT '',
+    collab_token     TEXT NOT NULL DEFAULT '',
+    last_seen        TEXT NOT NULL,
+    created_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS network_member (
+    network_id TEXT NOT NULL REFERENCES network(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    joined_at  TEXT NOT NULL,
+    PRIMARY KEY (network_id, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS node_network (

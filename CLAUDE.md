@@ -33,10 +33,12 @@ These are settled. Do not quietly reverse them.
    for more than local policy permits is refused *there*, not trimmed. A
    compromised coordinator cannot widen it. This is why it is reasonable to run
    someone else's code on your desktop. Terminal access is off by default.
-4. **The control plane and the data plane are separate.** Metadata, job state,
-   logs and editor deltas go through the coordinator. Datasets, checkpoints,
-   artifacts and gradients go **directly between peers, never through it.**
-   There must be no code path that proxies bulk bytes.
+4. **The management plane and the data plane are separate.** The enterprise
+   Pi stores accounts, network membership/recovery keys and aggregate health,
+   and relays collaboration deltas without storing them. Jobs, logs, projects,
+   datasets, checkpoints, artifacts and gradients go **directly between peers,
+   never through it.** There must be
+   no code path that proxies bulk bytes.
 5. **A job is a job.** Scripts, notebook kernels, terminals and training runs
    share one lifecycle, one log pipe, one stop button, one permission check.
    Resist adding a parallel mechanism for a new kind of work.
@@ -48,13 +50,13 @@ These are settled. Do not quietly reverse them.
 
 Three things, and only one of them is required.
 
-**Account.** You register once with the Plainshow Account Server. It is the one
-intentional central authority in the system: a small service backed by SQLite,
-hosted on the Plainshow Raspberry Pi and deployed at a configured public URL
-(`clusteradmin.plainshow.se` for the main environment). It also provides a
-minimal global statistics and account-administration page. Networks and compute
-remain peer-to-peer; centralising login must not put project data, jobs, or peer
-traffic through this server.
+**Enterprise master.** You register once with the Plainshow enterprise service.
+It is the one intentional central authority: `pscluster-admin`, backed by
+SQLite, hosted on the Plainshow Raspberry Pi at `clusteradmin.plainshow.se`.
+It manages global accounts, keeps recovery keys and membership roles for each
+independent network, relays live editor messages and provides the minimal global
+admin/statistics page. Network discovery, compute, project data and task traffic
+remain peer-to-peer.
 
 **Network.** A set of devices and people who work together. Anybody can create
 one; joining is a single-use code. A device can belong to several, and each
@@ -66,18 +68,18 @@ device can run tasks and connects directly to every other device on the network.
 What a device is willing to do is its own local policy — accept jobs, expose a
 GPU, allow a terminal — and nothing remote can widen it.
 
-**Controller Server** *(separate program, optional).* A machine you already have
-online — a web server, a VPS, a Pi — running a second, smaller program. It holds
-the WebSocket that makes live collaborative editing possible, and serves a web
-overview of the networks it is attached to. It is configured with which networks
-it serves. It is **not** a device role and it runs no jobs.
+**Controller Server** *(integrated by default, separately hostable).* The
+enterprise service holds the default collaboration WebSocket. The smaller
+`pscluster-controller` program remains available for networks that want their
+own relay and read-only overview. Neither form is a device role and neither runs
+jobs or holds projects.
 
-**Account Server** *(separate program, required for shared accounts).* One small
-global service stores accounts and session/registration metadata in its own
-SQLite database. This is an explicit exception to the no-canonical-holder
-design for account identity only. It never stores project files, datasets,
-artifacts, job payloads, or network traffic, and it is not the live-editing
-controller.
+**Account/key registry.** The enterprise SQLite database is the explicit
+canonical holder for identity, network membership and high-entropy recovery
+keys. Raw keys are intentionally retained because recovery is a product
+requirement. Access to the database/root is therefore equivalent to enterprise
+administrator access. It never stores project files, datasets, artifacts, job
+payloads, logs or peer addresses.
 
 ### Where project state lives
 
@@ -151,10 +153,9 @@ chosen correctly.
    `internal/tunnel` is gone; `internal/tailnet` drives the daemon and this
    machine advertises its tailnet address. `internal/mesh` still carries mTLS
    and request signing, which are worth keeping — see the migration below.
-2. **`internal/notebook` instead of `jupyter_server`.** A hand-written Python
-   kernel. Files are real `.ipynb`, but there are no ipywidgets, no rich MIME
-   output, no completion or inspection, and every one of those is free from the
-   real thing.
+2. ~~**`internal/notebook` instead of `jupyter_server`.**~~ Paid down. Plainshow
+   launches an installed Jupyter Server on loopback and reverse-proxies its UI;
+   it does not install Python packages or implement a kernel protocol.
 3. **`internal/collab` operational transform.** This one is closest to
    defensible — a collaborative editor over a socket is on the "we build it"
    list — but Yjs was the original choice and would have been less code.
@@ -197,7 +198,7 @@ internal/
   gitrepo/         git plumbing, remotes, push/pull/merge
   github/          API client and two-way collaborator sync
   collab/          revisioned text operations
-  notebook/        persistent Python kernels
+  notebook/        Jupyter Server lifecycle and reverse proxy
   dataset/         content-addressed dataset versions
   training/        distributed run plans (torchrun)
   jobs/            process supervision and log streaming
@@ -225,6 +226,7 @@ Assessed by running it, not by reading commit messages.
 | Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
 | Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
 | Terminal | implemented as a policy-controlled interactive PTY job |
+| Enterprise master | accounts, network/key registry, controller relay and admin statistics implemented |
 | Install hardening and docs | three component installer and deployment documentation implemented |
 
 Remaining work is validation and release operation rather than missing product
@@ -234,15 +236,11 @@ Everything above could be verified on the development Pi; a multi-GPU
 of estimate usually breaks. Expect the driver and CUDA mismatch handling to be
 wrong in some specific way that only appears on real hardware.
 
-## Handover: the exact steps to 100%
+## Handover: release gates after implementation
 
-Ordered. Each is a commit or two, and each leaves the tree working. Sizes are
-working days for one person who has read this file. **Roughly six weeks.**
-
-The architecture change above — every device equal, git as the truth, a separate
-controller server for live editing — adds scope relative to earlier estimates.
-It also deletes more than it adds, and removes the machine that was a single
-point of failure.
+All product paths below are implemented. The unchecked items require external
+hardware or a published release; they are release validation, not missing
+programs.
 
 ### A. Finish the peer model (≈3d)
 
@@ -306,24 +304,22 @@ project data. Live editing is the feature it adds; git works without it.
 12. ~~**Shrink `internal/mesh`.**~~ Only direct HTTPS, mTLS identity pinning,
     request signing, enrollment and task/data APIs remain; the reachability
     workaround and tunnel stack are gone.
-    of working around unreachability. *1d*
 
 ### E. Features never built (≈6d)
 
 13. ~~**Terminal.**~~ Implemented as a `terminal` job using a PTY from util-linux
     `script`, with streamed output, input, remote placement, stop handling and
     the existing local `allow_terminal` policy.
-    `allow_terminal` has been guarding it. xterm.js plus a PTY job kind; the job
-    lifecycle already handles streaming and stopping. *3d*
 14. ~~**Notebooks onto `jupyter_server`.**~~ The hand-written kernel is deleted.
     Plainshow launches and reverse-proxies the machine's installed Jupyter
     Server, gaining its kernels, widgets, rich MIME output and completions.
-    ipywidgets, rich output, completion and inspection, all for free. *3d*
 
 ### F. Release readiness (≈11d)
 
-15. **`internal/api` coverage.** ~3,000 lines, and only the auth gate and the
-    reachability probe are tested. *3d*
+15. **`internal/api` coverage.** Core network, account authority, registry,
+    collaboration, reachability and job paths have automated coverage. Add
+    regressions for failures discovered during hardware testing rather than
+    delaying the runnable build for a coverage percentage.
 16. **Real multi-GPU validation.** Two CUDA machines, an actual `torchrun`.
     Needs hardware nobody has run this on. Expect the driver and CUDA mismatch
     handling to be wrong. **This is where the estimate is most likely to
@@ -379,7 +375,7 @@ rendezvous port has nothing listening until the run starts, so a refusal proves
 the route exists. Treating it as failure would refuse every correctly configured
 cluster.
 
-## The Tailscale migration — what is done and what is next
+## The completed Tailscale migration
 
 We drive the daemon; we do not embed it. `internal/tailnet` shells out to
 `tailscale status --json` and `tailscale up`, and that is the entire integration
@@ -398,25 +394,18 @@ and nothing else, which was never the traffic that was stuck.
 2. `GET /api/tailnet`, and joining advertises the tailnet address when there is
    one, so the address the mesh proves reachable is the address training uses.
 
-**Next, in order**
-
-3. **Carry an auth key in the join code.** `mesh.Invite` gains an optional
+3. ~~**Carry an auth key in the join code.**~~ `mesh.Invite` has an optional
    tailscale auth key; `pscluster join` calls `tailnet.Up` before enrolling, so
    joining a Plainshow network and joining its tailnet are one step. This is
-   convenience, not correctness — `tailscale up` by hand works today — which is
-   why step 4 did not wait for it.
+   convenience, not correctness — `tailscale up` by hand also works.
 4. ~~**Delete `internal/tunnel`.**~~ Done. The registry, dialer, trusted-marker
    path and `StartTunnels` are gone, and `clientForNode` simply dials the peer.
    Cross-network now requires tailscale, which is the honest requirement rather
    than a second half-working networking stack.
-5. **Simplify `internal/mesh`.** Keep mTLS and request signing: they are cheap
-   and mean a stolen tailnet position still proves nothing. Drop everything that
-   exists to work around unreachability.
-6. **Relayed-link warning in the training preflight.** `tailnet` already reports
-   which peers are relayed. A relayed link is somebody else's bandwidth, and the
-   existing bandwidth advice should say so before a run starts.
-
-Steps 3–6 are roughly a week. The codebase gets smaller at every step.
+5. ~~**Simplify `internal/mesh`.**~~ mTLS, request signing, enrollment and the
+   direct peer APIs remain; the unreachability workaround was removed.
+6. ~~**Relayed-link warning in the training preflight.**~~ Training preflight
+   reports DERP-relayed peer paths before launch.
 
 ## How a machine on another network is reached
 

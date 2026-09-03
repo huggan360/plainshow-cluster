@@ -1,95 +1,136 @@
 # Codex handover to Claude
 
-Last updated 2026-09-03. Read `CLAUDE.md` first; it remains the architecture
-record. This file records the implementation pass after that handover.
+Last updated 2026-09-03. `CLAUDE.md` is the architecture record; this is the
+operational handover for the completed implementation pass.
 
-## Outcome
+## Current outcome
 
-All product programs in steps 1–14 and the installation work in step 18 now
-have executable implementations. The repository builds three binaries:
+The repository contains runnable implementations of all planned product paths
+and builds three programs:
 
-- `pscluster`: equal peer node, web workspace and task runner.
-- `pscluster-controller`: optional live-collaboration relay and read-only
-  multi-network overview.
-- `pscluster-admin`: central SQLite account authority and global statistics UI.
+- `pscluster`: equal peer node, browser workspace and task runner.
+- `pscluster-admin`: the enterprise management plane. It manages global
+  accounts, SQLite-backed network membership and recovery keys, the default
+  collaboration relay, and aggregate global statistics.
+- `pscluster-controller`: optional separately hosted collaboration relay and
+  read-only overview for networks that do not want the enterprise relay.
 
-Do not call this v1.0 until the two-machine CUDA run and a published upgrade
-have been exercised. Those are validation/release operations, not missing
-programs. The user and a friend intend to perform them on Arch Linux hosts.
+The Raspberry Pi is intentionally special only at the enterprise layer. It is
+the canonical holder of accounts, network membership/recovery keys and global
+statistics. It never runs cluster jobs and never stores or proxies project
+files, commands, logs, datasets, artifacts, checkpoints, gradients or peer
+addresses. Devices remain equal and exchange task/data traffic directly.
 
-## Work completed in this pass
+## Enterprise implementation
 
-1. Central node authentication now registers/logs in through the configured
-   Account Server, migrates legacy ownership to the global account ID, stores
-   the authority token in `keys/account.token`, and keeps local cached browser
-   sessions working during an authority outage.
-2. Network join proves the global account to the inviting peer. Enrolling a
-   second device for an existing account preserves its current network role.
-   Startup no longer rewrites joined networks as locally owned.
-3. Controller enrollment is single-use and authenticated. Run
-   `pscluster controller invite`, then
-   `pscluster-controller attach CODE --advertise HTTPS_URL`.
-4. Devices gossip controller records and send signed, metadata-only snapshots.
-   Controller snapshots persist in `<controller-root>/overview.json`.
-5. The controller WebSocket relays collaboration messages but stores no project
-   files. Each connected browser forwards remote operations into its own node,
-   where the existing operation log writes the clone. This deliberately
-   resolves the old handover contradiction between “controller writes files”
-   and “controller stores no project data”.
-6. Join codes optionally carry `tailnet_auth_key` and
-   `tailnet_login_server`; the joining node calls `tailscale up` first.
-   Training preflight reports DERP-relayed paths as warnings.
-7. Terminal is an ordinary `terminal` job. It uses util-linux `script` for a
-   PTY, accepts input, streams output, works on remote nodes, and is refused by
-   the target machine unless `worker.allow_terminal` is true.
-8. The handwritten Python kernel was deleted. Plainshow starts an already
-   installed `jupyter_server` on loopback with a random token and proxies its
-   complete UI under `/jupyter/<id>/`. Plainshow never installs Python packages.
-9. `install.sh node|controller|admin` atomically installs any component and
-   creates matching PATH/systemd integration. Make targets are `install`,
-   `install-controller`, and `install-admin`.
+The main deployment URL is `https://clusteradmin.plainshow.se` and the service
+root is `/opt/plainshow-cluster-admin`. The database is
+`/opt/plainshow-cluster-admin/accounts.db`.
 
-## Verification run here
+`internal/accountserver` now owns:
 
-- `make check`: passed after the implementation batch.
+- global registration, login, hashed sessions and administrator disable/enable;
+- a `network` registry containing owner, raw recovery key and collaboration
+  token (plaintext storage is deliberate because key recovery is required);
+- explicit `network_member` rows and roles;
+- authenticated network sync and invitation-time member grants;
+- an authenticated per-network WebSocket relay at `/ws?network=ID`;
+- aggregate device check-ins and the lightweight admin dashboard.
+
+The collaboration secret is carried as WebSocket subprotocol
+`plainshow.<token>`, not in URLs or proxy logs. The node chooses the enterprise
+controller when both it and a standalone controller are registered. Browser
+operations queued during controller downtime are replayed after reconnect, and
+the durable collaboration manager rejects duplicate client sequence numbers.
+
+Each node membership has a 256-bit `management_key` in `config.yaml`, omitted
+from JSON responses. Creating a network generates it; a peer invitation shares
+it over the pinned/signed mesh join; the inviting node registers the global
+account centrally before admitting it locally. `pscluster network key ID` reads
+a rotated key without echo and installs it locally. Global key rotation is in
+the admin dashboard; every device then needs the displayed new key.
+
+The enterprise server remains non-critical to existing work. If it is down,
+new global login/network admission and cross-node live editing pause, while
+cached node sessions, local work, Git, peer discovery, jobs and data transfers
+continue.
+
+## Other completed product work
+
+- All-to-all signed peer discovery; no master device or coordinator role.
+- Optional standalone controller enrollment, authenticated overview, durable
+  snapshots and automatic learning of later enrolled node keys.
+- Tailscale/Headscale auth material in join codes and DERP warnings in training
+  preflight; the removed custom tunnel has not returned.
+- Interactive local/remote terminal implemented as a policy-controlled PTY job.
+- Real installed `jupyter_server` lifecycle and complete same-origin reverse
+  proxy under `/jupyter/`; Plainshow installs no Python packages.
+- Component installer: `install.sh node|controller|admin BINARY`, with matching
+  `make install*` targets, atomic binary replacement, one-root state, PATH link
+  and systemd unit.
+- Release assets/workflow for Linux amd64 and arm64 for all three binaries.
+
+## Production deployment
+
+Repository templates are:
+
+- `deploy/clusteradmin-bootstrap.conf`: temporary port-80 vhost for first ACME
+  issuance.
+- `deploy/clusteradmin.plainshow.se.conf`: final HTTPS reverse proxy, including
+  WebSocket forwarding and `X-Forwarded-Proto`.
+
+The service binds to `127.0.0.1:10002`. Its bootstrap token is shown only by
+`pscluster-admin init`; on this Pi the deployment process stores that output in
+a root-readable file until the first global administrator is registered. Remove
+that file after registration. The systemd service is
+`plainshow-cluster-admin.service`.
+
+Back up `admin.yaml`, `accounts.db`, `accounts.db-wal` and `accounts.db-shm`
+together while stopped, or use SQLite's online backup facility. Possession of
+this root is enterprise administrator/key-recovery access.
+
+## Verification completed on this Pi
+
+- `make check`: formatting, vet, 18-module web graph and all Go tests passed.
+- Enterprise HTTP registration/membership and a two-client collaboration relay
+  are covered by `internal/accountserver/server_test.go`.
+- Duplicate collaboration delivery and controller authentication are tested.
 - `make smoke`: 71 passed, 0 failed.
-- Builds succeeded for all three local binaries.
-- This Pi has no `jupyter_server`, so smoke verified the actionable missing-tool
-  path. Exercise the real Jupyter iframe on the Arch test machine.
+- All three local programs built successfully.
 
-## Remaining release exercises
+No dependency was installed during this pass. This Pi does not have
+`jupyter_server`, so smoke covered the actionable unavailable-tool path.
 
-1. On two CUDA Arch machines, install matching Tailscale, NVIDIA driver, CUDA,
-   PyTorch and `torchrun`; join them and run a real two-rank job. Record driver,
-   CUDA and NCCL mismatch messages and adjust preflight wording as needed.
-2. Install `jupyter_server` on an Arch node and verify kernels, completion,
-   rich MIME output, widgets and WebSocket proxying through the node.
-3. Attach a public controller and edit the same file from browsers on two
-   devices. Verify both working trees receive the operation, then commit/pull.
-4. Publish a prerelease, install it, publish the next build and exercise
-   `pscluster update apply`. Only then tag v1.0.0.
-5. Expand `internal/api` coverage based on failures found in those exercises;
-   the user explicitly prioritized raw implementation during this pass.
+## External release gates
 
-## Production account service
+The software implementation is complete, but do not truthfully call hardware
+validation complete until these are exercised by the user and friend:
 
-The intended URL is `https://clusteradmin.plainshow.se`. The service should
-bind only to loopback and sit behind Apache TLS. Its root is
-`/opt/plainshow-cluster-admin`, database is `accounts.db`, and the first-admin
-bootstrap token is printed exactly once by `pscluster-admin init`. Never place
-project names, commands, logs, datasets, keys or peer addresses in this DB.
+1. Install on both Arch machines and join them through their actual Tailscale
+   or Headscale environment.
+2. Run one real two-rank CUDA/PyTorch `torchrun` job and record any NVIDIA
+   driver, CUDA or NCCL mismatch behavior.
+3. With `jupyter_server` installed, verify kernels, completion, rich MIME,
+   widgets and WebSocket proxying.
+4. Open the same file in browsers on two nodes and verify live edits reach both
+   working trees through `clusteradmin.plainshow.se`, then exercise Git merge.
+5. Publish a prerelease, install it, publish the next build and exercise
+   `pscluster update apply`; only then tag v1.0.0.
 
-## Important implementation notes
+These are external validation/release operations, not unimplemented programs.
+Add regression tests for concrete failures discovered there.
 
-- Controller collaboration tokens currently travel in authenticated peer
-  gossip and are returned only through the signed-in node API. Rotation/revoke
-  UI is a useful post-v1 hardening item.
-- Controller snapshot authentication knows the node keys present at attach
-  time. The initially attached node supplies the complete network overview;
-  teaching the controller new node keys dynamically is another hardening item.
-- Interactive terminal output is chunk-based so prompts without newlines are
-  visible. Historical terminal replay is plain text and may retain some ANSI
-  control characters; the live page strips common CSI sequences.
-- Jupyter is same-origin reverse-proxied and token-authenticated. If deploying a
-  node behind another reverse proxy, it must allow WebSocket upgrades under
-  `/jupyter/` as well as `/ws`.
+## Useful commands
+
+```sh
+PATH=/usr/local/go/bin:$PATH make check
+PATH=/usr/local/go/bin:$PATH make smoke
+PATH=/usr/local/go/bin:$PATH make dist
+
+sudo systemctl status plainshow-cluster-admin
+curl -fsS http://127.0.0.1:10002/healthz
+curl -fsS https://clusteradmin.plainshow.se/healthz
+```
+
+Never touch `/var/www/html/cloud`; it is the production Nextcloud instance and
+is unrelated to this project.

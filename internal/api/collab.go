@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -52,6 +53,9 @@ func (s *Server) handleClientEvent(raw []byte) {
 		}
 		applied, err := s.collab.Apply(op, content, func(next string) error { return fsys.WriteFile(op.Path, next) })
 		if err != nil {
+			if errors.Is(err, collab.ErrDuplicate) {
+				return
+			}
 			s.hub.Publish("collab.reject", map[string]any{"client_id": op.ClientID,
 				"sequence": op.Sequence, "project_id": op.ProjectID, "path": op.Path, "error": err.Error()})
 			return

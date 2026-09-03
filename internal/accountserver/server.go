@@ -3,6 +3,7 @@ package accountserver
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,8 +14,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/huggan360/plainshow-cluster/internal/auth"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 )
@@ -26,14 +29,18 @@ const (
 
 // Server serves global identity APIs and the deliberately small admin page.
 type Server struct {
-	config *Config
-	store  *Store
-	web    fs.FS
+	config  *Config
+	store   *Store
+	web     fs.FS
+	mu      sync.RWMutex
+	writeMu sync.Mutex
+	sockets map[string]map[*websocket.Conn]bool
 }
 
 // NewServer builds the account authority.
 func NewServer(config *Config, store *Store, web fs.FS) *Server {
-	return &Server{config: config, store: store, web: web}
+	return &Server{config: config, store: store, web: web,
+		sockets: map[string]map[*websocket.Conn]bool{}}
 }
 
 // Handler returns the public registration/login surface and authenticated
@@ -48,7 +55,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/accounts", s.requireAdmin(http.HandlerFunc(s.accounts)))
 	mux.Handle("PATCH /api/accounts/{id}", s.requireAdmin(http.HandlerFunc(s.updateAccount)))
 	mux.Handle("GET /api/nodes", s.requireAdmin(http.HandlerFunc(s.nodes)))
+	mux.Handle("GET /api/networks", s.requireAdmin(http.HandlerFunc(s.networks)))
+	mux.Handle("POST /api/networks/sync", s.requireAccount(http.HandlerFunc(s.syncNetwork)))
+	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
+	mux.Handle("POST /api/networks/{id}/rotate-key", s.requireAdmin(http.HandlerFunc(s.rotateNetworkKey)))
 	mux.Handle("POST /api/nodes/check-in", s.requireAccount(http.HandlerFunc(s.nodeCheckIn)))
+	mux.HandleFunc("GET /ws", s.collaborationSocket)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
@@ -205,6 +217,135 @@ func (s *Server) nodes(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, nodes)
+}
+
+func (s *Server) networks(w http.ResponseWriter, _ *http.Request) {
+	networks, err := s.store.Networks()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, networks)
+}
+
+func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var input NetworkRegistration
+	if err := decode(r, &input); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	network, err := s.store.RegisterNetwork(account.ID, input)
+	if err != nil {
+		if errors.Is(err, ErrNetworkKey) || errors.Is(err, ErrNetworkMember) {
+			fail(w, http.StatusForbidden, "This account is not registered for that network or its management key is incorrect.")
+		} else {
+			fail(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	publicURL := s.config.PublicURL
+	if publicURL == "" {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		publicURL = scheme + "://" + r.Host
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"network": network,
+		"controller": map[string]string{
+			"id": "plainshow-enterprise", "name": "Plainshow Enterprise",
+			"address": strings.TrimRight(publicURL, "/"), "collab_token": network.CollabToken,
+		},
+	})
+}
+
+func (s *Server) rotateNetworkKey(w http.ResponseWriter, r *http.Request) {
+	key, err := s.store.RotateNetworkKey(r.PathValue("id"))
+	if err != nil {
+		fail(w, http.StatusNotFound, "No such network.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"management_key": key})
+}
+
+func (s *Server) grantNetworkMember(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var body struct {
+		ManagementKey string `json:"management_key"`
+		AccountID     string `json:"account_id"`
+		Role          string `json:"role"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.GrantNetworkMember(account.ID, r.PathValue("id"),
+		body.ManagementKey, body.AccountID, body.Role); err != nil {
+		fail(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "member registered"})
+}
+
+var accountWSUpgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+func (s *Server) collaborationSocket(w http.ResponseWriter, r *http.Request) {
+	networkID := r.URL.Query().Get("network")
+	protocol := ""
+	for _, offered := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(offered, "plainshow.") {
+			protocol = offered
+			break
+		}
+	}
+	token := strings.TrimPrefix(protocol, "plainshow.")
+	want, err := s.store.NetworkCollabToken(networkID)
+	if err != nil || protocol == "" || len(token) != len(want) ||
+		subtle.ConstantTimeCompare([]byte(token), []byte(want)) != 1 {
+		fail(w, http.StatusUnauthorized, "The collaboration key is invalid.")
+		return
+	}
+	header := http.Header{}
+	header.Set("Sec-WebSocket-Protocol", protocol)
+	conn, err := accountWSUpgrader.Upgrade(w, r, header)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if s.sockets[networkID] == nil {
+		s.sockets[networkID] = map[*websocket.Conn]bool{}
+	}
+	s.sockets[networkID][conn] = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.sockets[networkID], conn)
+		s.mu.Unlock()
+		_ = conn.Close()
+	}()
+	conn.SetReadLimit(2 << 20)
+	for {
+		kind, payload, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		s.mu.RLock()
+		peers := make([]*websocket.Conn, 0, len(s.sockets[networkID]))
+		for peer := range s.sockets[networkID] {
+			if peer != conn {
+				peers = append(peers, peer)
+			}
+		}
+		s.mu.RUnlock()
+		for _, peer := range peers {
+			s.writeMu.Lock()
+			_ = peer.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_ = peer.WriteMessage(kind, payload)
+			s.writeMu.Unlock()
+		}
+	}
 }
 
 func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {

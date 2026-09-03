@@ -1,6 +1,7 @@
 // Package accountserver implements the one intentional central service in the
-// Plainshow environment: global accounts and aggregate cluster statistics.
-// Compute, project files, datasets and peer traffic never pass through it.
+// Plainshow environment: global accounts, network-key recovery, collaboration
+// relay and aggregate cluster statistics. Compute, project files, datasets and
+// task traffic never pass through it.
 package accountserver
 
 import (
@@ -95,7 +96,7 @@ func Save(layout config.Layout, value *Config) error {
 		return err
 	}
 	header := fmt.Sprintf(
-		"# Plainshow global account and statistics service\n"+
+		"# Plainshow enterprise account, network-key and collaboration service\n"+
 			"# Everything it stores lives under: %s\n\n", layout.Root)
 	temporary := layout.AdminConfigFile() + ".tmp"
 	if err := os.WriteFile(temporary, append([]byte(header), raw...), 0o640); err != nil {

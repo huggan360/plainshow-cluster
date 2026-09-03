@@ -18,6 +18,10 @@ const historyLimit = 4096
 // stay off the keystroke path, often enough that the log cannot run away.
 const trimEvery = 512
 
+// ErrDuplicate means the same browser operation already reached this clone,
+// normally through another tab connected to the controller relay.
+var ErrDuplicate = errors.New("edit was already applied")
+
 type Operation struct {
 	NetworkID string `json:"network_id"`
 	ProjectID string `json:"project_id"`
@@ -43,6 +47,7 @@ type document struct {
 	content   string
 	revision  int64
 	history   []Operation
+	seen      map[string]int64
 	sinceTrim int
 }
 
@@ -78,6 +83,9 @@ func (m *Manager) Apply(op Operation, diskContent string, write WriteFunc) (Oper
 	if op.Base > doc.revision {
 		return op, errors.New("edit revision is ahead of the server")
 	}
+	if op.ClientID != "" && op.Sequence > 0 && op.Sequence <= doc.seen[op.ClientID] {
+		return op, ErrDuplicate
+	}
 	oldest := doc.revision - int64(len(doc.history))
 	if op.Base < oldest {
 		return op, fmt.Errorf("edit is too old to reconcile; reload revision %d", doc.revision)
@@ -97,6 +105,9 @@ func (m *Manager) Apply(op Operation, diskContent string, write WriteFunc) (Oper
 	op.Revision = doc.revision
 	doc.content = next
 	doc.history = append(doc.history, op)
+	if op.ClientID != "" && op.Sequence > doc.seen[op.ClientID] {
+		doc.seen[op.ClientID] = op.Sequence
+	}
 	if len(doc.history) > historyLimit {
 		doc.history = doc.history[len(doc.history)-historyLimit:]
 	}
@@ -140,10 +151,15 @@ func (m *Manager) load(networkID, projectID, path, diskContent string) (*documen
 		return doc, nil
 	}
 	row, err := m.store.CollabDocument(networkID, projectID, path)
-	doc := &document{content: diskContent}
+	doc := &document{content: diskContent, seen: map[string]int64{}}
 	if err == nil {
 		doc.content, doc.revision = row.Content, row.Revision
 		doc.history = m.replayHistory(networkID, projectID, path, row.History)
+		for _, op := range doc.history {
+			if op.ClientID != "" && op.Sequence > doc.seen[op.ClientID] {
+				doc.seen[op.ClientID] = op.Sequence
+			}
+		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}

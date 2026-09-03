@@ -1,6 +1,7 @@
 package accountserver
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
@@ -8,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -25,6 +27,11 @@ var (
 	ErrBootstrapToken = errors.New("bootstrap token is invalid")
 	// ErrNodeOwner means another account already registered the same node id.
 	ErrNodeOwner = errors.New("node belongs to another account")
+	// ErrNetworkKey prevents an account from claiming a network by guessing its ID.
+	ErrNetworkKey = errors.New("network management key is invalid")
+	// ErrNetworkMember means a valid network key was presented by an account
+	// that has not been invited by a network administrator.
+	ErrNetworkMember = errors.New("account is not a member of the network")
 )
 
 // Account is a global Plainshow identity.
@@ -44,6 +51,29 @@ type Account struct {
 type NetworkRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// NetworkRegistration proves membership using the high-entropy key carried by
+// every joined device. The key is created with the peer network and backed up
+// by the enterprise master for recovery and administration.
+type NetworkRegistration struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ManagementKey string `json:"management_key"`
+	Role          string `json:"role"`
+}
+
+// EnterpriseNetwork is the Pi's canonical account/key registry entry.
+type EnterpriseNetwork struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	OwnerAccountID string `json:"owner_account_id"`
+	ManagementKey  string `json:"management_key,omitempty"`
+	CollabToken    string `json:"collab_token,omitempty"`
+	Members        int    `json:"members"`
+	Nodes          int    `json:"nodes"`
+	LastSeen       string `json:"last_seen"`
+	Created        string `json:"created_at"`
 }
 
 // NodeCheckIn is aggregate metadata only. It intentionally has no project
@@ -103,7 +133,44 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply account schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate account schema: %w", err)
+	}
+	return store, nil
+}
+
+func (s *Store) migrate() error {
+	columns := []struct{ name, definition string }{
+		{"owner_account_id", "TEXT NOT NULL DEFAULT ''"},
+		{"management_key", "TEXT NOT NULL DEFAULT ''"},
+		{"collab_token", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		rows, err := s.db.Query(`PRAGMA table_info(network)`)
+		if err != nil {
+			return err
+		}
+		found := false
+		for rows.Next() {
+			var cid, notNull, primary int
+			var name, kind string
+			var defaultValue sql.NullString
+			if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primary); err != nil {
+				rows.Close()
+				return err
+			}
+			found = found || name == column.name
+		}
+		rows.Close()
+		if !found {
+			if _, err := s.db.Exec("ALTER TABLE network ADD COLUMN " + column.name + " " + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Close releases the database.
@@ -286,10 +353,15 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
 		if network.ID == "" || network.Name == "" {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO network(id,name,last_seen,created_at) VALUES(?,?,?,?)
-            ON CONFLICT(id) DO UPDATE SET name=excluded.name,last_seen=excluded.last_seen`,
-			network.ID, network.Name, seen, seen); err != nil {
+		result, err := tx.Exec(`UPDATE network SET name=?,last_seen=? WHERE id=? AND EXISTS (
+            SELECT 1 FROM network_member WHERE network_id=? AND account_id=?)`,
+			network.Name, seen, network.ID, network.ID, accountID)
+		if err != nil {
 			return err
+		}
+		changed, _ := result.RowsAffected()
+		if changed != 1 {
+			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO node_network(node_id,network_id) VALUES(?,?)`,
 			input.ID, network.ID); err != nil {
@@ -297,6 +369,191 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func validNetworkRole(role string) bool {
+	switch role {
+	case "owner", "admin", "operator", "member", "viewer":
+		return true
+	default:
+		return false
+	}
+}
+
+func randomSecret() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// RegisterNetwork creates or proves access to an enterprise network registry
+// entry and records the global account's network role.
+func (s *Store) RegisterNetwork(accountID string, input NetworkRegistration) (EnterpriseNetwork, error) {
+	input.ID, input.Name = strings.TrimSpace(input.ID), strings.TrimSpace(input.Name)
+	if input.ID == "" || input.Name == "" || len(input.ManagementKey) < 32 || !validNetworkRole(input.Role) {
+		return EnterpriseNetwork{}, errors.New("network registration is incomplete")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return EnterpriseNetwork{}, err
+	}
+	defer tx.Rollback()
+	var network EnterpriseNetwork
+	err = tx.QueryRow(`SELECT id,name,owner_account_id,management_key,collab_token,last_seen,created_at
+        FROM network WHERE id=?`, input.ID).Scan(&network.ID, &network.Name,
+		&network.OwnerAccountID, &network.ManagementKey, &network.CollabToken,
+		&network.LastSeen, &network.Created)
+	seen := now()
+	if errors.Is(err, sql.ErrNoRows) {
+		collabToken, err := randomSecret()
+		if err != nil {
+			return network, err
+		}
+		input.Role = "owner"
+		network = EnterpriseNetwork{ID: input.ID, Name: input.Name,
+			OwnerAccountID: accountID, ManagementKey: input.ManagementKey,
+			CollabToken: collabToken, LastSeen: seen, Created: seen}
+		_, err = tx.Exec(`INSERT INTO network
+            (id,name,owner_account_id,management_key,collab_token,last_seen,created_at)
+            VALUES(?,?,?,?,?,?,?)`, network.ID, network.Name, network.OwnerAccountID,
+			network.ManagementKey, network.CollabToken, seen, seen)
+		if err != nil {
+			return network, err
+		}
+	} else if err != nil {
+		return network, err
+	} else {
+		if network.ManagementKey == "" {
+			collabToken, secretErr := randomSecret()
+			if secretErr != nil {
+				return network, secretErr
+			}
+			input.Role = "owner"
+			network.OwnerAccountID, network.ManagementKey, network.CollabToken =
+				accountID, input.ManagementKey, collabToken
+			if _, err := tx.Exec(`UPDATE network SET owner_account_id=?,management_key=?,collab_token=? WHERE id=?`,
+				accountID, input.ManagementKey, collabToken, input.ID); err != nil {
+				return network, err
+			}
+		}
+		if subtle.ConstantTimeCompare([]byte(network.ManagementKey), []byte(input.ManagementKey)) != 1 {
+			return network, ErrNetworkKey
+		}
+		network.Name, network.LastSeen = input.Name, seen
+		if _, err := tx.Exec(`UPDATE network SET name=?,last_seen=? WHERE id=?`, input.Name, seen, input.ID); err != nil {
+			return network, err
+		}
+	}
+	var existingRole string
+	memberErr := tx.QueryRow(`SELECT role FROM network_member WHERE network_id=? AND account_id=?`,
+		input.ID, accountID).Scan(&existingRole)
+	if errors.Is(memberErr, sql.ErrNoRows) {
+		if network.OwnerAccountID != accountID {
+			return network, ErrNetworkMember
+		}
+		existingRole = "owner"
+		if _, err := tx.Exec(`INSERT INTO network_member(network_id,account_id,role,joined_at)
+            VALUES(?,?,?,?)`, input.ID, accountID, existingRole, seen); err != nil {
+			return network, err
+		}
+	} else if memberErr != nil {
+		return network, memberErr
+	}
+	if err := tx.Commit(); err != nil {
+		return network, err
+	}
+	return network, nil
+}
+
+// GrantNetworkMember is called by the inviting peer after it has authenticated
+// the joining global account and consumed the peer invitation.
+func (s *Store) GrantNetworkMember(actorID, networkID, managementKey, accountID, role string) error {
+	if !validNetworkRole(role) || role == "owner" {
+		return errors.New("invalid invited network role")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var key, actorRole string
+	if err := tx.QueryRow(`SELECT management_key FROM network WHERE id=?`, networkID).Scan(&key); err != nil {
+		return ErrNotFound
+	}
+	if subtle.ConstantTimeCompare([]byte(key), []byte(managementKey)) != 1 {
+		return ErrNetworkKey
+	}
+	if err := tx.QueryRow(`SELECT role FROM network_member WHERE network_id=? AND account_id=?`,
+		networkID, actorID).Scan(&actorRole); err != nil || (actorRole != "owner" && actorRole != "admin") {
+		return errors.New("network administrator access is required")
+	}
+	var exists int
+	if err := tx.QueryRow(`SELECT count(*) FROM account WHERE id=? AND disabled=0`, accountID).Scan(&exists); err != nil || exists != 1 {
+		return errors.New("joining account does not exist or is disabled")
+	}
+	// Never demote or replace a role already assigned by an administrator.
+	var current string
+	if err := tx.QueryRow(`SELECT role FROM network_member WHERE network_id=? AND account_id=?`,
+		networkID, accountID).Scan(&current); err == nil {
+		return tx.Commit()
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO network_member(network_id,account_id,role,joined_at)
+        VALUES(?,?,?,?)`, networkID, accountID, role, now()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Networks returns the global registry with secrets included for administrators.
+func (s *Store) Networks() ([]EnterpriseNetwork, error) {
+	rows, err := s.db.Query(`SELECT n.id,n.name,n.owner_account_id,n.management_key,
+        n.collab_token,(SELECT count(*) FROM network_member m WHERE m.network_id=n.id),
+        (SELECT count(*) FROM node_network nn WHERE nn.network_id=n.id),n.last_seen,n.created_at
+        FROM network n ORDER BY lower(n.name)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EnterpriseNetwork{}
+	for rows.Next() {
+		var network EnterpriseNetwork
+		if err := rows.Scan(&network.ID, &network.Name, &network.OwnerAccountID,
+			&network.ManagementKey, &network.CollabToken, &network.Members,
+			&network.Nodes, &network.LastSeen, &network.Created); err != nil {
+			return nil, err
+		}
+		out = append(out, network)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) NetworkCollabToken(networkID string) (string, error) {
+	var token string
+	err := s.db.QueryRow(`SELECT collab_token FROM network WHERE id=?`, networkID).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return token, err
+}
+
+func (s *Store) RotateNetworkKey(networkID string) (string, error) {
+	secret, err := randomSecret()
+	if err != nil {
+		return "", err
+	}
+	result, err := s.db.Exec(`UPDATE network SET management_key=? WHERE id=?`, secret, networkID)
+	if err != nil {
+		return "", err
+	}
+	changed, _ := result.RowsAffected()
+	if changed != 1 {
+		return "", ErrNotFound
+	}
+	return secret, nil
 }
 
 // Nodes lists globally registered devices.

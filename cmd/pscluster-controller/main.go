@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -42,6 +43,8 @@ func run(args []string) error {
 		return attach(flags)
 	case "status":
 		return status(flags)
+	case "reset-admin-token":
+		return resetAdminToken(flags)
 	case "version", "--version", "-v":
 		fmt.Printf("%s Controller %s (%s, %s)\n", version.Product, version.Version, version.Commit, config.Platform())
 		return nil
@@ -67,6 +70,7 @@ func usage() {
       Attach this controller to a network using an admin-minted code.
 
   pscluster-controller status [--root DIR]
+  pscluster-controller reset-admin-token [--root DIR]
   pscluster-controller version
 
 The root is taken from --root, then %s, then a platform default.
@@ -141,6 +145,11 @@ func initialise(flags flags) error {
 		return fmt.Errorf("create controller identity: %w", err)
 	}
 	value.ID = key.ID
+	adminToken, err := newAdminToken()
+	if err != nil {
+		return err
+	}
+	value.AdminTokenHash = mesh.TokenHash(adminToken)
 	_, fingerprint, err := identity.TLSCertificate(key, layout.ControllerCert())
 	if err != nil {
 		return fmt.Errorf("create controller TLS certificate: %w", err)
@@ -153,7 +162,33 @@ func initialise(flags flags) error {
 	fmt.Printf("  Root         %s\n", layout.Root)
 	fmt.Printf("  Listen       %s:%d\n", value.Listen.Bind, value.Listen.Port)
 	fmt.Printf("  Fingerprint  %s\n\n", fingerprint)
+	fmt.Printf("  Overview admin token (shown once):\n\n  %s\n\n", adminToken)
 	fmt.Printf("  Start it: pscluster-controller serve --root %s\n\n", layout.Root)
+	return nil
+}
+
+func newAdminToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func resetAdminToken(flags flags) error {
+	layout, value, err := open(flags)
+	if err != nil {
+		return err
+	}
+	token, err := newAdminToken()
+	if err != nil {
+		return err
+	}
+	value.AdminTokenHash = mesh.TokenHash(token)
+	if err := controller.Save(layout, value); err != nil {
+		return err
+	}
+	fmt.Printf("\n  New controller admin token (shown once):\n\n  %s\n\n", token)
 	return nil
 }
 
@@ -199,7 +234,7 @@ func serve(flags flags) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	server := controller.NewServer(value, fingerprint)
-	server.SetOverviewPath(layout.ControllerOverview())
+	server.SetLayout(layout)
 	return server.ListenAndServe(ctx, certificate, func(address string) {
 		fmt.Printf("\n  %s Controller  ·  %s\n\n", version.Product, value.Name)
 		fmt.Printf("  %s\n", address)

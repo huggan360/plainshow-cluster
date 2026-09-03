@@ -21,10 +21,11 @@ const EnvRoot = "PSCLUSTER_CONTROLLER_ROOT"
 
 // Config is the controller's complete durable configuration.
 type Config struct {
-	ID       string          `yaml:"id" json:"id"`
-	Name     string          `yaml:"name" json:"name"`
-	Listen   ListenConfig    `yaml:"listen" json:"listen"`
-	Networks []NetworkConfig `yaml:"networks" json:"networks"`
+	ID             string          `yaml:"id" json:"id"`
+	Name           string          `yaml:"name" json:"name"`
+	AdminTokenHash string          `yaml:"admin_token_hash" json:"-"`
+	Listen         ListenConfig    `yaml:"listen" json:"listen"`
+	Networks       []NetworkConfig `yaml:"networks" json:"networks"`
 }
 
 // ListenConfig controls the HTTPS listener. Init resolves Port rather than

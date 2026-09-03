@@ -7,6 +7,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/accountserver"
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
@@ -58,8 +59,28 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		return
 	}
 	refs := make([]accountserver.NetworkRef, 0, len(networks))
+	roles := make(map[string]string, len(networks))
 	for _, network := range networks {
 		refs = append(refs, accountserver.NetworkRef{ID: network.ID, Name: network.Name})
+		roles[network.ID] = network.Role
+	}
+	for _, membership := range s.cfg.Memberships {
+		role := roles[membership.ID]
+		if role == "" {
+			role = "member"
+		}
+		access, syncErr := client.SyncNetwork(ctx, token, accountserver.NetworkRegistration{
+			ID: membership.ID, Name: membership.Name,
+			ManagementKey: membership.ManagementKey, Role: role,
+		})
+		if syncErr != nil || access.Controller.Address == "" {
+			continue
+		}
+		_ = s.store.UpsertNetworkController(store.NetworkController{
+			NetworkID: membership.ID, ID: access.Controller.ID,
+			Name: access.Controller.Name, Address: access.Controller.Address,
+			CollabToken: access.Controller.CollabToken, LastSeen: store.Now(),
+		})
 	}
 	info := sysinfo.Probe(s.layout.Root)
 	checkIn := accountserver.NodeCheckIn{

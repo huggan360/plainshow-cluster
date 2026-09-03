@@ -82,8 +82,11 @@ let attempts = 0;
 let live = false;
 const connectionListeners = new Set();
 const outboxKey = 'plainshow.cluster.outbox.v1';
+const controllerOutboxKey = 'plainshow.cluster.controller-outbox.v1';
 let outbox = [];
+let controllerOutbox = [];
 try { outbox = JSON.parse(localStorage.getItem(outboxKey) || '[]'); } catch { outbox = []; }
+try { controllerOutbox = JSON.parse(localStorage.getItem(controllerOutboxKey) || '[]'); } catch { controllerOutbox = []; }
 
 export function isLive() { return live; }
 
@@ -93,8 +96,12 @@ export function send(topic, data, durable = false) {
     const message = { topic, data };
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
-        if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN && topic.startsWith('collab.')) {
-            controllerSocket.send(JSON.stringify(message));
+        if (topic.startsWith('collab.')) {
+            if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN) {
+                controllerSocket.send(JSON.stringify(message));
+            } else if (durable) {
+                queueForController(message);
+            }
         }
         return true;
     }
@@ -103,6 +110,19 @@ export function send(topic, data, durable = false) {
         localStorage.setItem(outboxKey, JSON.stringify(outbox));
     }
     return false;
+}
+
+function queueForController(message) {
+    controllerOutbox.push(message);
+    localStorage.setItem(controllerOutboxKey, JSON.stringify(controllerOutbox));
+}
+
+function deliverToController(message) {
+    if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN) {
+        controllerSocket.send(JSON.stringify(message));
+    } else {
+        queueForController(message);
+    }
 }
 
 /** onConnection observes whether the event stream is up. */
@@ -129,7 +149,10 @@ export function connect() {
         const pending = outbox;
         outbox = [];
         localStorage.setItem(outboxKey, '[]');
-        pending.forEach((message) => socket.send(JSON.stringify(message)));
+        pending.forEach((message) => {
+            socket.send(JSON.stringify(message));
+            if (message.topic.startsWith('collab.')) deliverToController(message);
+        });
         connectController();
     };
     socket.onmessage = (event) => {
@@ -153,7 +176,13 @@ export function connect() {
 function connectController() {
     const target = state.overview && state.overview.controller;
     if (!target || !target.ws_url || (controllerSocket && controllerSocket.readyState < 2)) return;
-    controllerSocket = new WebSocket(target.ws_url);
+    controllerSocket = new WebSocket(target.ws_url, [`plainshow.${target.collab_token}`]);
+    controllerSocket.onopen = () => {
+        const pending = controllerOutbox;
+        controllerOutbox = [];
+        localStorage.setItem(controllerOutboxKey, '[]');
+        pending.forEach((message) => controllerSocket.send(JSON.stringify(message)));
+    };
     controllerSocket.onmessage = (event) => {
         // The sending browser already delivered the operation to its node.
         // Other browsers deliver the controller copy to their own node, which

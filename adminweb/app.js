@@ -106,15 +106,34 @@ function nodeRow(item) {
         node('span', { class: 'chip' }, item.version || 'dev'));
 }
 
+function networkRow(item, reload) {
+    const key = node('code', { class: 'meta' }, item.management_key);
+    const copy = node('button', { class: 'btn', onclick: async () => {
+        await navigator.clipboard.writeText(item.management_key);
+    } }, 'Copy key');
+    const rotate = node('button', { class: 'btn danger', onclick: async () => {
+        if (!confirm(`Rotate the management key for ${item.name}? Existing devices must receive the new key.`)) return;
+        const result = await api(`/api/networks/${encodeURIComponent(item.id)}/rotate-key`, { method: 'POST', body: {} });
+        await navigator.clipboard.writeText(result.management_key);
+        alert('The new key was copied. Update every device before its next registry sync.');
+        await reload();
+    } }, 'Rotate');
+    return node('div', { class: 'row' }, node('div', { class: 'main' },
+        node('div', { class: 'title' }, item.name),
+        node('div', { class: 'meta' }, `${item.members} accounts · ${item.nodes} devices · ${item.id}`),
+        node('details', {}, node('summary', {}, 'Recovery key'), key)),
+        node('div', {}, copy, rotate));
+}
+
 async function dashboard(status) {
     const draw = async () => {
-        const [stats, accounts, nodes] = await Promise.all([
-            api('/api/stats'), api('/api/accounts'), api('/api/nodes'),
+        const [stats, accounts, nodes, networks] = await Promise.all([
+            api('/api/stats'), api('/api/accounts'), api('/api/nodes'), api('/api/networks'),
         ]);
         app.replaceChildren(node('div', { class: 'shell' }, header(status.account),
             node('p', { class: 'sub' }, 'Global environment'),
             node('h1', {}, 'Cluster at a glance'),
-            node('p', { class: 'muted' }, 'Identity and aggregate health only. Project data and traffic stay on devices.'),
+            node('p', { class: 'muted' }, 'Accounts, network recovery keys, collaboration control and aggregate health. Project data and compute traffic stay on devices.'),
             node('section', { class: 'stats' },
                 stat(stats.accounts, 'accounts'), stat(`${stats.online_nodes}/${stats.nodes}`, 'nodes online'),
                 stat(stats.networks, 'networks'), stat(stats.gpus, 'GPUs'),
@@ -124,7 +143,9 @@ async function dashboard(status) {
                 node('section', { class: 'panel' }, node('h2', {}, 'Accounts'),
                     node('div', { class: 'rows' }, ...accounts.map((item) => accountRow(item, status.account, draw)))),
                 node('section', { class: 'panel' }, node('h2', {}, 'Devices'),
-                    node('div', { class: 'rows' }, ...nodes.map(nodeRow))))));
+                    node('div', { class: 'rows' }, ...nodes.map(nodeRow))),
+                node('section', { class: 'panel' }, node('h2', {}, 'Network registry'),
+                    node('div', { class: 'rows' }, ...networks.map((item) => networkRow(item, draw)))))));
     };
     await draw();
 }

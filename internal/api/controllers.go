@@ -20,6 +20,11 @@ func (s *Server) createControllerInvite(w http.ResponseWriter, r *http.Request) 
 		fail(w, 404, "No such network.")
 		return
 	}
+	member, err := s.store.NetworkMember(id, s.cfg.AccountID())
+	if err != nil || !member.Permissions.ManageNetwork {
+		fail(w, 403, "Your account cannot attach a controller to this network.")
+		return
+	}
 	endpoint := advertisedEndpointFor(s.cfg, tailnet.Probe(r.Context()))
 	invite, tokenHash, err := mesh.NewInvite(id, network.Name, endpoint,
 		s.fingerprint, "controller", 15*time.Minute)
@@ -86,6 +91,10 @@ func (s *Server) networkControllers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
+	}
+	for i := range items {
+		items[i].PublicKey = ""
+		items[i].CollabToken = ""
 	}
 	writeJSON(w, 200, items)
 }

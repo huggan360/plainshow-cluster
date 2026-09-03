@@ -68,6 +68,11 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	if err := store.CreateAccount(Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "hash"}, "", true); err != nil {
 		t.Fatal(err)
 	}
+	registered, err := store.RegisterNetwork("a1", NetworkRegistration{ID: "network", Name: "Lab",
+		ManagementKey: "a-management-key-that-is-long-enough", Role: "owner"})
+	if err != nil || registered.CollabToken == "" || registered.OwnerAccountID != "a1" {
+		t.Fatalf("network registration = %+v, %v", registered, err)
+	}
 	checkIn := NodeCheckIn{ID: "node", Name: "Pi", GPUCount: 1, ProjectCount: 3,
 		RunningJobs: 2, Networks: []NetworkRef{{ID: "network", Name: "Lab"}}}
 	if err := store.CheckIn("a1", checkIn); err != nil {
@@ -83,5 +88,32 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	if stats.Accounts != 2 || stats.Nodes != 1 || stats.OnlineNodes != 1 ||
 		stats.Networks != 1 || stats.GPUs != 1 || stats.Projects != 3 || stats.RunningJobs != 2 {
 		t.Fatalf("stats = %#v", stats)
+	}
+}
+
+func TestNetworkRegistryRequiresKeyAndRecordsMembers(t *testing.T) {
+	store := openTestStore(t)
+	_ = store.InitialiseBootstrap(TokenHash("secret"))
+	_ = store.CreateAccount(Account{ID: "a1", Username: "one", DisplayName: "One", PasswordHash: "hash"}, TokenHash("secret"), true)
+	_ = store.CreateAccount(Account{ID: "a2", Username: "two", DisplayName: "Two", PasswordHash: "hash"}, "", true)
+	key := "0123456789012345678901234567890123456789"
+	if _, err := store.RegisterNetwork("a1", NetworkRegistration{ID: "n", Name: "Lab", ManagementKey: key, Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RegisterNetwork("a2", NetworkRegistration{ID: "n", Name: "Lab", ManagementKey: "wrong-wrong-wrong-wrong-wrong-wrong", Role: "member"}); !errors.Is(err, ErrNetworkKey) {
+		t.Fatalf("wrong management key = %v", err)
+	}
+	if _, err := store.RegisterNetwork("a2", NetworkRegistration{ID: "n", Name: "Lab", ManagementKey: key, Role: "member"}); !errors.Is(err, ErrNetworkMember) {
+		t.Fatalf("uninvited account = %v", err)
+	}
+	if err := store.GrantNetworkMember("a1", "n", key, "a2", "member"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RegisterNetwork("a2", NetworkRegistration{ID: "n", Name: "Lab", ManagementKey: key, Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	networks, err := store.Networks()
+	if err != nil || len(networks) != 1 || networks[0].Members != 2 || networks[0].ManagementKey != key {
+		t.Fatalf("networks = %+v, %v", networks, err)
 	}
 }

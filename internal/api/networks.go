@@ -33,6 +33,11 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "This device does not belong to that network.")
 		return
 	}
+	member, err := s.store.NetworkMember(id, s.cfg.AccountID())
+	if err != nil || !member.Permissions.ManageMembers {
+		fail(w, 403, "Your account cannot invite accounts or devices to this network.")
+		return
+	}
 	network, err := s.store.NetworkByID(id)
 	if err != nil {
 		fail(w, 404, "No such network.")
@@ -58,6 +63,10 @@ func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if !store.ValidNetworkRole(body.Role) {
 		fail(w, 400, "Unknown network role.")
+		return
+	}
+	if body.Role == store.NetworkOwner {
+		fail(w, 400, "Ownership cannot be granted by a device invitation. Invite an administrator or member instead.")
 		return
 	}
 	if body.Minutes <= 0 {
@@ -146,9 +155,13 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		fail(w, 502, "Could not join the network: "+err.Error())
 		return
 	}
+	if len(response.ManagementKey) < 32 {
+		fail(w, 502, "The inviting node is too old to share this network's management key. Update it and create a new code.")
+		return
+	}
 	membership := config.MembershipConfig{ID: response.Network.ID, Name: response.Network.Name,
 		Roles: []config.Role{config.RoleWorker}, Enabled: true,
-		AccountRole: response.Role,
+		AccountRole: response.Role, ManagementKey: response.ManagementKey,
 		Coordinator: []string{invite.Endpoint}, Policy: s.cfg.Worker}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	s.cfg.SetActiveNetwork(membership.ID)
@@ -169,11 +182,16 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.Publish("networks.changed", membership)
+	go s.checkInAccountServer(context.Background())
 	writeJSON(w, 201, map[string]any{"network": response.Network, "role": response.Role,
 		"nodes": response.Nodes, "active": membership.ID})
 }
 
 func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
+	if s.usesCentralAccounts() && s.cfg.Account.ID == "" {
+		fail(w, 409, "Sign in with your Plainshow account before creating a network.")
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -189,7 +207,7 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 	membership := config.MembershipConfig{
 		ID: config.NewID(), Name: body.Name,
 		Roles: []config.Role{config.RoleWorker}, AccountRole: store.NetworkOwner,
-		Enabled: true, Policy: s.cfg.Worker,
+		ManagementKey: config.NewSecret(), Enabled: true, Policy: s.cfg.Worker,
 	}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	s.cfg.SetActiveNetwork(membership.ID)
@@ -204,6 +222,7 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.Publish("networks.changed", membership)
+	go s.checkInAccountServer(context.Background())
 	writeJSON(w, 201, membership)
 }
 
@@ -294,6 +313,39 @@ func (s *Server) updateNetworkPolicy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, membership)
 		return
 	}
+}
+
+func (s *Server) updateNetworkManagementKey(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !hasMembership(s.cfg, id) {
+		fail(w, 404, "This device does not belong to that network.")
+		return
+	}
+	var body struct {
+		ManagementKey string `json:"management_key"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	body.ManagementKey = strings.TrimSpace(body.ManagementKey)
+	if len(body.ManagementKey) < 32 {
+		fail(w, 400, "The management key is incomplete.")
+		return
+	}
+	for i := range s.cfg.Memberships {
+		if s.cfg.Memberships[i].ID == id {
+			s.cfg.Memberships[i].ManagementKey = body.ManagementKey
+			if err := config.Save(s.layout, s.cfg); err != nil {
+				fail(w, 500, err.Error())
+				return
+			}
+			go s.checkInAccountServer(context.Background())
+			writeJSON(w, 200, map[string]string{"status": "updated"})
+			return
+		}
+	}
+	fail(w, 404, "This device does not belong to that network.")
 }
 
 func hasMembership(cfg *config.Config, id string) bool {

@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/networks/{id}/nodes", s.networkNodes)
 	mux.HandleFunc("GET /api/networks/{id}/members", s.networkMembers)
 	mux.HandleFunc("PUT /api/networks/{id}/policy", s.updateNetworkPolicy)
+	mux.HandleFunc("PUT /api/networks/{id}/management-key", s.updateNetworkManagementKey)
 	mux.HandleFunc("POST /api/networks/{id}/invites", s.createNetworkInvite)
 	mux.HandleFunc("POST /api/networks/{id}/controller-invites", s.createControllerInvite)
 	mux.HandleFunc("GET /api/networks/{id}/controllers", s.networkControllers)
@@ -277,11 +278,18 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	var activeController any
 	if len(controllers) > 0 {
 		item := controllers[0]
+		for _, candidate := range controllers {
+			if candidate.ID == "plainshow-enterprise" {
+				item = candidate
+				break
+			}
+		}
 		wsURL := strings.Replace(item.Address, "https://", "wss://", 1)
 		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 		activeController = map[string]string{"id": item.ID, "name": item.Name,
+			"collab_token": item.CollabToken,
 			"ws_url": strings.TrimRight(wsURL, "/") + "/ws?network=" +
-				url.QueryEscape(item.NetworkID) + "&token=" + url.QueryEscape(item.CollabToken)}
+				url.QueryEscape(item.NetworkID)}
 	}
 	writeJSON(w, 200, map[string]any{
 		"cluster": map[string]string{
