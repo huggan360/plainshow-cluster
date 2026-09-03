@@ -107,8 +107,10 @@ HTTP redirects to HTTPS, the public health endpoint and embedded page return
 success through Cloudflare, and an attempted WebSocket upgrade reaches the relay
 and is correctly rejected without a network token. The dedicated ECDSA Let's
 Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
-The deployed Linux arm64 program includes the `3b29fde` admin-index and log
-ordering fixes. No account has been created yet, so the human handoff is:
+The deployed Linux arm64 program is revision `002a4c4`. It includes the final
+PlainShow-branded admin interface, and the public HTML, CSS, JavaScript and
+production-icon checksum were verified against that revision after restart. No
+account has been created yet, so the human handoff is:
 
 ```sh
 sudo cat /opt/plainshow-cluster-admin/bootstrap.txt
