@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/huggan360/plainshow-cluster/internal/store"
@@ -71,6 +72,38 @@ func (m *Manager) Open(networkID, projectID, path, diskContent string) (Snapshot
 		return Snapshot{}, err
 	}
 	return Snapshot{Content: doc.content, Revision: doc.revision}, nil
+}
+
+// Reset forgets collaboration history after a file is replaced outside the
+// editor, so the next open uses the new disk content instead of a stale cache.
+func (m *Manager) Reset(networkID, projectID, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.store.DeleteCollabDocument(networkID, projectID, path); err != nil {
+		return err
+	}
+	delete(m.docs, key(networkID, projectID, path))
+	return nil
+}
+
+// ResetTree is Reset for a directory rename or removal.
+func (m *Manager) ResetTree(networkID, projectID, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.store.DeleteCollabTree(networkID, projectID, path); err != nil {
+		return err
+	}
+	prefix := key(networkID, projectID, "")
+	for k := range m.docs {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(k, prefix)
+		if rel == path || strings.HasPrefix(rel, path+"/") {
+			delete(m.docs, k)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Apply(op Operation, diskContent string, write WriteFunc) (Operation, error) {

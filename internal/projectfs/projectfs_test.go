@@ -1,6 +1,8 @@
 package projectfs
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +115,51 @@ func TestReadFileRejectsOversize(t *testing.T) {
 	}
 	if _, err := p.ReadFile("big.txt"); err != ErrTooLarge {
 		t.Fatalf("ReadFile(big) error = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestUploadStreamsBinaryAtomically(t *testing.T) {
+	p, root := newProject(t)
+	body := []byte{0x00, 0x01, 0x02, 0xff}
+	n, err := p.Upload("assets/model.bin", bytes.NewReader(body), 32)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if n != int64(len(body)) {
+		t.Fatalf("Upload wrote %d bytes, want %d", n, len(body))
+	}
+	got, err := os.ReadFile(filepath.Join(root, "assets", "model.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("uploaded body = %v, want %v", got, body)
+	}
+}
+
+func TestUploadRejectsOversizeWithoutReplacingFile(t *testing.T) {
+	p, root := newProject(t)
+	target := filepath.Join(root, "weights.bin")
+	if err := os.WriteFile(target, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := p.Upload("weights.bin", bytes.NewReader([]byte("12345")), 4); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("Upload error = %v, want ErrTooLarge", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "old" {
+		t.Fatalf("oversize upload replaced existing file with %q", got)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, ".pscluster-upload-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary uploads left behind: %v", matches)
 	}
 }
 

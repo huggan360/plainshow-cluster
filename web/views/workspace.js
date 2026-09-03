@@ -109,16 +109,32 @@ async function renderProject(host, name, initialPath) {
         dirty: false,
         saving: false,
 		projectId: state.overview.projects.find((project) => project.name === name)?.id || '',
-		networkId: state.overview.active_network,
+        networkId: state.overview.active_network,
 		revision: 0,
 		nextBase: 0,
+		pending: new Set(),
+		expanded: new Set(),
     };
 	const clientId = sessionStorage.getItem('plainshow.client') || crypto.randomUUID();
 	sessionStorage.setItem('plainshow.client', clientId);
+	const sequenceKey = `plainshow.sequence.${clientId}`;
+	let operationSequence = Number(sessionStorage.getItem(sequenceKey)) || Date.now();
+	const nextSequence = () => {
+		operationSequence = Math.max(operationSequence + 1, Date.now());
+		sessionStorage.setItem(sequenceKey, String(operationSequence));
+		return operationSequence;
+	};
 
     const treeBox = el('div', { class: 'tree' });
     const editorBox = el('div', { class: 'editor' });
     const outputBox = el('div', { class: 'console' });
+	const uploadInput = el('input', {
+		type: 'file', multiple: true, class: 'hide',
+		onchange: async () => {
+			await uploadFiles([...uploadInput.files]);
+			uploadInput.value = '';
+		},
+	});
     let currentJob = null;
 
     // ---- file tree ----
@@ -130,37 +146,145 @@ async function renderProject(host, name, initialPath) {
             mount(treeBox, el('p', { class: 'muted', style: 'font-size:12px;padding:8px' },
                 'This project is empty.'));
         }
+		return tree;
     }
 
     function renderTree(entries, depth) {
         return entries.map((entry) => {
+			const open = ctx.expanded.has(entry.path);
+			const kids = entry.dir && entry.children && entry.children.length
+				? el('div', { class: `tree__kids ${open ? '' : 'hide'}` },
+					...renderTree(entry.children, depth + 1))
+				: null;
             const button = el('button', {
                 class: `tree__item ${entry.path === ctx.path ? 'tree__item--on' : ''}`,
                 title: entry.path,
                 onclick: () => {
                     if (entry.dir) {
+						if (!kids) return;
                         kids.classList.toggle('hide');
-                        button.querySelector('.tree__ico').textContent =
-                            kids.classList.contains('hide') ? '▸' : '▾';
+						const expanded = !kids.classList.contains('hide');
+						button.querySelector('.tree__ico').textContent = expanded ? '▾' : '▸';
+						if (expanded) ctx.expanded.add(entry.path);
+						else ctx.expanded.delete(entry.path);
                     } else {
                         openFile(entry.path);
                     }
                 },
             },
-                el('span', { class: 'tree__ico' }, fileIcon(entry.name, entry.dir)),
+				el('span', { class: 'tree__ico' }, entry.dir ? (open ? '▾' : '▸') : fileIcon(entry.name, false)),
                 el('span', { class: 'tree__name' }, entry.name),
                 !entry.dir && entry.size
                     ? el('span', { class: 'mono dim', style: 'margin-left:auto;font-size:9.5px' },
                         bytes(entry.size))
                     : null);
+			const actions = el('div', { class: 'tree__actions' },
+				!entry.dir ? el('a', {
+					class: 'tree__action', title: `Download ${entry.name}`,
+					'aria-label': `Download ${entry.name}`, download: entry.name,
+					href: `/api/projects/${encodeURIComponent(name)}/raw?path=${encodeURIComponent(entry.path)}`,
+				}, '↓') : null,
+				el('button', {
+					class: 'tree__action', title: `Rename ${entry.name}`,
+					'aria-label': `Rename ${entry.name}`,
+					onclick: () => renameEntryDialog(entry),
+				}, '✎'),
+				el('button', {
+					class: 'tree__action tree__action--danger', title: `Delete ${entry.name}`,
+					'aria-label': `Delete ${entry.name}`,
+					onclick: () => removeEntryDialog(entry),
+				}, '×'));
 
-            const kids = entry.dir && entry.children && entry.children.length
-                ? el('div', { class: 'tree__kids hide' }, ...renderTree(entry.children, depth + 1))
-                : null;
-
-            return el('div', {}, button, kids);
+            return el('div', { class: 'tree__node' },
+				el('div', { class: 'tree__row' }, button, actions), kids);
         });
     }
+
+	async function uploadFiles(files) {
+		if (!files.length) return;
+		const uploadButton = document.getElementById('workspace-upload');
+		if (uploadButton) {
+			uploadButton.disabled = true;
+			uploadButton.textContent = `Uploading 0/${files.length}`;
+		}
+		const uploaded = [];
+		try {
+			for (const [index, file] of files.entries()) {
+				const rawPath = file.webkitRelativePath || file.name;
+				const target = rawPath.replaceAll('\\', '/').split('/')
+					.filter((part) => part && part !== '.' && part !== '..').join('/');
+				if (!target) continue;
+				const form = new FormData();
+				form.append('file', file, file.name);
+				await api(`/api/projects/${encodeURIComponent(name)}/upload?path=${encodeURIComponent(target)}`, {
+					method: 'POST', body: form,
+				});
+				uploaded.push(target);
+				if (uploadButton) uploadButton.textContent = `Uploading ${index + 1}/${files.length}`;
+			}
+			await loadTree();
+			if (uploaded.length === 1) {
+				try { await openFile(uploaded[0]); } catch { /* binary uploads stay downloadable */ }
+			}
+			toast(`Uploaded ${uploaded.length} ${uploaded.length === 1 ? 'file' : 'files'}.`);
+		} catch (err) {
+			toast(err.message, 'err');
+		} finally {
+			if (uploadButton) {
+				uploadButton.disabled = false;
+				uploadButton.textContent = 'Upload';
+			}
+		}
+	}
+
+	function renameEntryDialog(entry) {
+		const destination = el('input', { class: 'input input--mono', value: entry.path });
+		modal({
+			title: `Rename ${entry.name}`,
+			confirmLabel: 'Rename',
+			body: () => el('div', {},
+				el('div', { class: 'field' },
+					el('label', { class: 'field__label' }, 'New path'), destination)),
+			onConfirm: async (close) => {
+				const to = destination.value.trim();
+				if (!to || to === entry.path) throw new Error('Choose a different path.');
+				const movingOpenFile = ctx.path === entry.path || ctx.path.startsWith(`${entry.path}/`);
+				if (movingOpenFile && ctx.dirty) {
+					throw new Error('Wait for the open file to finish syncing before renaming it.');
+				}
+				await api(`/api/projects/${encodeURIComponent(name)}/rename`, {
+					method: 'POST', body: { from: entry.path, to },
+				});
+				const movedPath = movingOpenFile ? `${to}${ctx.path.slice(entry.path.length)}` : '';
+				close();
+				await loadTree();
+				if (movedPath) await openFile(movedPath);
+				toast(`Renamed to ${to}.`);
+			},
+		});
+	}
+
+	function removeEntryDialog(entry) {
+		modal({
+			title: `Delete ${entry.name}?`, confirmLabel: 'Delete', danger: true,
+			body: () => el('p', { class: 'muted', style: 'margin:0;font-size:13px' },
+				entry.dir
+					? 'The folder and everything inside it will be removed. This cannot be undone.'
+					: 'The file will be removed. You can recover committed versions with Git.'),
+			onConfirm: async (close) => {
+				const deletingOpenFile = ctx.path === entry.path || ctx.path.startsWith(`${entry.path}/`);
+				if (deletingOpenFile && ctx.dirty) {
+					throw new Error('Wait for the open file to finish syncing before deleting it.');
+				}
+				await api(`/api/projects/${encodeURIComponent(name)}/entry?path=${encodeURIComponent(entry.path)}`,
+					{ method: 'DELETE' });
+				if (deletingOpenFile) closeEditor();
+				close();
+				await loadTree();
+				toast(`Deleted ${entry.name}.`);
+			},
+		});
+	}
 
     // ---- editor ----
 
@@ -168,12 +292,20 @@ async function renderProject(host, name, initialPath) {
     const highlightLayer = el('pre', { class: 'code__hl' });
     const input = el('textarea', {
         class: 'code__in', spellcheck: 'false', autocapitalize: 'off',
-        autocomplete: 'off', wrap: 'off',
+		autocomplete: 'off', wrap: 'off', disabled: true,
     });
+	const emptyEditor = el('div', { class: 'code__empty' },
+		el('span', { class: 'code__empty-icon' }, '⌁'),
+		el('strong', {}, 'Open a file to start editing'),
+		el('span', {}, 'Create a file, upload one, or choose it from the explorer.'));
 
     /** paint re-renders the highlight layer, gutter and textarea height. */
     function paint() {
         const text = input.value;
+		emptyEditor.classList.toggle('hide', Boolean(ctx.path));
+		gutter.classList.toggle('hide', !ctx.path);
+		input.classList.toggle('hide', !ctx.path);
+		highlightLayer.classList.toggle('hide', !ctx.path);
         highlightLayer.innerHTML = highlight(text, languageOf(ctx.path)) + '\n';
         const lines = text.split('\n').length;
         gutter.textContent = Array.from({ length: lines }, (_, i) => i + 1).join('\n');
@@ -189,11 +321,13 @@ async function renderProject(host, name, initialPath) {
 		const edit = textEdit(before, after);
 		ctx.content = after;
 		if (ctx.path && edit) {
+			const sequence = nextSequence();
+			ctx.pending.add(sequence);
 			send('collab.op', { network_id: ctx.networkId, project_id: ctx.projectId,
 				project: name, path: ctx.path, client_id: clientId,
-				sequence: Date.now(), base_revision: ctx.nextBase++, ...edit }, true);
+				sequence, base_revision: ctx.nextBase++, ...edit }, true);
+			setDirty(true);
 		}
-        setDirty(true);
         paint();
     });
     input.addEventListener('keydown', (e) => {
@@ -202,14 +336,16 @@ async function renderProject(host, name, initialPath) {
             const { selectionStart: a, selectionEnd: b } = input;
             input.value = `${input.value.slice(0, a)}    ${input.value.slice(b)}`;
             input.selectionStart = input.selectionEnd = a + 4;
-            ctx.content = input.value;
-            setDirty(true);
-            paint();
+			input.dispatchEvent(new Event('input', { bubbles: true }));
         }
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
             e.preventDefault();
             save();
         }
+		if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+			e.preventDefault();
+			run();
+		}
     });
     input.addEventListener('scroll', () => { highlightLayer.scrollTop = input.scrollTop; });
 
@@ -232,14 +368,16 @@ async function renderProject(host, name, initialPath) {
 				`/api/projects/${encodeURIComponent(name)}/collab?path=${encodeURIComponent(path)}`);
             ctx.path = path;
             ctx.content = file.content;
-			ctx.revision = file.revision;
+            ctx.revision = file.revision;
 			ctx.nextBase = file.revision;
+			ctx.pending.clear();
             input.value = file.content;
+			input.disabled = false;
             pathLabel.textContent = path;
             setDirty(false);
             paint();
             history.replaceState(null, '',
-                `#/workspace/${encodeURIComponent(name)}/${path}`);
+				`#/workspace/${encodeURIComponent(name)}/${encodeURIComponent(path)}`);
             treeBox.querySelectorAll('.tree__item').forEach((node) => {
                 node.classList.toggle('tree__item--on', node.title === path);
             });
@@ -254,8 +392,9 @@ async function renderProject(host, name, initialPath) {
         ctx.saving = true;
         saveBtn.disabled = true;
 		try {
-            setDirty(false);
-			toast(isLive() ? `Synced ${ctx.path}.` : `${ctx.path} is queued and will sync when reconnected.`);
+			if (!isLive()) toast(`${ctx.path} is saved locally and will sync when reconnected.`);
+			else if (ctx.pending.size) toast(`Saving ${ctx.path}…`);
+			else toast(`Saved ${ctx.path}.`);
             await loadGit();
         } catch (err) {
             toast(err.message, 'err');
@@ -264,6 +403,18 @@ async function renderProject(host, name, initialPath) {
             saveBtn.disabled = !ctx.dirty;
         }
     }
+
+	function closeEditor() {
+		ctx.path = '';
+		ctx.content = '';
+		ctx.pending.clear();
+		input.value = '';
+		input.disabled = true;
+		pathLabel.textContent = 'No file open';
+		setDirty(false);
+		history.replaceState(null, '', `#/workspace/${encodeURIComponent(name)}`);
+		paint();
+	}
 
 	function sendPresence() {
 		if (!ctx.path) return;
@@ -287,7 +438,7 @@ async function renderProject(host, name, initialPath) {
             }, '+ Folder'),
             saveBtn),
         el('div', { class: 'code' }, gutter,
-            el('div', { class: 'code__wrap' }, highlightLayer, input)));
+			el('div', { class: 'code__wrap' }, highlightLayer, input, emptyEditor)));
 
     // ---- run ----
 
@@ -338,6 +489,43 @@ async function renderProject(host, name, initialPath) {
 
     // ---- assemble ----
 
+	const filePanel = el('div', { class: 'panel file-panel' },
+		el('div', { class: 'panel__head' },
+			el('span', { class: 'grow' }, 'Files'),
+			el('button', {
+				id: 'workspace-upload', class: 'btn btn--sm', title: 'Upload files',
+				onclick: () => uploadInput.click(),
+			}, 'Upload'),
+			el('button', {
+				class: 'btn btn--sm btn--icon', title: 'Refresh files',
+				onclick: loadTree,
+			}, '↻')),
+		treeBox, uploadInput,
+		el('div', { class: 'file-panel__drop' }, 'Drop files to upload'));
+	let dragDepth = 0;
+	filePanel.addEventListener('dragenter', (event) => {
+		event.preventDefault();
+		dragDepth += 1;
+		filePanel.classList.add('file-panel--drop');
+	});
+	filePanel.addEventListener('dragover', (event) => {
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+	});
+	filePanel.addEventListener('dragleave', () => {
+		dragDepth -= 1;
+		if (dragDepth <= 0) {
+			dragDepth = 0;
+			filePanel.classList.remove('file-panel--drop');
+		}
+	});
+	filePanel.addEventListener('drop', (event) => {
+		event.preventDefault();
+		dragDepth = 0;
+		filePanel.classList.remove('file-panel--drop');
+		uploadFiles([...event.dataTransfer.files]);
+	});
+
     mount(page,
         el('div', { class: 'page__head',
             style: 'display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap' },
@@ -353,14 +541,7 @@ async function renderProject(host, name, initialPath) {
 
         el('div', { class: 'ws' },
             el('div', { class: 'ws__side' },
-                el('div', { class: 'panel' },
-                    el('div', { class: 'panel__head' },
-                        el('span', { class: 'grow' }, 'Files'),
-                        el('button', {
-                            class: 'btn btn--sm btn--icon', title: 'Refresh',
-                            onclick: loadTree,
-                        }, '↻')),
-                    treeBox)),
+				filePanel),
 
             el('div', { style: 'display:flex;flex-direction:column;gap:14px;min-width:0' },
                 editorBox,
@@ -384,8 +565,15 @@ async function renderProject(host, name, initialPath) {
     mount(outputBox, el('div', { class: 'console__line console__line--meta' },
         'Output appears here when you run something.'));
 
-    await loadTree();
-    if (ctx.path) await openFile(ctx.path);
+	const initialTree = await loadTree();
+	if (ctx.path) {
+		await openFile(ctx.path);
+	} else {
+		const files = flattenFiles(initialTree);
+		const first = files.find((entry) => entry.path === 'main.py') ||
+			files.find((entry) => entry.path.toLowerCase() === 'readme.md') || files[0];
+		if (first) await openFile(first.path);
+	}
     paint();
 
     // ---- live updates ----
@@ -415,11 +603,41 @@ async function renderProject(host, name, initialPath) {
     });
 
     const offTree = on('tree.changed', (e) => { if (e.project === name) loadTree(); });
+	const offReplace = on('file.replaced', async (event) => {
+		if (event.project !== name || event.path !== ctx.path) return;
+		if (ctx.dirty) {
+			toast(`${event.path} was replaced while you had pending edits. Reload it before continuing.`, 'err');
+			return;
+		}
+		await openFile(ctx.path);
+	});
+	const offRename = on('entry.renamed', async (event) => {
+		if (event.project !== name ||
+			(ctx.path !== event.from && !ctx.path.startsWith(`${event.from}/`))) return;
+		if (ctx.dirty) {
+			toast('An open path was renamed while you had pending edits. Reload the workspace.', 'err');
+			return;
+		}
+		await openFile(`${event.to}${ctx.path.slice(event.from.length)}`);
+	});
+	const offDelete = on('entry.deleted', (event) => {
+		if (event.project !== name ||
+			(ctx.path !== event.path && !ctx.path.startsWith(`${event.path}/`))) return;
+		if (ctx.dirty) {
+			toast('An open path was deleted while you had pending edits. Reload the workspace.', 'err');
+			return;
+		}
+		closeEditor();
+	});
 	const offCollab = on('collab.op', (op) => {
 		if (op.project_id !== ctx.projectId || op.path !== ctx.path) return;
 		ctx.revision = Math.max(ctx.revision, op.revision);
 		ctx.nextBase = Math.max(ctx.nextBase, op.revision);
-		if (op.client_id === clientId) { if (ctx.dirty) setDirty(false); return; }
+		if (op.client_id === clientId) {
+			ctx.pending.delete(op.sequence);
+			if (ctx.dirty && ctx.pending.size === 0) setDirty(false);
+			return;
+		}
 		const chars = Array.from(ctx.content);
 		chars.splice(op.from, op.to - op.from, ...Array.from(op.insert));
 		ctx.content = chars.join(''); input.value = ctx.content; paint();
@@ -445,7 +663,8 @@ async function renderProject(host, name, initialPath) {
     window.addEventListener('beforeunload', beforeUnload);
 
     return () => {
-		offLog(); offState(); offTree(); offCollab(); offReject(); offPresence(); offConnection();
+		offLog(); offState(); offTree(); offReplace(); offRename(); offDelete();
+		offCollab(); offReject(); offPresence(); offConnection();
         window.removeEventListener('beforeunload', beforeUnload);
     };
 }
@@ -458,6 +677,15 @@ function textEdit(before, after) {
 	while (aEnd > from && bEnd > from && a[aEnd - 1] === b[bEnd - 1]) { aEnd -= 1; bEnd -= 1; }
 	if (from === aEnd && from === bEnd) return null;
 	return { from, to: aEnd, insert: b.slice(from, bEnd).join('') };
+}
+
+function flattenFiles(entries) {
+	const files = [];
+	for (const entry of entries) {
+		if (entry.dir) files.push(...flattenFiles(entry.children || []));
+		else files.push(entry);
+	}
+	return files;
 }
 
 // ------------------------------------------------------------- dialogues ---

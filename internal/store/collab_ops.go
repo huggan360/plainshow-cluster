@@ -120,4 +120,24 @@ func (s *Store) DeleteCollabDocument(networkID, projectID, path string) error {
 	return tx.Commit()
 }
 
+// DeleteCollabTree forgets a file or every document beneath a directory. SQL's
+// length function keeps wildcard characters in legitimate paths literal.
+func (s *Store) DeleteCollabTree(networkID, projectID, path string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, table := range []string{"collab_operation", "collab_document"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+`
+            WHERE network_id=? AND project_id=?
+              AND (path=? OR substr(path,1,length(?)+1)=? || '/')`,
+			networkID, projectID, path, path, path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 var _ = sql.ErrNoRows

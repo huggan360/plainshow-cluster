@@ -11,7 +11,8 @@
 /** api performs a JSON request and turns a failure into a readable Error. */
 export async function api(path, options = {}) {
     const init = { headers: {}, ...options };
-    if (init.body !== undefined && typeof init.body !== 'string') {
+    if (init.body !== undefined && typeof init.body !== 'string' &&
+        !(typeof FormData !== 'undefined' && init.body instanceof FormData)) {
         init.headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(init.body);
     }

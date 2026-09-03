@@ -71,6 +71,14 @@ continue.
 - Release assets/workflow for Linux amd64 and arm64 for all three binaries.
   Each release also carries the tested `install.sh` and includes it in
   `checksums.txt`, so installing does not require a source checkout.
+- The Cowork workspace now behaves as a compact IDE: it opens a starter file,
+  creates files/folders, streams atomic multi-file uploads (including
+  drag-and-drop), downloads binary/large artifacts, renames and removes tree
+  entries, retains expanded folders, supports Ctrl/Cmd-S and Ctrl/Cmd-Enter,
+  and stays usable on phone-sized screens. Uploads are limited to 256 MiB per
+  file. External file replacement clears stale collaboration history, and
+  operation sequences are monotonic so rapid edits cannot be mistaken for
+  duplicate relay delivery.
 
 ## Production deployment
 
@@ -111,7 +119,8 @@ this root is enterprise administrator/key-recovery access.
 - Enterprise HTTP registration/membership and a two-client collaboration relay
   are covered by `internal/accountserver/server_test.go`.
 - Duplicate collaboration delivery and controller authentication are tested.
-- `make smoke`: 71 passed, 0 failed.
+- `make smoke`: 75 passed, 0 failed, including streamed project upload,
+  download and collaboration-state refresh after external replacement.
 - All three local programs built successfully.
 - All three component installers were exercised against disposable roots.
 - Public HTTP, HTTPS, static assets, health and the Apache WebSocket route were

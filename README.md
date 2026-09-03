@@ -231,6 +231,13 @@ gang reservations, PyTorch `torchrun` plans, checkpoints, and a bandwidth
 advisor. The interface uses the same visual language as the existing Plainshow
 console and is embedded in the binary.
 
+The workspace is a lightweight Cowork IDE rather than a file viewer. It opens
+the starter file automatically, provides syntax-coloured editing with shared
+live saves, file/folder creation, rename and delete actions, multi-file upload
+and drag-and-drop, artifact downloads, Git history, machine/dataset-aware runs
+and streaming output. Project uploads are streamed atomically and capped at
+256 MiB per file; larger datasets belong in the dataset manager instead.
+
 Machines on different networks find each other through **tailscale**, which
 Plainshow drives rather than reimplements. When tailscale is connected,
 Plainshow records the address it got. That address is what training uses too,

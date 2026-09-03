@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -124,6 +126,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{name}/tree", s.projectTree)
 	mux.HandleFunc("GET /api/projects/{name}/file", s.readFile)
 	mux.HandleFunc("PUT /api/projects/{name}/file", s.writeFile)
+	mux.HandleFunc("GET /api/projects/{name}/raw", s.downloadFile)
+	mux.HandleFunc("POST /api/projects/{name}/upload", s.uploadFile)
 	mux.HandleFunc("GET /api/projects/{name}/collab", s.openCollabDocument)
 	mux.HandleFunc("POST /api/projects/{name}/dir", s.createDir)
 	mux.HandleFunc("POST /api/projects/{name}/rename", s.renameEntry)
@@ -444,7 +448,7 @@ func (s *Server) readFile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	_, fsys, err := s.project(name)
+	p, fsys, err := s.project(name)
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
@@ -465,16 +469,120 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
-	if p, _, err := s.project(name); err == nil {
-		_ = s.store.TouchProjectID(p.ID)
+	if err := s.collab.Reset(p.NetworkID, p.ID, body.Path); err != nil {
+		fail(w, 500, "The file was saved, but its live-editing state could not be refreshed. Retry the save.")
+		return
 	}
+	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("file.saved", map[string]string{"project": name, "path": body.Path})
+	s.hub.Publish("file.replaced", map[string]string{"project": name, "path": body.Path})
+	s.hub.Publish("tree.changed", map[string]string{"project": name})
 	writeJSON(w, 200, map[string]string{"status": "saved"})
+}
+
+const maxProjectUploadBytes int64 = 256 << 20
+
+// uploadFile streams one multipart file directly into the project. Parsing the
+// whole form would spill large uploads into the machine's global temporary
+// directory, violating the one-root storage contract.
+func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	p, fsys, err := s.project(name)
+	if err != nil {
+		fail(w, 404, "No such project.")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxProjectUploadBytes+(1<<20))
+	defer r.Body.Close()
+	reader, err := r.MultipartReader()
+	if err != nil {
+		fail(w, 400, "Choose a file to upload.")
+		return
+	}
+
+	for {
+		part, nextErr := reader.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			fail(w, 400, "Could not read that upload.")
+			return
+		}
+		if part.FormName() != "file" || part.FileName() == "" {
+			part.Close()
+			continue
+		}
+		rel := strings.TrimSpace(r.URL.Query().Get("path"))
+		if rel == "" {
+			rel = filepath.Base(part.FileName())
+		}
+		if rel == "" || rel == "." || strings.HasSuffix(rel, "/") {
+			part.Close()
+			fail(w, 400, "Give the uploaded file a destination path.")
+			return
+		}
+		n, uploadErr := fsys.Upload(rel, part, maxProjectUploadBytes)
+		part.Close()
+		if errors.Is(uploadErr, projectfs.ErrTooLarge) {
+			fail(w, http.StatusRequestEntityTooLarge, "That file is larger than the 256 MiB project upload limit.")
+			return
+		}
+		if uploadErr != nil {
+			fsError(w, uploadErr)
+			return
+		}
+		if err := s.collab.Reset(p.NetworkID, p.ID, rel); err != nil {
+			fail(w, 500, "The upload finished, but its live-editing state could not be refreshed. Retry the upload.")
+			return
+		}
+		_ = s.store.TouchProjectID(p.ID)
+		s.hub.Publish("file.replaced", map[string]string{"project": name, "path": rel})
+		s.hub.Publish("tree.changed", map[string]string{"project": name})
+		writeJSON(w, http.StatusCreated, map[string]any{"path": rel, "size": n})
+		return
+	}
+	fail(w, 400, "Choose a file to upload.")
+}
+
+// downloadFile streams editor-incompatible and binary files without loading
+// them into memory. ServeContent also gives large artifacts range support.
+func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
+	_, fsys, err := s.project(r.PathValue("name"))
+	if err != nil {
+		fail(w, 404, "No such project.")
+		return
+	}
+	rel := strings.TrimSpace(r.URL.Query().Get("path"))
+	abs, err := fsys.Resolve(rel)
+	if err != nil {
+		fsError(w, err)
+		return
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		fsError(w, err)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		fsError(w, err)
+		return
+	}
+	if rel == "" || info.IsDir() {
+		fail(w, 400, "Choose a file to download.")
+		return
+	}
+	filename := filepath.Base(rel)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, filename, info.ModTime(), f)
 }
 
 func (s *Server) createDir(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	_, fsys, err := s.project(name)
+	p, fsys, err := s.project(name)
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
@@ -490,13 +598,14 @@ func (s *Server) createDir(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
+	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("tree.changed", map[string]string{"project": name})
 	writeJSON(w, 201, map[string]string{"status": "created"})
 }
 
 func (s *Server) renameEntry(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	_, fsys, err := s.project(name)
+	p, fsys, err := s.project(name)
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
@@ -513,21 +622,38 @@ func (s *Server) renameEntry(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.From); err != nil {
+		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
+		return
+	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.To); err != nil {
+		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
+		return
+	}
+	_ = s.store.TouchProjectID(p.ID)
+	s.hub.Publish("entry.renamed", map[string]string{"project": name, "from": body.From, "to": body.To})
 	s.hub.Publish("tree.changed", map[string]string{"project": name})
 	writeJSON(w, 200, map[string]string{"status": "renamed"})
 }
 
 func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	_, fsys, err := s.project(name)
+	p, fsys, err := s.project(name)
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
 	}
-	if err := fsys.Remove(r.URL.Query().Get("path")); err != nil {
+	rel := r.URL.Query().Get("path")
+	if err := fsys.Remove(rel); err != nil {
 		fsError(w, err)
 		return
 	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, rel); err != nil {
+		fail(w, 500, "The entry was deleted, but its live-editing state could not be refreshed. Reload the workspace.")
+		return
+	}
+	_ = s.store.TouchProjectID(p.ID)
+	s.hub.Publish("entry.deleted", map[string]string{"project": name, "path": rel})
 	s.hub.Publish("tree.changed", map[string]string{"project": name})
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }

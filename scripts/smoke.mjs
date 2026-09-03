@@ -78,6 +78,15 @@ ok('read back', (await j('/api/projects/demo/file?path=a/b/deep.py')).body.conte
 ok('mkdir', (await j('/api/projects/demo/dir', { method: 'POST', body: { path: 'notebooks' } })).status === 201);
 ok('rename', (await j('/api/projects/demo/rename', { method: 'POST', body: { from: 'a/b/deep.py', to: 'a/b/renamed.py' } })).status === 200);
 ok('delete', (await j('/api/projects/demo/entry?path=a/b/renamed.py', { method: 'DELETE' })).status === 200);
+const uploadForm = new FormData();
+uploadForm.append('file', new Blob(['uploaded through the browser\n']), 'notes.txt');
+const uploaded = await fetch(B + '/api/projects/demo/upload?path=assets/notes.txt', {
+  method: 'POST', body: uploadForm,
+});
+ok('multipart upload', uploaded.status === 201 && (await uploaded.json()).size === 29);
+const downloaded = await fetch(B + '/api/projects/demo/raw?path=assets/notes.txt');
+ok('uploaded file downloads', downloaded.ok && (await downloaded.text()) === 'uploaded through the browser\n');
+ok('download names the attachment', downloaded.headers.get('content-disposition').includes('notes.txt'));
 const esc = await j('/api/projects/demo/file?path=../../../etc/passwd');
 ok('traversal read refused', esc.status === 404 || esc.status === 400, JSON.stringify(esc.body));
 
@@ -103,6 +112,12 @@ if (jupyterStatus.available) {
 console.log('\nCOLLABORATION');
 const shared = await j('/api/projects/demo/collab?path=main.py');
 ok('shared document opens with revision', shared.status === 200 && shared.body.revision === 0 && shared.body.content.includes('Hello'));
+await j('/api/projects/demo/file', {
+  method: 'PUT', body: { path: 'main.py', content: 'print("replacement")\n' },
+});
+const replacedShared = await j('/api/projects/demo/collab?path=main.py');
+ok('external replacement refreshes shared document', replacedShared.status === 200 &&
+  replacedShared.body.revision === 0 && replacedShared.body.content === 'print("replacement")\n');
 
 console.log('\nGIT');
 // Make a change to observe: the file operations above net out to nothing.

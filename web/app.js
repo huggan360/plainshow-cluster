@@ -4,7 +4,7 @@
 // runs one way: app -> views -> client.
 
 import { el, mount, initials } from './lib/ui.js';
-import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
+import { api, state, refresh, connect, onConnection, onUnauthorized, toast } from './lib/client.js';
 import { renderHome } from './views/home.js';
 import { renderWorkspace } from './views/workspace.js';
 import { renderJobs } from './views/jobs.js';
@@ -73,6 +73,15 @@ async function renderRoute() {
 /** shell builds the sidebar and page frame around the routed view. */
 function shell(overview) {
     const node = overview.node;
+	let railScrim;
+	const closeRail = () => {
+		rail.classList.remove('rail--open');
+		if (railScrim) railScrim.classList.remove('rail-scrim--open');
+	};
+	const toggleRail = () => {
+		const open = rail.classList.toggle('rail--open');
+		railScrim.classList.toggle('rail-scrim--open', open);
+	};
 
     const rail = el('aside', { class: 'rail', id: 'rail' },
         el('div', { class: 'brand' },
@@ -85,6 +94,7 @@ function shell(overview) {
             el('p', { class: 'nav__label' }, 'Cluster'),
             ...ROUTES.map((r) => el('a', {
                 class: 'nav__item', href: `#/${r.id}`, dataset: { route: r.id },
+				onclick: closeRail,
             },
                 el('span', { class: 'nav__ico' }, r.icon),
                 el('span', {}, r.label),
@@ -102,6 +112,9 @@ function shell(overview) {
                     el('span', {
                         class: 'mono', id: 'conn-label', style: 'font-size:10px',
                     }, 'offline')))));
+	railScrim = el('button', {
+		class: 'rail-scrim', 'aria-label': 'Close navigation', onclick: closeRail,
+	});
 
     const networkPicker = el('select', {
         class: 'input input--mono',
@@ -109,8 +122,13 @@ function shell(overview) {
         'aria-label': 'Active network',
         onchange: async (event) => {
             event.target.disabled = true;
-            await fetch(`/api/networks/${encodeURIComponent(event.target.value)}/active`, { method: 'PUT' });
-            location.reload();
+			try {
+				await api(`/api/networks/${encodeURIComponent(event.target.value)}/active`, { method: 'PUT' });
+				location.reload();
+			} catch (err) {
+				event.target.disabled = false;
+				toast(err.message, 'err');
+			}
         },
     }, ...(overview.networks || []).map((network) => el('option', {
         value: network.id, selected: network.id === overview.active_network,
@@ -119,16 +137,16 @@ function shell(overview) {
     const main = el('div', { class: 'main' },
         el('header', { class: 'top' },
             el('button', {
-                class: 'btn btn--icon btn--sm', id: 'menu', style: 'display:none',
+				class: 'btn btn--icon btn--sm mobile-menu', id: 'menu',
                 'aria-label': 'Toggle navigation',
-                onclick: () => rail.classList.toggle('rail--open'),
+				onclick: toggleRail,
             }, '☰'),
             el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
             networkPicker),
         el('div', { id: 'view' }));
 
-    return [rail, main];
+    return [railScrim, rail, main];
 }
 
 async function boot() {
@@ -157,10 +175,6 @@ async function boot() {
     }
 
     mount(app, ...shell(state.overview));
-    if (window.matchMedia('(max-width: 1000px)').matches) {
-        document.getElementById('menu').style.display = 'inline-flex';
-    }
-
     onConnection((live) => {
         const dot = document.getElementById('conn-dot');
         const label = document.getElementById('conn-label');

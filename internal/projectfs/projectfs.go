@@ -246,6 +246,9 @@ func (p Project) Rename(from, to string) error {
 
 // Upload writes a streamed file into the project, capped at limit bytes.
 func (p Project) Upload(rel string, r io.Reader, limit int64) (int64, error) {
+	if limit < 0 {
+		return 0, ErrTooLarge
+	}
 	abs, err := p.Resolve(rel)
 	if err != nil {
 		return 0, err
@@ -253,15 +256,25 @@ func (p Project) Upload(rel string, r io.Reader, limit int64) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return 0, err
 	}
-	tmp := abs + ".pscluster-upload"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	// A unique sibling makes concurrent uploads safe while still allowing the
+	// final rename to be atomic on every supported filesystem.
+	f, err := os.CreateTemp(filepath.Dir(abs), ".pscluster-upload-*")
 	if err != nil {
 		return 0, err
 	}
-	n, err := io.Copy(f, io.LimitReader(r, limit))
+	tmp := f.Name()
+	if err := f.Chmod(0o640); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return 0, err
+	}
+	n, err := io.Copy(f, io.LimitReader(r, limit+1))
 	closeErr := f.Close()
 	if err == nil {
 		err = closeErr
+	}
+	if err == nil && n > limit {
+		err = ErrTooLarge
 	}
 	if err != nil {
 		os.Remove(tmp)
