@@ -290,11 +290,11 @@ func (s *Supervisor) recordOutput(live *running, jobID, stream, text string, log
 		live.tail = live.tail[len(live.tail)-maxTailLines:]
 	}
 	_, writeErr := fmt.Fprint(logFile, text)
+	s.hub.Publish("job.log", line)
 	live.mu.Unlock()
 	if writeErr != nil {
 		log.Printf("job %s: writing log: %v", jobID, writeErr)
 	}
-	s.hub.Publish("job.log", line)
 }
 
 // classify turns a Wait error into the job's terminal state.
@@ -343,13 +343,13 @@ func (s *Supervisor) pump(live *running, jobID, stream string, r io.Reader, logF
 			live.tail = live.tail[len(live.tail)-maxTailLines:]
 		}
 		_, writeErr := fmt.Fprintf(logFile, "%s%s\n", prefix, text)
+		s.hub.Publish("job.log", line)
 		live.mu.Unlock()
 
 		if writeErr != nil {
 			// Losing the on-disk copy must not stop the job or the live view.
 			log.Printf("job %s: writing log: %v", jobID, writeErr)
 		}
-		s.hub.Publish("job.log", line)
 	}
 }
 

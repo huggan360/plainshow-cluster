@@ -509,7 +509,14 @@ func (s *Server) staticHandler() http.Handler {
 	files := http.FileServer(http.FS(s.web))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			r.URL.Path = "/index.html"
+			raw, err := fs.ReadFile(s.web, "index.html")
+			if err != nil {
+				http.Error(w, "admin interface is unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(raw)
+			return
 		}
 		files.ServeHTTP(w, r)
 	})

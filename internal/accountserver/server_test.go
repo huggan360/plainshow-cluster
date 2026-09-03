@@ -19,6 +19,12 @@ func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 	}
 	web := fstest.MapFS{"index.html": {Data: []byte("admin")}}
 	server := NewServer(&Config{RegistrationOpen: true}, store, web).Handler()
+	indexRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	index := httptest.NewRecorder()
+	server.ServeHTTP(index, indexRequest)
+	if index.Code != http.StatusOK || index.Body.String() != "admin" {
+		t.Fatalf("admin index = %d %q", index.Code, index.Body.String())
+	}
 
 	register := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
 		`{"username":"hugo","display_name":"Hugo","password":"a-long-enough-password","bootstrap_token":"bootstrap"}`))
