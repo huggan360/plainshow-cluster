@@ -4,7 +4,7 @@ import { el, mount, ago } from '../lib/ui.js';
 import { api, toast, modal, navigate, refresh } from '../lib/client.js';
 
 const TOKEN_URL =
-    'https://github.com/settings/tokens/new?description=Plainshow%20Cluster&scopes=repo';
+    'https://github.com/settings/tokens/new?description=Plainshow%20Cluster&scopes=repo,workflow';
 
 export async function renderGitHub(host) {
     const page = el('div', { class: 'page' });
@@ -121,7 +121,9 @@ function connectForm(draw, replacing) {
             el('p', { style: 'margin:0 0 16px;font-size:12.5px;color:#94a3b8;line-height:1.6' },
                 'Create a classic personal access token with the ',
                 el('strong', {}, 'repo'),
-                ' scope. That is what lets Plainshow Cluster create repositories, push, ' +
+                ' and ',
+                el('strong', {}, 'workflow'),
+                ' scopes. That is what lets Plainshow Cluster create repositories, push, ' +
                 'pull, and manage who may work on a project.'),
             el('a', {
                 class: 'btn btn--sm', href: TOKEN_URL, target: '_blank', rel: 'noreferrer',
