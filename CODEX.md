@@ -157,10 +157,11 @@ at deployed revision `23baa31`. PlainShow runs it as the isolated,
 boot-restored `cluster-controller` process on `127.0.0.1:10003`. Its state file
 is owned by the runtime account with mode `0600`.
 
-The `cluster.plainshow.se` publication is enabled with an Apache WebSocket proxy
-and currently has status `waiting-dns`; the Host-header HTTP path already
-reaches the controller. Add the DNS record pointing at this Pi. PlainShow will
-retry certificate issuance automatically and then report `published`.
+The `cluster.plainshow.se` publication is enabled and reports `published` with
+an Apache WebSocket proxy. Public HTTPS, the embedded page and an unauthenticated
+WebSocket upgrade were exercised through Cloudflare; the latter reached the
+controller and correctly returned 401. Its dedicated Let's Encrypt certificate
+expires on 2026-12-03 and has automatic renewal.
 
 The controller is unclaimed until the first global account and at least one
 owner/admin network are created. Sign in at the controller after those exist,

@@ -240,9 +240,9 @@ The main enterprise service is deployed on this Pi at
 `127.0.0.1:10002`. Its systemd unit is enabled. The first administrator still
 needs to register using the protected bootstrap output described in `CODEX.md`.
 The independent `cluster-controller` runtime is online on `127.0.0.1:10003`.
-Its PlainShow publication for `cluster.plainshow.se` is enabled and waiting for
-the DNS record; TLS issuance retries automatically after DNS resolves. It then
-needs to be claimed by the first global network owner.
+Its PlainShow publication for `https://cluster.plainshow.se` is live with TLS
+and WebSocket forwarding through Cloudflare. It still needs to be claimed by
+the first global network owner.
 
 Remaining work is validation and release operation rather than missing product
 programs. The highest-risk gate is still the real two-CUDA-machine run.
