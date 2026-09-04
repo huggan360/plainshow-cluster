@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build check test vet fmt web clean install install-admin dist release run smoke
+.PHONY: all build check test vet fmt web installer-check clean install install-admin dist arch-package release run smoke
 
 all: build
 
@@ -27,8 +27,17 @@ build: web
 web:
 	@node scripts/check-web.mjs
 
+## installer-check: parse the portable installer and native Arch package hooks
+installer-check:
+	@sh -n install.sh
+	@bash -n packaging/arch/plainshow-cluster.install
+	@sed -e 's/@VERSION@/1.0.0/g' -e 's/@ARCH@/x86_64/g' \
+		-e 's/@BINARY_SHA256@/abc/g' -e 's/@SERVICE_SHA256@/def/g' \
+		packaging/arch/PKGBUILD.in | bash -n
+	@echo "installer and Arch packaging syntax clean"
+
 ## check: everything CI runs
-check: fmt vet web test
+check: fmt vet web installer-check test
 
 ## fmt: fail if anything is unformatted
 fmt:
@@ -87,6 +96,35 @@ dist: web
 	@ls -lh dist/
 	@echo
 	@cat dist/checksums.txt
+
+## arch-package: build a native pacman package for this Arch machine
+##
+## makepkg is deliberately not installed by this target. On Arch it comes from
+## pacman/base-devel; release CI also builds and publishes the x86_64 package.
+arch-package: dist
+	@command -v makepkg >/dev/null 2>&1 || { \
+		echo "makepkg is required; on Arch install the base-devel group"; exit 1; \
+	}
+	@set -eu; \
+	case "$$(uname -m)" in \
+		x86_64) asset_arch=amd64; package_arch=x86_64 ;; \
+		aarch64) asset_arch=arm64; package_arch=aarch64 ;; \
+		*) echo "unsupported Arch package architecture: $$(uname -m)"; exit 1 ;; \
+	esac; \
+	version=$$(printf '%s' "$(VERSION)" | sed 's/^v//; s/[^[:alnum:].+_]/./g'); \
+	work=dist/arch-package; \
+	mkdir -p "$$work"; \
+	cp "dist/$(BINARY)-linux-$$asset_arch" "$$work/pscluster"; \
+	cp packaging/arch/plainshow-cluster.service packaging/arch/plainshow-cluster.install "$$work/"; \
+	binary_sha=$$(sha256sum "$$work/pscluster" | cut -d ' ' -f 1); \
+	service_sha=$$(sha256sum "$$work/plainshow-cluster.service" | cut -d ' ' -f 1); \
+	sed -e "s/@VERSION@/$$version/g" -e "s/@ARCH@/$$package_arch/g" \
+		-e "s/@BINARY_SHA256@/$$binary_sha/g" -e "s/@SERVICE_SHA256@/$$service_sha/g" \
+		packaging/arch/PKGBUILD.in > "$$work/PKGBUILD"; \
+	(cd "$$work" && makepkg --force --noconfirm --nodeps); \
+	cp "$$work"/*.pkg.tar.zst dist/; \
+	(cd dist && sha256sum plainshow-cluster-*.pkg.tar.zst > arch-checksums.txt); \
+	ls -lh dist/*.pkg.tar.zst
 
 ## release: check, build the assets, and print the commands to publish them
 release: check dist

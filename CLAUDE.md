@@ -233,7 +233,7 @@ Assessed by running it, not by reading commit messages.
 | Terminal | implemented as a policy-controlled interactive PTY job |
 | Enterprise master | accounts, network/key/controller registry and admin statistics implemented; no relay |
 | Controller | separate PlainShow project, global login, network selection, registry heartbeat and relay implemented |
-| Install hardening and docs | node/admin installer and separate controller runtime documentation implemented |
+| Install hardening and docs | automatic Arch/Debian/Ubuntu dependencies, native pacman package, node/admin installer and controller docs implemented |
 
 The main enterprise service is deployed on this Pi at
 `https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
@@ -343,7 +343,10 @@ editing is the only data-plane feature it adds; Git works without it.
     one, watch a node take it. *2d*
 18. ~~**Install hardening and docs.**~~ `install.sh` installs the node or account
     service atomically, creates the matching one-root configuration, and writes
-    optional systemd integration. The independent controller is built and run
+    systemd integration. Node installation provisions the full non-GPU runtime
+    through pacman on Arch or apt on Debian/Ubuntu; GPU/CUDA/PyTorch remain an
+    explicit hardware preflight. Native pacman packaging and tagged-release
+    automation are included. The independent controller is built and run
     through its own PlainShow project/runtime. README and `CODEX.md` describe
     operation and handover.
 

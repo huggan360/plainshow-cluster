@@ -149,6 +149,23 @@ the binary matching the machine, verify with
 `sudo ./install.sh node ./pscluster-linux-amd64`. Use `admin` as the first
 argument when installing the account/key service.
 
+The node installer provisions its complete general-purpose runtime on Arch,
+Debian and Ubuntu. On Arch it uses pacman for CA certificates, Git, Tailscale,
+util-linux and Jupyter Server. On Debian/Ubuntu it uses apt and, when needed,
+adds Tailscale's official distribution-specific signed repository. It enables
+the Tailscale daemon and the PlainShow node, but interactive Tailscale login is
+still a user action unless `PSCLUSTER_TAILSCALE_AUTH_KEY` is supplied. Set
+`PSCLUSTER_SKIP_DEPENDENCIES=1` for an offline/custom runtime, or
+`PSCLUSTER_NO_START=1` to stage files without starting services. CUDA, GPU
+drivers and PyTorch remain machine-specific and are diagnosed by training
+preflight rather than guessed by the installer.
+
+On Arch, `make arch-package` produces a native
+`plainshow-cluster-*.pkg.tar.zst`; install it with `sudo pacman -U`. Tagged
+releases attach the x86_64 package automatically. A future PlainShow package
+repository can then provide the exact `pacman -S plainshow-cluster` experience;
+see `packaging/arch/README.md`.
+
 `make race` runs the suite under the race detector. It needs a kernel with a
 48-bit VMA; some arm64 boards (including the Raspberry Pi 5) report 47 and
 ThreadSanitizer refuses to start, which is why it is not part of `make check`.

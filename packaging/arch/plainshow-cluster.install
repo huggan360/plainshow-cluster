@@ -1,0 +1,39 @@
+post_install() {
+    if [[ ! -f /opt/plainshow-cluster/config.yaml ]]; then
+        install -d -m 0750 /opt/plainshow-cluster
+        PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
+            /usr/bin/pscluster init --root /opt/plainshow-cluster
+    fi
+
+    if [[ -d /run/systemd/system ]]; then
+        systemctl daemon-reload
+        systemctl enable --now tailscaled.service
+        systemctl enable --now plainshow-cluster.service
+    fi
+
+    if ! tailscale status >/dev/null 2>&1; then
+        echo 'PlainShow Cluster installed. Complete Tailscale login with: sudo tailscale up'
+    else
+        echo 'PlainShow Cluster installed and started.'
+    fi
+}
+
+post_upgrade() {
+    if [[ -d /run/systemd/system ]]; then
+        systemctl daemon-reload
+        systemctl try-restart plainshow-cluster.service || true
+    fi
+}
+
+pre_remove() {
+    if [[ -d /run/systemd/system ]]; then
+        systemctl disable --now plainshow-cluster.service || true
+    fi
+}
+
+post_remove() {
+    if [[ -d /run/systemd/system ]]; then
+        systemctl daemon-reload
+    fi
+    echo 'PlainShow node data remains in /opt/plainshow-cluster.'
+}

@@ -69,10 +69,18 @@ continue.
   preflight; the removed custom tunnel has not returned.
 - Interactive local/remote terminal implemented as a policy-controlled PTY job.
 - Real installed `jupyter_server` lifecycle and complete same-origin reverse
-  proxy under `/jupyter/`; Plainshow installs no Python packages.
+  proxy under `/jupyter/`; installation uses the distribution package and
+  never writes into Python with pip.
 - Component installer: `install.sh node|admin BINARY`, with matching
   `make install*` targets, atomic binary replacement, one-root state, PATH link
-  and systemd unit.
+  and systemd unit. Node installation provisions Git, Tailscale, PTY and
+  Jupyter dependencies through pacman on Arch or apt on Debian/Ubuntu, starts
+  services, and accepts a Tailscale/Headscale authentication key for unattended
+  enrolment.
+- Native Arch packaging is under `packaging/arch`; `make arch-package` creates
+  a pacman-installable package, and tagged release CI attaches the x86_64
+  package. A public repository is the only remaining gate for literal
+  `pacman -S plainshow-cluster`.
 - Release assets/workflow for Linux amd64 and arm64 for both binaries.
   Each release also carries the tested `install.sh` and includes it in
   `checksums.txt`, so installing does not require a source checkout.

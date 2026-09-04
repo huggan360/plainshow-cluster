@@ -69,3 +69,29 @@ jobs:
             dist/checksums.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  arch-package:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: pacman -Syu --noconfirm git go nodejs npm
+
+      - name: Build native pacman package
+        run: |
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env HOME=/home/builder make arch-package
+
+      - name: Attach pacman package
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.pkg.tar.zst
+            dist/arch-checksums.txt
+          fail_on_unmatched_files: true

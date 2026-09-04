@@ -1,0 +1,17 @@
+[Unit]
+Description=PlainShow Cluster node
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/pscluster serve --root /opt/plainshow-cluster
+Restart=on-failure
+RestartSec=3
+ReadWritePaths=/opt/plainshow-cluster
+ProtectSystem=full
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
