@@ -1,13 +1,18 @@
 package updater
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/huggan360/plainshow-cluster/internal/config"
 )
 
 // TestAssetNameMatchesTheBuild locks the contract between the release build and
@@ -18,6 +23,43 @@ func TestAssetNameMatchesTheBuild(t *testing.T) {
 	want := fmt.Sprintf("pscluster-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if got := AssetName(); got != want {
 		t.Errorf("AssetName() = %q, want %q", got, want)
+	}
+}
+
+func TestPrivateChecksumDownloadUsesGitHubToken(t *testing.T) {
+	const token = "private-release-token"
+	const hash = "63d360e5da2f95842ce4255b7157e92f8b0fcbe559e533116a2e818ee41c8a02"
+	asset := AssetName()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+			t.Errorf("Authorization = %q", got)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprintf(w, "%s  %s\n", hash, asset)
+	}))
+	defer server.Close()
+
+	layout, err := config.NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(layout.Keys(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(layout.GitHubToken(), []byte(token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := &Updater{layout: layout, http: server.Client()}
+	got, err := u.expectedChecksum(context.Background(), &Release{
+		AssetName: asset, ChecksumURL: server.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != hash {
+		t.Fatalf("checksum = %q, want %q", got, hash)
 	}
 }
 

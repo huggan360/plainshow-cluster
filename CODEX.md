@@ -74,16 +74,25 @@ continue.
 - Component installer: `install.sh node|admin BINARY`, with matching
   `make install*` targets, atomic binary replacement, one-root state, PATH link
   and systemd unit. Node installation provisions Git, Tailscale, PTY and
-  Jupyter dependencies through pacman on Arch or apt on Debian/Ubuntu, starts
-  services, and accepts a Tailscale/Headscale authentication key for unattended
-  enrolment.
+  Jupyter dependencies through pacman on Arch, apt on Debian/Ubuntu, dnf on
+  Fedora/RHEL derivatives, or zypper on openSUSE. It starts services and accepts
+  a Tailscale/Headscale authentication key for unattended enrolment. Other Linux
+  systems can use the static amd64/arm64 binaries after manually providing the
+  same runtime tools.
 - Native Arch packaging is under `packaging/arch`; `make arch-package` creates
   a pacman-installable package, and tagged release CI attaches the x86_64
   package. A public repository is the only remaining gate for literal
   `pacman -S plainshow-cluster`.
 - Release assets/workflow for Linux amd64 and arm64 for both binaries.
   Each release also carries the tested `install.sh` and includes it in
-  `checksums.txt`, so installing does not require a source checkout.
+  `checksums.txt`, so installing does not require a source checkout. Release
+  binaries are built with `CGO_ENABLED=0` for distribution portability, and
+  hyphenated version tags are automatically published as prereleases.
+- The updater compares full semantic prerelease versions, so alpha.2 supersedes
+  alpha.1. Private GitHub release listing, binary download and checksum download
+  all use the node's stored GitHub credential. The Arch package seeds the
+  mutable one-root binary and routes both its service and `/usr/bin/pscluster`
+  through that copy, so a built-in update remains active after reboot.
 - The Cowork workspace now behaves as a compact IDE: it opens a starter file,
   creates files/folders, streams atomic multi-file uploads (including
   drag-and-drop), downloads binary/large artifacts, renames and removes tree
@@ -192,7 +201,7 @@ validation complete until these are exercised by the user and friend:
    widgets and WebSocket proxying.
 4. Open the same file in browsers on two nodes and verify live edits reach both
    working trees through `cluster.plainshow.se`, then exercise Git merge.
-5. Publish a prerelease, install it, publish the next build and exercise
+5. Install `v0.1.0-alpha.1`, publish the next alpha build and exercise
    `pscluster update apply`; only then tag v1.0.0.
 
 These are external validation/release operations, not unimplemented programs.

@@ -1,262 +1,146 @@
-# Plainshow Cluster
+# PlainShow Cluster
 
-Turn a set of ordinary computers into one collaborative AI development and
-training environment.
+PlainShow Cluster links Linux computers into one collaborative workspace for AI
+and development tasks. Install it on each computer, sign in, create or join a
+network, and choose which machines may run work.
 
-The node is a single binary serving a web workspace where you create projects,
-edit code, run it on any joined machine, and watch output live. The enterprise
-service supplies shared accounts, network-key recovery and controller
-discovery; project data and compute still move directly between nodes.
+> **Alpha software:** use it for testing first. Keep copies of important
+> projects and datasets.
 
+## Install
+
+Open the [v0.1.0 alpha release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.0-alpha.1)
+and download these three files:
+
+- `install.sh`
+- `checksums.txt`
+- `pscluster-linux-amd64` for a normal 64-bit Intel/AMD computer, or
+  `pscluster-linux-arm64` for a 64-bit ARM computer such as a Raspberry Pi
+
+Check your architecture with `uname -m`: `x86_64` means `amd64`, while
+`aarch64` means `arm64`. Then run this from the download directory, replacing
+the binary name if you downloaded the ARM version:
+
+```sh
+chmod +x install.sh pscluster-linux-*
+sha256sum --ignore-missing -c checksums.txt
+sudo env PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
+  ./install.sh node ./pscluster-linux-amd64
 ```
+
+The installer automatically installs Git, Tailscale, terminal support and
+Jupyter Server on these Linux families:
+
+| Distribution | Package manager |
+|---|---|
+| Arch, Manjaro, EndeavourOS | `pacman` |
+| Debian, Ubuntu, Mint, Pop!_OS, Raspberry Pi OS | `apt` |
+| Fedora, RHEL, CentOS, Rocky, AlmaLinux, Oracle Linux | `dnf` |
+| openSUSE Leap and Tumbleweed | `zypper` |
+
+It uses the official Tailscale repository when the distribution does not carry
+Tailscale. GPU drivers, CUDA, PyTorch and other model runtimes are deliberately
+left to you because the correct versions depend on the computer and workload.
+
+For another Linux distribution, install `ca-certificates`, Git, Tailscale,
+util-linux (`script`) and optionally Jupyter Server yourself, then run:
+
+```sh
+sudo env PSCLUSTER_SKIP_DEPENDENCIES=1 \
+  PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
+  ./install.sh node ./pscluster-linux-amd64
+```
+
+The prebuilt binaries support 64-bit x86 and ARM Linux. A system without
+systemd can still run `/opt/plainshow-cluster/bin/pscluster serve`; it just will
+not get the automatically managed service.
+
+### Native Arch package
+
+The release also contains a `.pkg.tar.zst` package:
+
+```sh
+sha256sum -c arch-checksums.txt
+sudo pacman -U ./plainshow-cluster-*.pkg.tar.zst
+```
+
+`pacman -S plainshow-cluster` will require a public signed PlainShow package
+repository. The alpha release starts with `pacman -U`; the package and built-in
+updater still provide normal upgrades.
+
+## First start
+
+If Tailscale did not open a login during installation, connect it once:
+
+```sh
+sudo tailscale up
+```
+
+Open <http://127.0.0.1:9999>. Sign in with your PlainShow account, create a
+network, or use a single-use invitation from another member. A node may belong
+to several networks, and its owner controls whether it accepts jobs, terminal
+sessions or GPU work.
+
+The global service at `clusteradmin.plainshow.se` stores accounts, memberships,
+network recovery keys and controller registrations. It does not store projects
+or run tasks. The separate service at `cluster.plainshow.se` supplies optional
+live Cowork collaboration for networks selected by its owner. Projects and jobs
+remain on the cluster machines.
+
+## Update
+
+PlainShow has a built-in verified updater. For alpha releases, select the beta
+channel once:
+
+```sh
+sudo pscluster config set update.channel beta
+sudo pscluster update check
+sudo pscluster update apply
+```
+
+You can do the same in **Settings → Updates**: select **Beta**, click **Check
+now**, then **Install**. PlainShow downloads the binary for that computer,
+verifies its published SHA-256 checksum, keeps the old binary as
+`pscluster.previous`, swaps in the new one atomically, and restarts. Your
+configuration, projects and database are not replaced.
+
+The node checks every six hours, but installation is manual by default. To let
+it install available updates automatically:
+
+```sh
+sudo pscluster config set update.automatic true
+```
+
+If the GitHub repository is private, connect GitHub in PlainShow first so the
+updater can access its releases. You can always download a newer release and
+rerun `install.sh`; it preserves the existing node data.
+
+## Useful commands
+
+```sh
+sudo pscluster status
+sudo pscluster config show
+sudo pscluster network list
+sudo pscluster invite
+sudo pscluster update status
+journalctl -u plainshow-cluster -f
+```
+
+The installation lives under `/opt/plainshow-cluster`: configuration, keys,
+SQLite state, projects, datasets, artifacts, logs and the active binary. The
+installer also adds a command link and a systemd service.
+
+## Build from source
+
+Development requires Go 1.24+ and Node.js:
+
+```sh
 git clone https://github.com/huggan360/plainshow-cluster.git
 cd plainshow-cluster
+make check
 make build
-PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se ./pscluster init
-./pscluster serve
 ```
 
-Then open the address it prints — `http://127.0.0.1:9999` by default.
-
-## Everything lives in one directory
-
-A node writes nothing scattered across the machine. One root holds all of it:
-
-```
-<root>/
-├── bin/pscluster        the binary
-├── config.yaml          settings
-├── cluster.db           state: machines, projects, job history
-├── keys/                identity
-├── projects/            your code
-├── datasets/            training data
-├── artifacts/           checkpoints and outputs
-├── logs/jobs/           one log file per job
-└── run/                 pid file
-```
-
-Move that directory and you have moved the node. Delete it and the machine is
-clean. The only two files that may sit outside it are a symlink onto `PATH` and
-a systemd unit, both optional, both offered by `install.sh` — and the unit file
-itself lives in the root and is only linked from `/etc/systemd/system`.
-
-The root is chosen in this order: `--root`, then `PSCLUSTER_ROOT`, then
-`/opt/plainshow-cluster` when running as root and `~/.plainshow-cluster`
-otherwise.
-
-## How it fits together
-
-**Every device is equal.** Any machine that joins a network can run tasks and
-talks directly to every other machine on it. There is no master, no coordinator,
-and no machine whose being offline is everybody's problem. What a device is
-willing to do — accept jobs, expose a GPU, allow a terminal — is its own local
-setting, and nothing remote can widen it.
-
-**Git is the source of truth for projects**, and every device keeps a full
-clone. Two people can work while disconnected and reconcile with a real merge.
-
-**The Plainshow enterprise service is the one intentional master service.** In
-the main environment it runs at `clusteradmin.plainshow.se` on the Raspberry Pi.
-Its SQLite database stores global accounts, membership roles, network recovery
-keys, the controller registry and aggregate device health. It deliberately has
-no collaboration WebSocket route and never runs jobs or stores projects,
-commands, logs, datasets, artifacts or peer addresses.
-
-Live Cowork delivery belongs to the separate `cluster-controller` project. A
-controller owner signs in through the enterprise account service, selects
-networks they administer, and the controller registers its address and
-heartbeat centrally. Eligible nodes then discover it automatically. Without a
-controller, Git collaboration continues to work offline.
-
-Machines on different networks find each other through **tailscale**, which
-Plainshow drives rather than reimplements.
-
-
-## Commands
-
-```sh
-pscluster init [--root DIR] [--name NAME] [--cluster NAME]
-               [--port N] [--bind ADDR]
-pscluster serve [--root DIR]
-pscluster status [--root DIR]
-pscluster run [--project NAME] <command...>
-pscluster config [show | get KEY | set KEY VALUE | path | root]
-
-pscluster network [list | use ID | key ID]
-pscluster invite [--role member] [--network ID]
-pscluster join CODE [--endpoint URL]
-pscluster github [status | connect | disconnect]
-pscluster update [check | status | apply]
-pscluster version
-
-pscluster-admin init [--root DIR] [--public-url HTTPS_URL]
-pscluster-admin serve [--root DIR]
-pscluster-admin status [--root DIR]
-```
-
-The commands after `config` talk to this machine's own running daemon, so a
-headless worker can be joined and managed without a browser. They authenticate
-with a token inside the install root that only the owner can read.
-
-Nothing about a particular machine is compiled in. `init` probes rather than
-assumes: it picks the first free port upward from 9999, reads the hostname, and
-enumerates GPUs. Every value it chooses is written to `config.yaml` and can be
-changed.
-
-## What this machine will allow
-
-Worker limits are enforced **on the machine, by the machine**, from
-`config.yaml`. Nothing in the cluster can widen them, and a job that asks for
-more than the policy permits is refused here rather than quietly trimmed. That
-is what makes it reasonable to run someone else's code on your own desktop.
-
-Terminal access is off by default.
-
-```sh
-pscluster config set worker.enabled false        # stay in the cluster, run nothing
-pscluster config set worker.allow_terminal true
-```
-
-## Projects and history
-
-A project is a directory under `<root>/projects/`. Creating one gives you a
-folder, a starter file and a git repository with an initial commit.
-
-Git is not the live-editing transport: per-keystroke commits would be unusable
-as both a sync protocol and a history. Git carries a project between machines
-that were not online at the same time. Every device keeps a full clone, so work
-continues while other devices are unreachable and divergence is reconciled by
-a real three-way merge rather than a last-writer-wins guess.
-
-## Building
-
-Requires Go 1.24+ and Node (only to check the interface's module graph; there is
-no frontend build step). `git` is optional but recommended — without it projects
-have no history.
-
-```sh
-make check      # fmt, vet, module graph, tests
-make build      # ./pscluster for this machine
-make dist       # linux/amd64 and linux/arm64
-make run        # throwaway node in ./.devnode
-sudo make install             # node
-sudo PSCLUSTER_ADMIN_URL=https://clusteradmin.example make install-admin
-```
-
-A GitHub release is self-contained: download `install.sh`, `checksums.txt` and
-the binary matching the machine, verify with
-`sha256sum --ignore-missing -c checksums.txt`, then run for example
-`sudo ./install.sh node ./pscluster-linux-amd64`. Use `admin` as the first
-argument when installing the account/key service.
-
-The node installer provisions its complete general-purpose runtime on Arch,
-Debian and Ubuntu. On Arch it uses pacman for CA certificates, Git, Tailscale,
-util-linux and Jupyter Server. On Debian/Ubuntu it uses apt and, when needed,
-adds Tailscale's official distribution-specific signed repository. It enables
-the Tailscale daemon and the PlainShow node, but interactive Tailscale login is
-still a user action unless `PSCLUSTER_TAILSCALE_AUTH_KEY` is supplied. Set
-`PSCLUSTER_SKIP_DEPENDENCIES=1` for an offline/custom runtime, or
-`PSCLUSTER_NO_START=1` to stage files without starting services. CUDA, GPU
-drivers and PyTorch remain machine-specific and are diagnosed by training
-preflight rather than guessed by the installer.
-
-On Arch, `make arch-package` produces a native
-`plainshow-cluster-*.pkg.tar.zst`; install it with `sudo pacman -U`. Tagged
-releases attach the x86_64 package automatically. A future PlainShow package
-repository can then provide the exact `pacman -S plainshow-cluster` experience;
-see `packaging/arch/README.md`.
-
-`make race` runs the suite under the race detector. It needs a kernel with a
-48-bit VMA; some arm64 boards (including the Raspberry Pi 5) report 47 and
-ThreadSanitizer refuses to start, which is why it is not part of `make check`.
-
-The interface is hand-written ES modules and CSS, embedded into the binary. What
-is served is exactly what is in `web/`. Typefaces are bundled too, so a node with
-no internet access renders identically to one with it.
-
-`make build` also produces `pscluster-admin`, the enterprise account authority,
-network/key/controller registry and global statistics page. The service
-uses a dedicated SQLite database and binds to loopback for a public TLS reverse
-proxy. Its configured URL in the main Plainshow environment is
-`https://clusteradmin.plainshow.se`; that hostname is deployment configuration
-rather than a client-side constant.
-
-The production Apache template is
-`deploy/clusteradmin.plainshow.se.conf`. The admin root is
-`/opt/plainshow-cluster-admin`; back up `accounts.db`, `accounts.db-wal`,
-`accounts.db-shm` and `admin.yaml` together while the service is stopped, or use
-SQLite's online backup tooling.
-
-On the main Pi deployment, open `https://clusteradmin.plainshow.se` and create
-the first account using the one-time token from
-`sudo cat /opt/plainshow-cluster-admin/bootstrap.txt`. That first account is the
-global administrator. Delete the bootstrap file after the account exists; the
-token is removed from SQLite automatically when it is consumed.
-
-## Layout
-
-```
-cmd/pscluster/     CLI and daemon entry point
-internal/
-  config/          install layout and settings
-  store/           SQLite state
-  projectfs/       the filesystem side of a project
-  gitrepo/         git plumbing
-  jobs/            process supervision and log streaming
-  events/          the event hub behind the WebSocket
-  sysinfo/         CPU, memory, disk and GPU probing
-  api/             HTTP API and the web server
-  version/
-web/               the interface, embedded
-scripts/           checks a compiler cannot do
-```
-
-## Runtime programs
-
-The node does not silently install tools. Install the programs for the features
-you use: `git` for project history, Tailscale for cross-network peers,
-util-linux `script` for interactive terminals, `jupyter_server` for notebooks,
-and PyTorch/`torchrun` plus the appropriate CUDA stack for distributed training.
-Missing optional tools produce an actionable message in the interface.
-
-Controller servers are built and operated from the separate PlainShow project
-`../cluster-controller`. They authenticate owners against this service and do
-not use peer invitation codes.
-
-## Implementation status
-
-Working now: the complete single-machine workspace, Jupyter-backed notebooks,
-interactive terminal jobs, GitHub project/team flows, multiple independent network memberships,
-single-use join codes, pinned TLS and Ed25519-authenticated peer requests,
-project transfer, remote jobs with live logs, revisioned collaborative editing
-with offline replay, immutable content-addressed datasets, worker placement,
-gang reservations, PyTorch `torchrun` plans, checkpoints, and a bandwidth
-advisor. The interface uses the same visual language as the existing Plainshow
-console and is embedded in the binary. That includes the official folded-ribbon
-mark, Space Grotesk/IBM Plex Mono typography and the production gradient
-wordmark; no branding or typeface is fetched from the internet at runtime.
-
-The workspace is a lightweight Cowork IDE rather than a file viewer. It opens
-the starter file automatically, provides syntax-coloured editing with shared
-live saves, file/folder creation, rename and delete actions, multi-file upload
-and drag-and-drop, artifact downloads, Git history, machine/dataset-aware runs
-and streaming output. Project uploads are streamed atomically and capped at
-256 MiB per file; larger datasets belong in the dataset manager instead.
-
-Machines on different networks find each other through **tailscale**, which
-Plainshow drives rather than reimplements. When tailscale is connected,
-Plainshow records the address it got. That address is what training uses too,
-so a link the cluster proves reachable is the link NCCL will run over.
-
-A machine with no reachable address of its own — an ordinary desktop behind NAT,
-or behind carrier-grade NAT — is reached at its tailnet address. There is no
-Plainshow-specific fallback: cross-network needs tailscale on both machines, and
-the interface says so rather than timing out. The
-distributed launcher is implemented and its lifecycle is tested with local and
-two-node integration runs; a real multi-GPU PyTorch run still needs validation
-on two CUDA machines before v1.0 is tagged.
-
-One installation can belong to several networks. Each membership has its own
-projects, accounts, machines and worker policy, and the active network is
-selected from the top bar. Devices exchange their signed peer directories
-directly, so every reachable pair converges without a coordinator.
+`make dist` builds portable Linux release assets. On Arch with `base-devel`,
+`make arch-package` builds the native pacman package. Implementation and
+deployment details for the next developer are in `CODEX.md` and `CLAUDE.md`.

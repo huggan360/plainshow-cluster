@@ -68,6 +68,7 @@ jobs:
             dist/install.sh
             dist/checksums.txt
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
 
   arch-package:

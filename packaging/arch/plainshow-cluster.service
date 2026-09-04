@@ -5,7 +5,7 @@ Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/pscluster serve --root /opt/plainshow-cluster
+ExecStart=/opt/plainshow-cluster/bin/pscluster serve --root /opt/plainshow-cluster
 Restart=on-failure
 RestartSec=3
 ReadWritePaths=/opt/plainshow-cluster

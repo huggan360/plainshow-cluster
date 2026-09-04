@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -170,9 +171,7 @@ func (u *Updater) latestRelease(ctx context.Context) (*Release, error) {
 	req.Header.Set("User-Agent", "plainshow-cluster")
 	// A public repository needs no token. A private one is read with the
 	// node's own GitHub credential if it has been connected.
-	if token, err := os.ReadFile(u.layout.GitHubToken()); err == nil {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-	}
+	u.authorizeGitHub(req)
 
 	res, err := u.http.Do(req)
 	if err != nil {
@@ -327,9 +326,7 @@ func (u *Updater) download(ctx context.Context, url, dest string) (string, error
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("User-Agent", "plainshow-cluster")
-	if token, err := os.ReadFile(u.layout.GitHubToken()); err == nil {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
-	}
+	u.authorizeGitHub(req)
 
 	res, err := u.http.Do(req)
 	if err != nil {
@@ -364,6 +361,7 @@ func (u *Updater) expectedChecksum(ctx context.Context, release *Release) (strin
 		return "", err
 	}
 	req.Header.Set("User-Agent", "plainshow-cluster")
+	u.authorizeGitHub(req)
 	res, err := u.http.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("could not download the checksum: %w", err)
@@ -381,6 +379,19 @@ func (u *Updater) expectedChecksum(ctx context.Context, release *Release) (strin
 		return sum, nil
 	}
 	return "", errors.New("the checksum file does not contain this platform's asset")
+}
+
+// authorizeGitHub lets every part of a private release use the credential.
+// GitHub protects checksum assets exactly like binaries; authorizing only the
+// binary download would make an otherwise valid private update fail closed.
+func (u *Updater) authorizeGitHub(req *http.Request) {
+	token, err := os.ReadFile(u.layout.GitHubToken())
+	if err != nil {
+		return
+	}
+	if value := strings.TrimSpace(string(token)); value != "" {
+		req.Header.Set("Authorization", "Bearer "+value)
+	}
 }
 
 // parseChecksums finds one asset's SHA-256 in a published checksum file.
@@ -481,29 +492,73 @@ func (u *Updater) Run(ctx context.Context) {
 	}()
 }
 
-// IsNewer compares two dotted versions, ignoring any leading "v" and any
-// trailing build suffix. A development build is always considered older, so a
-// node built locally still sees released updates.
+// IsNewer compares semantic versions, including prerelease identifiers. A
+// development build is always considered older, so a node built locally still
+// sees released updates.
 func IsNewer(candidate, current string) bool {
 	if candidate == "" {
 		return false
 	}
-	if strings.Contains(current, "-dev") || strings.Contains(current, "dirty") {
+	if strings.Contains(current, "-dev") || strings.Contains(current, "dirty") ||
+		gitDescribeVersion.MatchString(current) {
 		return true
 	}
-	return compare(candidate, current) > 0
+	next, nextOK := parseSemanticVersion(candidate)
+	installed, installedOK := parseSemanticVersion(current)
+	if !nextOK {
+		return false
+	}
+	if !installedOK {
+		return true
+	}
+	return compareSemanticVersions(next, installed) > 0
 }
 
-func compare(a, b string) int {
-	partsA, partsB := numbers(a), numbers(b)
+var gitDescribeVersion = regexp.MustCompile(`-[0-9]+-g[0-9a-f]+(?:-dirty)?$`)
+
+type semanticVersion struct {
+	core       [3]int
+	prerelease []string
+}
+
+func parseSemanticVersion(value string) (semanticVersion, bool) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	if build := strings.IndexByte(value, '+'); build >= 0 {
+		value = value[:build]
+	}
+	coreText, preText, hasPre := strings.Cut(value, "-")
+	pieces := strings.Split(coreText, ".")
+	if len(pieces) == 0 || len(pieces) > 3 {
+		return semanticVersion{}, false
+	}
+	var parsed semanticVersion
+	for index, piece := range pieces {
+		if piece == "" {
+			return semanticVersion{}, false
+		}
+		number, err := strconv.Atoi(piece)
+		if err != nil || number < 0 {
+			return semanticVersion{}, false
+		}
+		parsed.core[index] = number
+	}
+	if hasPre {
+		if preText == "" {
+			return semanticVersion{}, false
+		}
+		parsed.prerelease = strings.Split(preText, ".")
+		for _, identifier := range parsed.prerelease {
+			if identifier == "" {
+				return semanticVersion{}, false
+			}
+		}
+	}
+	return parsed, true
+}
+
+func compareSemanticVersions(a, b semanticVersion) int {
 	for i := 0; i < 3; i++ {
-		x, y := 0, 0
-		if i < len(partsA) {
-			x = partsA[i]
-		}
-		if i < len(partsB) {
-			y = partsB[i]
-		}
+		x, y := a.core[i], b.core[i]
 		if x != y {
 			if x > y {
 				return 1
@@ -511,23 +566,49 @@ func compare(a, b string) int {
 			return -1
 		}
 	}
-	return 0
-}
-
-func numbers(v string) []int {
-	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	if i := strings.IndexAny(v, "-+"); i >= 0 {
-		v = v[:i]
+	if len(a.prerelease) == 0 && len(b.prerelease) == 0 {
+		return 0
 	}
-	out := []int{}
-	for _, piece := range strings.Split(v, ".") {
-		n, err := strconv.Atoi(piece)
-		if err != nil {
-			break
+	if len(a.prerelease) == 0 {
+		return 1
+	}
+	if len(b.prerelease) == 0 {
+		return -1
+	}
+	count := len(a.prerelease)
+	if len(b.prerelease) > count {
+		count = len(b.prerelease)
+	}
+	for index := 0; index < count; index++ {
+		if index == len(a.prerelease) {
+			return -1
 		}
-		out = append(out, n)
+		if index == len(b.prerelease) {
+			return 1
+		}
+		x, y := a.prerelease[index], b.prerelease[index]
+		if x == y {
+			continue
+		}
+		xNumber, xErr := strconv.Atoi(x)
+		yNumber, yErr := strconv.Atoi(y)
+		switch {
+		case xErr == nil && yErr == nil:
+			if xNumber > yNumber {
+				return 1
+			}
+			return -1
+		case xErr == nil:
+			return -1
+		case yErr == nil:
+			return 1
+		case x > y:
+			return 1
+		default:
+			return -1
+		}
 	}
-	return out
+	return 0
 }
 
 // underServiceManager reports whether something will restart this node if it

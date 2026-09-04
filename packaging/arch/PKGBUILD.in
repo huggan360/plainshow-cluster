@@ -10,11 +10,13 @@ depends=('ca-certificates' 'git' 'tailscale' 'util-linux' 'jupyter-server')
 provides=('plainshow-cluster')
 conflicts=('plainshow-cluster-git')
 install=plainshow-cluster.install
-source=('pscluster' 'plainshow-cluster.service')
-sha256sums=('@BINARY_SHA256@' '@SERVICE_SHA256@')
+source=('pscluster.seed' 'pscluster-wrapper' 'plainshow-cluster.service')
+sha256sums=('@BINARY_SHA256@' '@WRAPPER_SHA256@' '@SERVICE_SHA256@')
 
 package() {
-    install -Dm755 "$srcdir/pscluster" "$pkgdir/usr/bin/pscluster"
+    install -Dm755 "$srcdir/pscluster.seed" \
+        "$pkgdir/usr/lib/plainshow-cluster/pscluster"
+    install -Dm755 "$srcdir/pscluster-wrapper" "$pkgdir/usr/bin/pscluster"
     install -Dm644 "$srcdir/plainshow-cluster.service" \
         "$pkgdir/usr/lib/systemd/system/plainshow-cluster.service"
 }

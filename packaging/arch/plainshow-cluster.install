@@ -1,8 +1,10 @@
 post_install() {
+    install -d -m 0750 /opt/plainshow-cluster/bin
+    install -m 0755 /usr/lib/plainshow-cluster/pscluster \
+        /opt/plainshow-cluster/bin/pscluster
     if [[ ! -f /opt/plainshow-cluster/config.yaml ]]; then
-        install -d -m 0750 /opt/plainshow-cluster
         PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
-            /usr/bin/pscluster init --root /opt/plainshow-cluster
+            /opt/plainshow-cluster/bin/pscluster init --root /opt/plainshow-cluster
     fi
 
     if [[ -d /run/systemd/system ]]; then
@@ -19,6 +21,9 @@ post_install() {
 }
 
 post_upgrade() {
+    install -d -m 0750 /opt/plainshow-cluster/bin
+    install -m 0755 /usr/lib/plainshow-cluster/pscluster \
+        /opt/plainshow-cluster/bin/pscluster
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
         systemctl try-restart plainshow-cluster.service || true

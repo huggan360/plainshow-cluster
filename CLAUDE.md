@@ -227,13 +227,13 @@ Assessed by running it, not by reading commit messages.
 | Datasets | implemented — content-addressed and direct peer syncing; no sharding |
 | Collaborative editing | implemented — controller relay plus local durable writes and offline outbox |
 | Notebooks | implemented through an installed `jupyter_server` |
-| Updates and releases | implemented; real published upgrade remains a release exercise |
+| Updates and releases | implemented; first alpha release cut, alpha-to-alpha upgrade remains a hardware exercise |
 | Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
 | Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
 | Terminal | implemented as a policy-controlled interactive PTY job |
 | Enterprise master | accounts, network/key/controller registry and admin statistics implemented; no relay |
 | Controller | separate PlainShow project, global login, network selection, registry heartbeat and relay implemented |
-| Install hardening and docs | automatic Arch/Debian/Ubuntu dependencies, native pacman package, node/admin installer and controller docs implemented |
+| Install hardening and docs | automatic pacman/apt/dnf/zypper dependencies, static Linux binaries, native pacman package and simple install guide implemented |
 
 The main enterprise service is deployed on this Pi at
 `https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
@@ -339,16 +339,20 @@ editing is the only data-plane feature it adds; Git works without it.
     Needs hardware nobody has run this on. Expect the driver and CUDA mismatch
     handling to be wrong. **This is where the estimate is most likely to
     break.** *3d*
-17. **Cut v0.1.0 and test a real upgrade** — install an old build, publish a new
-    one, watch a node take it. *2d*
+17. **Test a real published upgrade.** `v0.1.0-alpha.1` is the first release;
+    install it, publish alpha.2, and watch an actual node take the update. The
+    updater supports semantic prerelease ordering and authenticates every asset
+    of a private release, including `checksums.txt`. *2d*
 18. ~~**Install hardening and docs.**~~ `install.sh` installs the node or account
     service atomically, creates the matching one-root configuration, and writes
     systemd integration. Node installation provisions the full non-GPU runtime
-    through pacman on Arch or apt on Debian/Ubuntu; GPU/CUDA/PyTorch remain an
-    explicit hardware preflight. Native pacman packaging and tagged-release
-    automation are included. The independent controller is built and run
-    through its own PlainShow project/runtime. README and `CODEX.md` describe
-    operation and handover.
+    through pacman on Arch, apt on Debian/Ubuntu, dnf on Fedora/RHEL derivatives,
+    or zypper on openSUSE; GPU/CUDA/PyTorch remain an explicit hardware
+    preflight. Release binaries are static. Native pacman packaging and
+    tagged-release automation are included, and the package's wrapper keeps the
+    built-in updated binary active after reboot. The independent controller is
+    built and run through its own PlainShow project/runtime. README and
+    `CODEX.md` describe operation and handover.
 
 ### Done and not to be redone
 

@@ -32,7 +32,8 @@ installer-check:
 	@sh -n install.sh
 	@bash -n packaging/arch/plainshow-cluster.install
 	@sed -e 's/@VERSION@/1.0.0/g' -e 's/@ARCH@/x86_64/g' \
-		-e 's/@BINARY_SHA256@/abc/g' -e 's/@SERVICE_SHA256@/def/g' \
+		-e 's/@BINARY_SHA256@/abc/g' -e 's/@WRAPPER_SHA256@/def/g' \
+		-e 's/@SERVICE_SHA256@/123/g' \
 		packaging/arch/PKGBUILD.in | bash -n
 	@echo "installer and Arch packaging syntax clean"
 
@@ -86,10 +87,10 @@ smoke: build
 ## a platform simply looks like no release at all.
 dist: web
 	@rm -rf dist && mkdir -p dist
-	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-amd64 $(PKG)
-	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
-	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-amd64 $(ADMIN_PKG)
-	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-arm64 $(ADMIN_PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-amd64 $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-amd64 $(ADMIN_PKG)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-arm64 $(ADMIN_PKG)
 	@cp install.sh dist/install.sh && chmod 755 dist/install.sh
 	@cd dist && sha256sum *-linux-* install.sh > checksums.txt
 	@echo
@@ -114,12 +115,15 @@ arch-package: dist
 	version=$$(printf '%s' "$(VERSION)" | sed 's/^v//; s/[^[:alnum:].+_]/./g'); \
 	work=dist/arch-package; \
 	mkdir -p "$$work"; \
-	cp "dist/$(BINARY)-linux-$$asset_arch" "$$work/pscluster"; \
-	cp packaging/arch/plainshow-cluster.service packaging/arch/plainshow-cluster.install "$$work/"; \
-	binary_sha=$$(sha256sum "$$work/pscluster" | cut -d ' ' -f 1); \
+	cp "dist/$(BINARY)-linux-$$asset_arch" "$$work/pscluster.seed"; \
+	cp packaging/arch/pscluster-wrapper packaging/arch/plainshow-cluster.service \
+		packaging/arch/plainshow-cluster.install "$$work/"; \
+	binary_sha=$$(sha256sum "$$work/pscluster.seed" | cut -d ' ' -f 1); \
+	wrapper_sha=$$(sha256sum "$$work/pscluster-wrapper" | cut -d ' ' -f 1); \
 	service_sha=$$(sha256sum "$$work/plainshow-cluster.service" | cut -d ' ' -f 1); \
 	sed -e "s/@VERSION@/$$version/g" -e "s/@ARCH@/$$package_arch/g" \
-		-e "s/@BINARY_SHA256@/$$binary_sha/g" -e "s/@SERVICE_SHA256@/$$service_sha/g" \
+		-e "s/@BINARY_SHA256@/$$binary_sha/g" -e "s/@WRAPPER_SHA256@/$$wrapper_sha/g" \
+		-e "s/@SERVICE_SHA256@/$$service_sha/g" \
 		packaging/arch/PKGBUILD.in > "$$work/PKGBUILD"; \
 	(cd "$$work" && makepkg --force --noconfirm --nodeps); \
 	cp "$$work"/*.pkg.tar.zst dist/; \

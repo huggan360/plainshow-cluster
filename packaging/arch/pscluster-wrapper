@@ -1,0 +1,8 @@
+#!/bin/sh
+# The package seeds a mutable one-root binary. PlainShow's verified updater
+# replaces that copy atomically; this wrapper keeps both CLI calls and reboots
+# on the updated binary rather than the package seed.
+if [ -x /opt/plainshow-cluster/bin/pscluster ]; then
+    exec /opt/plainshow-cluster/bin/pscluster "$@"
+fi
+exec /usr/lib/plainshow-cluster/pscluster "$@"

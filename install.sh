@@ -102,6 +102,83 @@ install_apt_dependencies() {
     fi
 }
 
+configure_tailscale_dnf_repository() {
+    if dnf --quiet list --available tailscale >/dev/null 2>&1; then
+        return
+    fi
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    major="${VERSION_ID%%.*}"
+    case "${ID:-}" in
+        fedora) repository="https://pkgs.tailscale.com/stable/fedora/tailscale.repo" ;;
+        rhel|centos|ol) repository="https://pkgs.tailscale.com/stable/${ID}/$major/tailscale.repo" ;;
+        rocky|almalinux) repository="https://pkgs.tailscale.com/stable/rhel/$major/tailscale.repo" ;;
+        *)
+            echo "install: no automatic Tailscale repository mapping for ${ID:-this dnf system}" >&2
+            exit 1
+            ;;
+    esac
+    case "$major" in *[!0-9]*) echo "install: invalid RPM release version" >&2; exit 1 ;; esac
+    note "adding Tailscale's signed RPM repository"
+    install -d -m 0755 /etc/yum.repos.d
+    temporary_repo="$(mktemp)"
+    if ! curl -fsSL "$repository" -o "$temporary_repo" ||
+       ! grep -q 'pkgs.tailscale.com' "$temporary_repo"; then
+        rm -f "$temporary_repo"
+        echo "install: Tailscale repository metadata failed validation" >&2
+        exit 1
+    fi
+    install -m 0644 "$temporary_repo" /etc/yum.repos.d/tailscale.repo
+    rm -f "$temporary_repo"
+}
+
+install_dnf_dependencies() {
+    note "installing Fedora/RHEL runtime dependencies"
+    dnf install -y ca-certificates curl git util-linux
+    configure_tailscale_dnf_repository
+    dnf install -y tailscale
+    if dnf --quiet list --available python3-jupyter-server >/dev/null 2>&1 ||
+       dnf --quiet list --installed python3-jupyter-server >/dev/null 2>&1; then
+        dnf install -y python3-jupyter-server
+    else
+        note "python3-jupyter-server is unavailable; notebooks remain disabled"
+    fi
+}
+
+configure_tailscale_zypper_repository() {
+    if zypper --non-interactive search --installed-only --match-exact tailscale 2>/dev/null |
+        grep -q 'tailscale'; then
+        return
+    fi
+    if zypper --non-interactive repos tailscale-stable >/dev/null 2>&1; then
+        return
+    fi
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    case "${ID:-}" in
+        opensuse-tumbleweed) track=tumbleweed ;;
+        opensuse-leap|opensuse)
+            track="leap/${VERSION_ID:-}"
+            ;;
+        *) echo "install: unsupported zypper distribution: ${ID:-unknown}" >&2; exit 1 ;;
+    esac
+    case "$track" in *[!a-zA-Z0-9./_-]*) echo "install: invalid openSUSE release" >&2; exit 1 ;; esac
+    note "adding Tailscale's signed openSUSE repository"
+    zypper --non-interactive addrepo --gpgcheck --refresh \
+        "https://pkgs.tailscale.com/stable/opensuse/$track/tailscale.repo" tailscale-stable
+}
+
+install_zypper_dependencies() {
+    note "installing openSUSE runtime dependencies"
+    zypper --non-interactive install ca-certificates curl git util-linux
+    configure_tailscale_zypper_repository
+    zypper --non-interactive refresh
+    zypper --non-interactive install tailscale
+    if ! zypper --non-interactive install python-jupyter-server; then
+        note "python-jupyter-server is unavailable; notebooks remain disabled"
+    fi
+}
+
 install_node_dependencies() {
     missing="$(missing_node_commands)"
     [ -n "$missing" ] || {
@@ -125,8 +202,12 @@ install_node_dependencies() {
             ca-certificates git tailscale util-linux jupyter-server
     elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1; then
         install_apt_dependencies
+    elif command -v dnf >/dev/null 2>&1; then
+        install_dnf_dependencies
+    elif command -v zypper >/dev/null 2>&1; then
+        install_zypper_dependencies
     else
-        echo "install: automatic dependency installation supports Arch, Debian and Ubuntu" >&2
+        echo "install: automatic dependencies support Arch, Debian/Ubuntu, Fedora/RHEL and openSUSE" >&2
         echo "install: missing:$missing" >&2
         echo "install: install Git, Tailscale, util-linux/script and jupyter-server, or set" >&2
         echo "install: PSCLUSTER_SKIP_DEPENDENCIES=1 to install only the binary" >&2
