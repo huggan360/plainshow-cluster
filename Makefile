@@ -118,12 +118,22 @@ arch-package: dist
 	cp "dist/$(BINARY)-linux-$$asset_arch" "$$work/pscluster.seed"; \
 	cp packaging/arch/pscluster-wrapper packaging/arch/plainshow-cluster.service \
 		packaging/arch/plainshow-cluster.install "$$work/"; \
+	cp packaging/desktop/plainshow-cluster.desktop \
+		packaging/desktop/plainshow-cluster-*.png "$$work/"; \
 	binary_sha=$$(sha256sum "$$work/pscluster.seed" | cut -d ' ' -f 1); \
 	wrapper_sha=$$(sha256sum "$$work/pscluster-wrapper" | cut -d ' ' -f 1); \
 	service_sha=$$(sha256sum "$$work/plainshow-cluster.service" | cut -d ' ' -f 1); \
+	desktop_sha=$$(sha256sum "$$work/plainshow-cluster.desktop" | cut -d ' ' -f 1); \
+	icon48_sha=$$(sha256sum "$$work/plainshow-cluster-48.png" | cut -d ' ' -f 1); \
+	icon64_sha=$$(sha256sum "$$work/plainshow-cluster-64.png" | cut -d ' ' -f 1); \
+	icon128_sha=$$(sha256sum "$$work/plainshow-cluster-128.png" | cut -d ' ' -f 1); \
+	icon256_sha=$$(sha256sum "$$work/plainshow-cluster-256.png" | cut -d ' ' -f 1); \
 	sed -e "s/@VERSION@/$$version/g" -e "s/@ARCH@/$$package_arch/g" \
 		-e "s/@BINARY_SHA256@/$$binary_sha/g" -e "s/@WRAPPER_SHA256@/$$wrapper_sha/g" \
 		-e "s/@SERVICE_SHA256@/$$service_sha/g" \
+		-e "s/@DESKTOP_SHA256@/$$desktop_sha/g" \
+		-e "s/@ICON48_SHA256@/$$icon48_sha/g" -e "s/@ICON64_SHA256@/$$icon64_sha/g" \
+		-e "s/@ICON128_SHA256@/$$icon128_sha/g" -e "s/@ICON256_SHA256@/$$icon256_sha/g" \
 		packaging/arch/PKGBUILD.in > "$$work/PKGBUILD"; \
 	(cd "$$work" && makepkg --force --noconfirm --nodeps); \
 	cp "$$work"/plainshow-cluster-[0-9]*.pkg.tar.zst dist/; \

@@ -1,3 +1,17 @@
+# _install_ray puts Ray in a virtual environment inside the node's own root.
+# Arch does not package Ray, and a system-wide pip install is refused, so the
+# node keeps its own. A failure here is a warning: the node is useful before
+# anybody runs anything.
+_install_ray() {
+    [[ -x /opt/plainshow-cluster/runtime/bin/ray ]] && return 0
+    echo 'Installing Ray for Plainshow Cluster...'
+    if ! python3 -m venv /opt/plainshow-cluster/runtime 2>/dev/null ||
+       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet "ray[default]"; then
+        echo 'Ray could not be installed automatically. Run:'
+        echo '  sudo /opt/plainshow-cluster/runtime/bin/pip install "ray[default]"'
+    fi
+}
+
 post_install() {
     install -d -m 0750 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
@@ -6,6 +20,8 @@ post_install() {
         PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
             /opt/plainshow-cluster/bin/pscluster init --root /opt/plainshow-cluster
     fi
+
+    _install_ray
 
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
@@ -24,6 +40,7 @@ post_upgrade() {
     install -d -m 0750 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
+    _install_ray
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
         systemctl try-restart plainshow-cluster.service || true
@@ -41,4 +58,5 @@ post_remove() {
         systemctl daemon-reload
     fi
     echo 'PlainShow node data remains in /opt/plainshow-cluster.'
+    echo 'To remove it as well:  sudo rm -rf /opt/plainshow-cluster'
 }
