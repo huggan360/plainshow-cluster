@@ -14,7 +14,59 @@ permissions:
   contents: write
 
 jobs:
+  desktop:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - name: Install native desktop build libraries
+        run: sudo apt-get update && sudo apt-get install -y build-essential libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Build native desktop
+        run: make desktop && mv plainshow-cluster-desktop plainshow-cluster-desktop-linux-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plainshow-cluster-desktop-linux-${{ matrix.arch }}
+          path: plainshow-cluster-desktop-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  snap-package:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build classic Snap
+        id: snapcraft
+        uses: snapcore/action-build@v1
+        with:
+          path: .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plainshow-cluster-snap-${{ matrix.arch }}
+          path: ${{ steps.snapcraft.outputs.snap }}
+          if-no-files-found: error
+
   release:
+    needs: [desktop, snap-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,15 +90,57 @@ jobs:
       - name: Build release assets
         run: make dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plainshow-cluster-desktop-linux-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plainshow-cluster-snap-*
+          path: dist
+          merge-multiple: true
+
+      - name: Add desktop applications and snaps to checksums
+        run: cd dist && sha256sum plainshow-cluster-desktop-linux-* plainshow-cluster_*.snap >> checksums.txt
+
+      - name: Build complete portable installer bundles
+        run: |
+          set -eu
+          for arch in amd64 arm64; do
+            temporary="$(mktemp -d)"
+            folder="plainshow-cluster-linux-$arch"
+            bundle="$temporary/$folder"
+            mkdir -p "$bundle/packaging/desktop"
+            cp "dist/pscluster-linux-$arch" \
+               "dist/plainshow-cluster-desktop-linux-$arch" \
+               dist/install.sh dist/checksums.txt "$bundle/"
+            cp packaging/desktop/plainshow-cluster.desktop \
+               packaging/desktop/plainshow-cluster-*.png \
+               "$bundle/packaging/desktop/"
+            tar -czf "dist/plainshow-cluster-linux-$arch.tar.gz" -C "$temporary" "$folder"
+            rm -rf "$temporary"
+          done
+          cd dist && sha256sum plainshow-cluster-linux-*.tar.gz >> checksums.txt
+
       - name: Verify the assets are what a node will look for
         run: |
           set -eu
           version="${GITHUB_REF_NAME#v}"
           for asset in pscluster-linux-amd64 pscluster-linux-arm64 \
                        pscluster-admin-linux-amd64 pscluster-admin-linux-arm64 \
+                       plainshow-cluster-desktop-linux-amd64 \
+                       plainshow-cluster-desktop-linux-arm64 \
+                       plainshow-cluster-linux-amd64.tar.gz \
+                       plainshow-cluster-linux-arm64.tar.gz \
                        install.sh checksums.txt; do
             test -s "dist/$asset" || { echo "missing dist/$asset"; exit 1; }
           done
+          test "$(find dist -maxdepth 1 -name 'plainshow-cluster_*.snap' | wc -l)" -eq 2 || {
+            echo "expected one snap for amd64 and one for arm64"
+            exit 1
+          }
           # The binary must report the tag it was built from, or a node will
           # download this release forever and never consider itself current.
           reported="$(./dist/pscluster-linux-amd64 version || true)"
@@ -65,6 +159,11 @@ jobs:
             dist/pscluster-linux-arm64
             dist/pscluster-admin-linux-amd64
             dist/pscluster-admin-linux-arm64
+            dist/plainshow-cluster-desktop-linux-amd64
+            dist/plainshow-cluster-desktop-linux-arm64
+            dist/plainshow-cluster-linux-amd64.tar.gz
+            dist/plainshow-cluster-linux-arm64.tar.gz
+            dist/plainshow-cluster_*.snap
             dist/install.sh
             dist/checksums.txt
           generate_release_notes: true
@@ -81,7 +180,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install build tools
-        run: pacman -Syu --noconfirm git go nodejs npm
+        run: pacman -Syu --noconfirm git go nodejs npm gtk3 webkit2gtk-4.1
 
       - name: Build native pacman package
         run: |
