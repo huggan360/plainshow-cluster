@@ -8,8 +8,6 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 func TestRegisterLoginAndAdminDashboard(t *testing.T) {
@@ -87,7 +85,7 @@ func TestOrdinaryAccountCannotReadGlobalDirectory(t *testing.T) {
 	}
 }
 
-func TestEnterpriseNetworkRegistrationAndCollaborationRelay(t *testing.T) {
+func TestControllerRegistryIsSeparateFromAccountServer(t *testing.T) {
 	store := openTestStore(t)
 	_ = store.InitialiseBootstrap(TokenHash("bootstrap"))
 	if err := store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("bootstrap"), true); err != nil {
@@ -113,8 +111,34 @@ func TestEnterpriseNetworkRegistrationAndCollaborationRelay(t *testing.T) {
 		return response
 	}
 	ownerSync := sync("owner-token")
-	if ownerSync.Code != http.StatusOK || !strings.Contains(ownerSync.Body.String(), "plainshow-enterprise") {
+	if ownerSync.Code != http.StatusOK || !strings.Contains(ownerSync.Body.String(), `"controller":{}`) {
 		t.Fatalf("owner sync = %d %s", ownerSync.Code, ownerSync.Body.String())
+	}
+	configure := httptest.NewRequest(http.MethodPut, "/api/controllers/controller-1", strings.NewReader(
+		`{"name":"Main controller","public_url":"https://cluster.example","network_ids":["network"]}`))
+	configure.Header.Set("Authorization", "Bearer owner-token")
+	configure.Header.Set("Content-Type", "application/json")
+	configured := httptest.NewRecorder()
+	handler.ServeHTTP(configured, configure)
+	if configured.Code != http.StatusOK {
+		t.Fatalf("configure controller = %d %s", configured.Code, configured.Body.String())
+	}
+	var registration ControllerConfiguration
+	if err := json.Unmarshal(configured.Body.Bytes(), &registration); err != nil ||
+		registration.Credential == "" || len(registration.Networks) != 1 || registration.Networks[0].RelayToken == "" {
+		t.Fatalf("controller registration = %+v, %v", registration, err)
+	}
+	checkIn := httptest.NewRequest(http.MethodPost, "/api/controllers/controller-1/check-in", nil)
+	checkIn.Header.Set("Authorization", "Bearer "+registration.Credential)
+	checkedIn := httptest.NewRecorder()
+	handler.ServeHTTP(checkedIn, checkIn)
+	if checkedIn.Code != http.StatusOK || !strings.Contains(checkedIn.Body.String(), `"relay_token"`) {
+		t.Fatalf("controller check-in = %d %s", checkedIn.Code, checkedIn.Body.String())
+	}
+	ownerSync = sync("owner-token")
+	if ownerSync.Code != http.StatusOK || !strings.Contains(ownerSync.Body.String(), "https://cluster.example") ||
+		!strings.Contains(ownerSync.Body.String(), registration.Networks[0].RelayToken) {
+		t.Fatalf("owner controller discovery = %d %s", ownerSync.Code, ownerSync.Body.String())
 	}
 	if response := sync("member-token"); response.Code != http.StatusForbidden {
 		t.Fatalf("uninvited sync = %d %s", response.Code, response.Body.String())
@@ -131,31 +155,18 @@ func TestEnterpriseNetworkRegistrationAndCollaborationRelay(t *testing.T) {
 	if response := sync("member-token"); response.Code != http.StatusOK {
 		t.Fatalf("member sync = %d %s", response.Code, response.Body.String())
 	}
-
-	collabToken, err := store.NetworkCollabToken("network")
-	if err != nil {
-		t.Fatal(err)
+	contextRequest := httptest.NewRequest(http.MethodGet, "/api/controller/context/controller-1", nil)
+	contextRequest.Header.Set("Authorization", "Bearer member-token")
+	contextResponse := httptest.NewRecorder()
+	handler.ServeHTTP(contextResponse, contextRequest)
+	if contextResponse.Code != http.StatusOK || !strings.Contains(contextResponse.Body.String(), `"can_access":true`) ||
+		!strings.Contains(contextResponse.Body.String(), `"can_manage":false`) {
+		t.Fatalf("member controller context = %d %s", contextResponse.Code, contextResponse.Body.String())
 	}
-	httpServer := httptest.NewServer(handler)
-	defer httpServer.Close()
-	dialer := websocket.Dialer{Subprotocols: []string{"plainshow." + collabToken}}
-	address := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws?network=network"
-	first, _, err := dialer.Dial(address, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer first.Close()
-	second, _, err := dialer.Dial(address, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer second.Close()
-	if err := first.WriteMessage(websocket.TextMessage, []byte(`{"operation":"change"}`)); err != nil {
-		t.Fatal(err)
-	}
-	_ = second.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, message, err := second.ReadMessage()
-	if err != nil || string(message) != `{"operation":"change"}` {
-		t.Fatalf("relay = %q, %v", message, err)
+	websocketRequest := httptest.NewRequest(http.MethodGet, "/ws?network=network", nil)
+	websocketResponse := httptest.NewRecorder()
+	handler.ServeHTTP(websocketResponse, websocketRequest)
+	if websocketResponse.Code != http.StatusNotFound {
+		t.Fatalf("account server still serves collaboration websocket: %d", websocketResponse.Code)
 	}
 }

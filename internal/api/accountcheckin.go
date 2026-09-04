@@ -73,14 +73,16 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 			ID: membership.ID, Name: membership.Name,
 			ManagementKey: membership.ManagementKey, Role: role,
 		})
-		if syncErr != nil || access.Controller.Address == "" {
+		if syncErr != nil {
 			continue
 		}
-		_ = s.store.UpsertNetworkController(store.NetworkController{
-			NetworkID: membership.ID, ID: access.Controller.ID,
-			Name: access.Controller.Name, Address: access.Controller.Address,
-			CollabToken: access.Controller.CollabToken, LastSeen: store.Now(),
-		})
+		var selected *store.NetworkController
+		if access.Controller.Address != "" {
+			selected = &store.NetworkController{NetworkID: membership.ID, ID: access.Controller.ID,
+				Name: access.Controller.Name, Address: access.Controller.Address,
+				CollabToken: access.Controller.CollabToken, LastSeen: store.Now()}
+		}
+		_ = s.store.SetNetworkController(membership.ID, selected)
 	}
 	info := sysinfo.Probe(s.layout.Root)
 	checkIn := accountserver.NodeCheckIn{

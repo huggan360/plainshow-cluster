@@ -388,17 +388,6 @@ func (l Layout) DeviceKey() string    { return filepath.Join(l.Root, "keys", "de
 func (l Layout) DeviceCert() string   { return filepath.Join(l.Root, "keys", "device.crt") }
 func (l Layout) PIDFile() string      { return filepath.Join(l.Root, "run", "pscluster.pid") }
 
-// Controller paths use the same one-root rule without creating node-only
-// project, dataset or artifact directories.
-func (l Layout) ControllerConfigFile() string {
-	return filepath.Join(l.Root, "controller.yaml")
-}
-func (l Layout) ControllerKey() string      { return filepath.Join(l.Root, "keys", "controller.key") }
-func (l Layout) ControllerCert() string     { return filepath.Join(l.Root, "keys", "controller.crt") }
-func (l Layout) ControllerOverview() string { return filepath.Join(l.Root, "overview.json") }
-func (l Layout) ControllerPIDFile() string {
-	return filepath.Join(l.Root, "run", "pscluster-controller.pid")
-}
 func (l Layout) AdminConfigFile() string { return filepath.Join(l.Root, "admin.yaml") }
 func (l Layout) AdminDatabase() string   { return filepath.Join(l.Root, "accounts.db") }
 func (l Layout) AdminPIDFile() string {
@@ -418,18 +407,6 @@ func (l Layout) EnsureDirs() error {
 	for _, d := range l.Dirs() {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
-		}
-	}
-	return nil
-}
-
-// EnsureControllerDirs creates only the directories the controller server
-// uses. A controller never grows empty project or dataset trees that imply it
-// is a compute device.
-func (l Layout) EnsureControllerDirs() error {
-	for _, dir := range []string{l.Root, l.Keys(), l.Logs(), l.Run(), l.Bin()} {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
 	return nil

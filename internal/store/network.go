@@ -249,6 +249,28 @@ func (s *Store) UpsertNetworkController(item NetworkController) error {
 	return err
 }
 
+// SetNetworkController replaces the controller discovered from the global
+// registry for one network. Passing nil clears a stale/offline assignment.
+func (s *Store) SetNetworkController(networkID string, item *NetworkController) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM network_controller WHERE network_id=?`, networkID); err != nil {
+		return err
+	}
+	if item != nil {
+		if _, err := tx.Exec(`INSERT INTO network_controller
+			(network_id,id,name,public_key,fingerprint,address,collab_token,last_seen,created_at)
+			VALUES (?,?,?,?,?,?,?,?,?)`, networkID, item.ID, item.Name, "", "",
+			item.Address, item.CollabToken, item.LastSeen, Now()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) NetworkControllers(networkID string) ([]NetworkController, error) {
 	rows, err := s.db.Query(`SELECT network_id,id,name,public_key,fingerprint,address,
         collab_token,last_seen,created_at FROM network_controller WHERE network_id=? ORDER BY lower(name)`, networkID)

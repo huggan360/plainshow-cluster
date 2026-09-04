@@ -32,6 +32,10 @@ var (
 	// ErrNetworkMember means a valid network key was presented by an account
 	// that has not been invited by a network administrator.
 	ErrNetworkMember = errors.New("account is not a member of the network")
+	// ErrControllerOwner prevents another account from taking over a controller.
+	ErrControllerOwner = errors.New("controller belongs to another account")
+	// ErrControllerAccess means the account cannot use or configure a controller.
+	ErrControllerAccess = errors.New("account cannot access this controller")
 )
 
 // Account is a global Plainshow identity.
@@ -69,7 +73,6 @@ type EnterpriseNetwork struct {
 	Name           string `json:"name"`
 	OwnerAccountID string `json:"owner_account_id"`
 	ManagementKey  string `json:"management_key,omitempty"`
-	CollabToken    string `json:"collab_token,omitempty"`
 	Members        int    `json:"members"`
 	Nodes          int    `json:"nodes"`
 	LastSeen       string `json:"last_seen"`
@@ -115,6 +118,7 @@ type Stats struct {
 	GPUs        int `json:"gpus"`
 	Projects    int `json:"projects"`
 	RunningJobs int `json:"running_jobs"`
+	Controllers int `json:"controllers"`
 }
 
 // Store owns the account server's independent SQLite database.
@@ -145,7 +149,6 @@ func (s *Store) migrate() error {
 	columns := []struct{ name, definition string }{
 		{"owner_account_id", "TEXT NOT NULL DEFAULT ''"},
 		{"management_key", "TEXT NOT NULL DEFAULT ''"},
-		{"collab_token", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range columns {
 		rows, err := s.db.Query(`PRAGMA table_info(network)`)
@@ -401,24 +404,20 @@ func (s *Store) RegisterNetwork(accountID string, input NetworkRegistration) (En
 	}
 	defer tx.Rollback()
 	var network EnterpriseNetwork
-	err = tx.QueryRow(`SELECT id,name,owner_account_id,management_key,collab_token,last_seen,created_at
+	err = tx.QueryRow(`SELECT id,name,owner_account_id,management_key,last_seen,created_at
         FROM network WHERE id=?`, input.ID).Scan(&network.ID, &network.Name,
-		&network.OwnerAccountID, &network.ManagementKey, &network.CollabToken,
+		&network.OwnerAccountID, &network.ManagementKey,
 		&network.LastSeen, &network.Created)
 	seen := now()
 	if errors.Is(err, sql.ErrNoRows) {
-		collabToken, err := randomSecret()
-		if err != nil {
-			return network, err
-		}
 		input.Role = "owner"
 		network = EnterpriseNetwork{ID: input.ID, Name: input.Name,
 			OwnerAccountID: accountID, ManagementKey: input.ManagementKey,
-			CollabToken: collabToken, LastSeen: seen, Created: seen}
+			LastSeen: seen, Created: seen}
 		_, err = tx.Exec(`INSERT INTO network
-            (id,name,owner_account_id,management_key,collab_token,last_seen,created_at)
-            VALUES(?,?,?,?,?,?,?)`, network.ID, network.Name, network.OwnerAccountID,
-			network.ManagementKey, network.CollabToken, seen, seen)
+			(id,name,owner_account_id,management_key,last_seen,created_at)
+			VALUES(?,?,?,?,?,?)`, network.ID, network.Name, network.OwnerAccountID,
+			network.ManagementKey, seen, seen)
 		if err != nil {
 			return network, err
 		}
@@ -426,15 +425,10 @@ func (s *Store) RegisterNetwork(accountID string, input NetworkRegistration) (En
 		return network, err
 	} else {
 		if network.ManagementKey == "" {
-			collabToken, secretErr := randomSecret()
-			if secretErr != nil {
-				return network, secretErr
-			}
 			input.Role = "owner"
-			network.OwnerAccountID, network.ManagementKey, network.CollabToken =
-				accountID, input.ManagementKey, collabToken
-			if _, err := tx.Exec(`UPDATE network SET owner_account_id=?,management_key=?,collab_token=? WHERE id=?`,
-				accountID, input.ManagementKey, collabToken, input.ID); err != nil {
+			network.OwnerAccountID, network.ManagementKey = accountID, input.ManagementKey
+			if _, err := tx.Exec(`UPDATE network SET owner_account_id=?,management_key=? WHERE id=?`,
+				accountID, input.ManagementKey, input.ID); err != nil {
 				return network, err
 			}
 		}
@@ -511,8 +505,8 @@ func (s *Store) GrantNetworkMember(actorID, networkID, managementKey, accountID,
 // Networks returns the global registry with secrets included for administrators.
 func (s *Store) Networks() ([]EnterpriseNetwork, error) {
 	rows, err := s.db.Query(`SELECT n.id,n.name,n.owner_account_id,n.management_key,
-        n.collab_token,(SELECT count(*) FROM network_member m WHERE m.network_id=n.id),
-        (SELECT count(*) FROM node_network nn WHERE nn.network_id=n.id),n.last_seen,n.created_at
+		(SELECT count(*) FROM network_member m WHERE m.network_id=n.id),
+		(SELECT count(*) FROM node_network nn WHERE nn.network_id=n.id),n.last_seen,n.created_at
         FROM network n ORDER BY lower(n.name)`)
 	if err != nil {
 		return nil, err
@@ -522,22 +516,13 @@ func (s *Store) Networks() ([]EnterpriseNetwork, error) {
 	for rows.Next() {
 		var network EnterpriseNetwork
 		if err := rows.Scan(&network.ID, &network.Name, &network.OwnerAccountID,
-			&network.ManagementKey, &network.CollabToken, &network.Members,
+			&network.ManagementKey, &network.Members,
 			&network.Nodes, &network.LastSeen, &network.Created); err != nil {
 			return nil, err
 		}
 		out = append(out, network)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) NetworkCollabToken(networkID string) (string, error) {
-	var token string
-	err := s.db.QueryRow(`SELECT collab_token FROM network WHERE id=?`, networkID).Scan(&token)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return token, err
 }
 
 func (s *Store) RotateNetworkKey(networkID string) (string, error) {
@@ -594,6 +579,7 @@ func (s *Store) Stats() (Stats, error) {
 		{`SELECT coalesce(sum(gpu_count),0) FROM node`, &out.GPUs},
 		{`SELECT coalesce(sum(project_count),0) FROM node`, &out.Projects},
 		{`SELECT coalesce(sum(running_jobs),0) FROM node`, &out.RunningJobs},
+		{`SELECT count(*) FROM controller_server`, &out.Controllers},
 	}
 	for _, item := range queries {
 		var err error

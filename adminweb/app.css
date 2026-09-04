@@ -112,7 +112,7 @@ input:focus { border-color: rgba(103,232,249,.42); box-shadow: 0 0 0 3px rgba(34
 .toast--error { border-color: rgba(251,113,133,.28); background: rgba(63,11,24,.94); color: #fecdd3; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(7px); } }
 
-.metrics { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 10px; margin: 0 0 24px; }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin: 0 0 24px; }
 .metric { min-height: 118px; overflow: hidden; border-radius: 18px; padding: 4px; background: linear-gradient(135deg, #176bff, #18e5e5); }
 .metric:nth-child(2) { background: linear-gradient(135deg, #15803d, #4ade80); }
 .metric:nth-child(3) { background: linear-gradient(135deg, #7c3cff, #ff3bf4); }
@@ -120,6 +120,7 @@ input:focus { border-color: rgba(103,232,249,.42); box-shadow: 0 0 0 3px rgba(34
 .metric:nth-child(5) { background: linear-gradient(135deg, #176bff, #38bdf8); }
 .metric:nth-child(6) { background: linear-gradient(135deg, #0f766e, #2dd4bf); }
 .metric:nth-child(7) { background: linear-gradient(135deg, #b91c1c, #fb7185); }
+.metric:nth-child(8) { background: linear-gradient(135deg, #6d28d9, #c084fc); }
 .metric__surface { display: flex; height: 100%; min-height: 110px; flex-direction: column; justify-content: flex-end; border-radius: 14px; background: var(--panel); padding: 14px; }
 .metric strong { display: block; color: #fff; font-size: 30px; font-weight: 600; letter-spacing: -.05em; }
 .metric span { margin-top: 5px; color: var(--muted); font: 9px var(--mono); letter-spacing: .11em; text-transform: uppercase; }
@@ -129,6 +130,7 @@ input:focus { border-color: rgba(103,232,249,.42); box-shadow: 0 0 0 3px rgba(34
 .rows { display: grid; gap: 7px; }
 .row { display: flex; align-items: center; gap: 12px; min-width: 0; border: 1px solid rgba(255,255,255,.055); border-radius: 13px; background: rgba(3,7,12,.34); padding: 11px 12px; }
 .row__icon { display: inline-flex; width: 32px; height: 32px; flex: none; align-items: center; justify-content: center; border-radius: 10px; background: rgba(103,232,249,.07); color: var(--cyan); font: 11px var(--mono); }
+.row__icon--online { background: rgba(74,222,128,.08); color: var(--green); }
 .main { min-width: 0; flex: 1; }
 .title { overflow: hidden; color: #dbe5ef; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .meta { margin-top: 3px; overflow-wrap: anywhere; color: var(--dim); font: 10px/1.5 var(--mono); }

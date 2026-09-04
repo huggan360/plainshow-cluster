@@ -77,22 +77,9 @@ function networkCard(network, active) {
                     },
                 }, 'Switch to') : null,
 				el('button', { class: 'btn btn--sm', onclick: () => createInvite(network) },
-					'Invite machine'),
-				el('button', { class: 'btn btn--sm', onclick: () => createControllerInvite(network) },
-					'Attach controller')),
+					'Invite machine')),
             details);
     }
-}
-
-async function createControllerInvite(network) {
-	const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/controller-invites`,
-		{ method: 'POST', body: {} });
-	const code = el('textarea', { class: 'textarea input--mono', rows: '8', readonly: true }, invite.code);
-	modal({ title: 'Controller enrollment code', confirmLabel: 'Copy code',
-		body: () => el('div', {}, code, el('p', { class: 'muted' },
-			'Run pscluster-controller attach CODE --advertise HTTPS_URL on the controller server.')),
-		onConfirm: async (close) => { await navigator.clipboard.writeText(invite.code); close(); toast('Code copied.'); },
-	});
 }
 
 function joinNetwork() {

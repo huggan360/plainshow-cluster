@@ -5,15 +5,18 @@ operational handover for the completed implementation pass.
 
 ## Current outcome
 
-The repository contains runnable implementations of all planned product paths
-and builds three programs:
+The repository contains runnable implementations of the node and global
+management plane and builds two programs:
 
 - `pscluster`: equal peer node, browser workspace and task runner.
 - `pscluster-admin`: the enterprise management plane. It manages global
-  accounts, SQLite-backed network membership and recovery keys, the default
-  collaboration relay, and aggregate global statistics.
-- `pscluster-controller`: optional separately hosted collaboration relay and
-  read-only overview for networks that do not want the enterprise relay.
+  accounts, SQLite-backed network membership/recovery keys, external controller
+  registration and aggregate global statistics. It has no collaboration relay.
+
+The controller is now a genuinely separate PlainShow project and Go module at
+`/var/www/html/projects/hugohansson/cluster-controller`. Its isolated runtime
+listens on `127.0.0.1:10003`; the assigned production hostname is
+`https://cluster.plainshow.se`.
 
 The Raspberry Pi is intentionally special only at the enterprise layer. It is
 the canonical holder of accounts, network membership/recovery keys and global
@@ -30,16 +33,17 @@ root is `/opt/plainshow-cluster-admin`. The database is
 `internal/accountserver` now owns:
 
 - global registration, login, hashed sessions and administrator disable/enable;
-- a `network` registry containing owner, raw recovery key and collaboration
-  token (plaintext storage is deliberate because key recovery is required);
+- a `network` registry containing owner and raw recovery key (plaintext storage
+  is deliberate because key recovery is required);
 - explicit `network_member` rows and roles;
 - authenticated network sync and invitation-time member grants;
-- an authenticated per-network WebSocket relay at `/ws?network=ID`;
+- owner-authorized external controller registration, scoped relay credentials,
+  heartbeats and node discovery;
 - aggregate device check-ins and the lightweight admin dashboard.
 
-The collaboration secret is carried as WebSocket subprotocol
-`plainshow.<token>`, not in URLs or proxy logs. The node chooses the enterprise
-controller when both it and a standalone controller are registered. Browser
+`clusteradmin.plainshow.se` has no `/ws` handler and never sees collaboration
+messages. The independent controller validates a scoped secret carried as the
+WebSocket subprotocol `plainshow.<token>`, not in URLs or proxy logs. Browser
 operations queued during controller downtime are replayed after reconnect, and
 the durable collaboration manager rejects duplicate client sequence numbers.
 
@@ -58,17 +62,18 @@ continue.
 ## Other completed product work
 
 - All-to-all signed peer discovery; no master device or coordinator role.
-- Optional standalone controller enrollment, authenticated overview, durable
-  snapshots and automatic learning of later enrolled node keys.
+- Separate controller application with global login, owner-only network
+  selection, member-scoped visibility, registry heartbeat and live socket
+  counts. It never stores project content or runs jobs.
 - Tailscale/Headscale auth material in join codes and DERP warnings in training
   preflight; the removed custom tunnel has not returned.
 - Interactive local/remote terminal implemented as a policy-controlled PTY job.
 - Real installed `jupyter_server` lifecycle and complete same-origin reverse
   proxy under `/jupyter/`; Plainshow installs no Python packages.
-- Component installer: `install.sh node|controller|admin BINARY`, with matching
+- Component installer: `install.sh node|admin BINARY`, with matching
   `make install*` targets, atomic binary replacement, one-root state, PATH link
   and systemd unit.
-- Release assets/workflow for Linux amd64 and arm64 for all three binaries.
+- Release assets/workflow for Linux amd64 and arm64 for both binaries.
   Each release also carries the tested `install.sh` and includes it in
   `checksums.txt`, so installing does not require a source checkout.
 - The Cowork workspace now behaves as a compact IDE: it opens a starter file,
@@ -93,8 +98,8 @@ Repository templates are:
 
 - `deploy/clusteradmin-bootstrap.conf`: temporary port-80 vhost for first ACME
   issuance.
-- `deploy/clusteradmin.plainshow.se.conf`: final HTTPS reverse proxy, including
-  WebSocket forwarding and `X-Forwarded-Proto`.
+- `deploy/clusteradmin.plainshow.se.conf`: final HTTPS reverse proxy for the
+  account/key application, with `X-Forwarded-Proto` and no WebSocket route.
 
 The service binds to `127.0.0.1:10002`. Its bootstrap token is shown only by
 `pscluster-admin init`; on this Pi the deployment process stores that output in
@@ -103,9 +108,8 @@ that file after registration. The systemd service is
 `plainshow-cluster-admin.service`.
 
 Deployment is complete. Both `plainshow-cluster-admin` and Apache are active,
-HTTP redirects to HTTPS, the public health endpoint and embedded page return
-success through Cloudflare, and an attempted WebSocket upgrade reaches the relay
-and is correctly rejected without a network token. The dedicated ECDSA Let's
+HTTP redirects to HTTPS, and the public health endpoint and embedded page
+return success through Cloudflare. The dedicated ECDSA Let's
 Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
 The deployed Linux arm64 program is revision `002a4c4`. It includes the final
 PlainShow-branded admin interface, and the public HTML, CSS, JavaScript and
@@ -125,16 +129,16 @@ this root is enterprise administrator/key-recovery access.
 ## Verification completed on this Pi
 
 - `make check`: formatting, vet, 18-module web graph and all Go tests passed.
-- Enterprise HTTP registration/membership and a two-client collaboration relay
-  are covered by `internal/accountserver/server_test.go`.
+- Enterprise HTTP registration/membership, controller authorization and
+  external-controller discovery are covered by `internal/accountserver` tests.
 - Duplicate collaboration delivery and controller authentication are tested.
 - `make smoke`: 76 passed, 0 failed, including the production brand asset,
   streamed project upload, download and collaboration-state refresh after
   external replacement.
-- All three local programs built successfully.
-- All three component installers were exercised against disposable roots.
-- Public HTTP, HTTPS, static assets, health and the Apache WebSocket route were
-  exercised against `clusteradmin.plainshow.se` after deployment.
+- Both local programs built successfully.
+- Both component installers were exercised against disposable roots.
+- Public HTTP, HTTPS, static assets and health were exercised against
+  `clusteradmin.plainshow.se` after deployment.
 - A real-process integration with one disposable account server and two node
   daemons registered two global accounts, minted/consumed an invitation,
   completed the pinned-TLS peer join, transferred the management key and
@@ -155,7 +159,7 @@ validation complete until these are exercised by the user and friend:
 3. With `jupyter_server` installed, verify kernels, completion, rich MIME,
    widgets and WebSocket proxying.
 4. Open the same file in browsers on two nodes and verify live edits reach both
-   working trees through `clusteradmin.plainshow.se`, then exercise Git merge.
+   working trees through `cluster.plainshow.se`, then exercise Git merge.
 5. Publish a prerelease, install it, publish the next build and exercise
    `pscluster update apply`; only then tag v1.0.0.
 

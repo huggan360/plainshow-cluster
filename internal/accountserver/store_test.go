@@ -70,7 +70,7 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	}
 	registered, err := store.RegisterNetwork("a1", NetworkRegistration{ID: "network", Name: "Lab",
 		ManagementKey: "a-management-key-that-is-long-enough", Role: "owner"})
-	if err != nil || registered.CollabToken == "" || registered.OwnerAccountID != "a1" {
+	if err != nil || registered.OwnerAccountID != "a1" {
 		t.Fatalf("network registration = %+v, %v", registered, err)
 	}
 	checkIn := NodeCheckIn{ID: "node", Name: "Pi", GPUCount: 1, ProjectCount: 3,

@@ -133,8 +133,7 @@ type joinResponse struct {
 }
 
 type peerExchange struct {
-	Nodes       []store.NetworkNode       `json:"nodes"`
-	Controllers []store.NetworkController `json:"controllers,omitempty"`
+	Nodes []store.NetworkNode `json:"nodes"`
 }
 
 // MeshHandler is the deliberately narrow API exposed on the encrypted peer
@@ -143,7 +142,6 @@ type peerExchange struct {
 func (s *Server) MeshHandler() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /mesh/v1/join/{network}", s.acceptJoin)
-	root.HandleFunc("POST /mesh/v1/controllers/join/{network}", s.acceptControllerJoin)
 	authed := http.NewServeMux()
 	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
@@ -318,8 +316,7 @@ func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
 	if err != nil {
 		return
 	}
-	controllers, _ := s.store.NetworkControllers(networkID)
-	request := peerExchange{Nodes: nodes, Controllers: controllers}
+	request := peerExchange{Nodes: nodes}
 	var wg sync.WaitGroup
 	for _, node := range nodes {
 		if node.NodeID == s.cfg.Node.ID || node.Address == "" || node.Fingerprint == "" {
@@ -340,7 +337,6 @@ func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
 				return
 			}
 			s.mergePeerNodes(networkID, response.Nodes)
-			s.mergeControllers(networkID, response.Controllers)
 		}(node)
 	}
 	wg.Wait()
@@ -358,25 +354,13 @@ func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mergePeerNodes(networkID, exchange.Nodes)
-	s.mergeControllers(networkID, exchange.Controllers)
 	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
 	nodes, err := s.store.NetworkNodes(networkID)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	controllers, _ := s.store.NetworkControllers(networkID)
-	writeJSON(w, 200, peerExchange{Nodes: nodes, Controllers: controllers})
-}
-
-func (s *Server) mergeControllers(networkID string, items []store.NetworkController) {
-	for _, item := range items {
-		if item.NetworkID != networkID || item.ID == "" || item.PublicKey == "" ||
-			item.Fingerprint == "" || item.Address == "" || item.CollabToken == "" {
-			continue
-		}
-		_ = s.store.UpsertNetworkController(item)
-	}
+	writeJSON(w, 200, peerExchange{Nodes: nodes})
 }
 
 // mergePeerNodes accepts only complete, newer records and never lets gossip

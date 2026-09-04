@@ -1,15 +1,14 @@
 #!/bin/sh
 # Install one Plainshow Cluster component without installing dependencies.
-# Usage: ./install.sh [node|controller|admin] [binary]
+# Usage: ./install.sh [node|admin] [binary]
 
 set -eu
 
 COMPONENT="${1:-node}"
 case "$COMPONENT" in
     node)       BINARY_NAME=pscluster; ROOT="${PSCLUSTER_ROOT:-/opt/plainshow-cluster}" ;;
-    controller) BINARY_NAME=pscluster-controller; ROOT="${PSCLUSTER_CONTROLLER_ROOT:-/opt/plainshow-controller}" ;;
     admin)      BINARY_NAME=pscluster-admin; ROOT="${PSCLUSTER_ADMIN_ROOT:-/opt/plainshow-cluster-admin}" ;;
-    *) echo "install: component must be node, controller, or admin" >&2; exit 2 ;;
+    *) echo "install: component must be node or admin" >&2; exit 2 ;;
 esac
 
 BINARY_SRC="${2:-./$BINARY_NAME}"
@@ -38,15 +37,6 @@ case "$COMPONENT" in
             "$ROOT/bin/$BINARY_NAME" "$@"
         fi
         ;;
-    controller)
-        if [ ! -f "$ROOT/controller.yaml" ]; then
-            set -- init --root "$ROOT"
-            if [ -n "${PSCLUSTER_CONTROLLER_URL:-}" ]; then
-                set -- "$@" --advertise "$PSCLUSTER_CONTROLLER_URL"
-            fi
-            "$ROOT/bin/$BINARY_NAME" "$@"
-        fi
-        ;;
     admin)
         if [ ! -f "$ROOT/admin.yaml" ]; then
             set -- init --root "$ROOT"
@@ -63,7 +53,6 @@ if [ "$(id -u)" -eq 0 ] && [ -d /usr/local/bin ]; then
 fi
 
 SERVICE_NAME="plainshow-cluster"
-[ "$COMPONENT" = controller ] && SERVICE_NAME="plainshow-controller"
 [ "$COMPONENT" = admin ] && SERVICE_NAME="plainshow-cluster-admin"
 
 if [ "$(id -u)" -eq 0 ] && [ -d /etc/systemd/system ]; then

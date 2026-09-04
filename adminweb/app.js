@@ -130,6 +130,15 @@ function nodeRow(item) {
         node('span', { class: 'chip' }, item.version || 'dev'));
 }
 
+function controllerRow(item) {
+    return node('div', { class: 'row' },
+        node('span', { class: `row__icon ${item.online ? 'row__icon--online' : ''}` }, 'WS'),
+        node('div', { class: 'main' },
+            node('div', { class: 'title' }, item.name),
+            node('div', { class: 'meta' }, `${item.public_url} · @${item.owner_username} · ${item.networks} networks`)),
+        node('span', { class: `chip ${item.online ? 'good' : ''}` }, item.online ? 'online' : 'offline'));
+}
+
 function networkRow(item, reload) {
     const key = node('code', { class: 'meta' }, item.management_key);
     const copy = node('button', { class: 'btn', onclick: async () => {
@@ -159,22 +168,23 @@ function panel(title, items, empty, wide = false) {
 
 async function dashboard(status) {
     const draw = async () => {
-        const [stats, accounts, nodes, networks] = await Promise.all([
-            api('/api/stats'), api('/api/accounts'), api('/api/nodes'), api('/api/networks'),
+        const [stats, accounts, nodes, networks, controllers] = await Promise.all([
+            api('/api/stats'), api('/api/accounts'), api('/api/nodes'), api('/api/networks'), api('/api/controllers'),
         ]);
 		app.replaceChildren(node('div', { class: 'shell' }, header(status.account),
 			node('section', { class: 'hero' }, node('p', { class: 'eyebrow' }, 'Global environment'),
 				node('h1', {}, 'Cluster at a glance'),
-				node('p', { class: 'muted' }, 'Accounts, network recovery keys, collaboration control and aggregate health. Project data and compute traffic stay on devices.')),
+				node('p', { class: 'muted' }, 'Accounts, network recovery keys, controller registrations and aggregate health. Project data, compute traffic and Cowork WebSockets stay outside this service.')),
 			node('section', { class: 'metrics', 'aria-label': 'Global cluster statistics' },
                 stat(stats.accounts, 'accounts'), stat(`${stats.online_nodes}/${stats.nodes}`, 'nodes online'),
                 stat(stats.networks, 'networks'), stat(stats.gpus, 'GPUs'),
                 stat(stats.projects, 'projects'), stat(stats.running_jobs, 'running jobs'),
-                stat(stats.disabled_accounts, 'disabled accounts')),
+                stat(stats.controllers, 'controllers'), stat(stats.disabled_accounts, 'disabled accounts')),
 			node('div', { class: 'dashboard-grid' },
 				panel('Accounts', accounts.map((item) => accountRow(item, status.account, draw)), 'No accounts registered.'),
 				panel('Devices', nodes.map(nodeRow), 'No devices have checked in yet.'),
-				panel('Network registry', networks.map((item) => networkRow(item, draw)), 'No networks registered.', true))));
+				panel('Network registry', networks.map((item) => networkRow(item, draw)), 'No networks registered.'),
+				panel('Controller registry', controllers.map(controllerRow), 'No controller servers registered.'))));
     };
     await draw();
 }

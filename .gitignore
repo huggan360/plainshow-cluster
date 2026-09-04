@@ -1,6 +1,5 @@
 # Build output
 /pscluster
-/pscluster-controller
 /pscluster-admin
 /dist/
 

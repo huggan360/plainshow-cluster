@@ -5,8 +5,8 @@ training environment.
 
 The node is a single binary serving a web workspace where you create projects,
 edit code, run it on any joined machine, and watch output live. The enterprise
-service supplies shared accounts, network-key recovery and live collaboration;
-project data and compute still move directly between nodes.
+service supplies shared accounts, network-key recovery and controller
+discovery; project data and compute still move directly between nodes.
 
 ```
 git clone https://github.com/huggan360/plainshow-cluster.git
@@ -58,13 +58,15 @@ clone. Two people can work while disconnected and reconcile with a real merge.
 **The Plainshow enterprise service is the one intentional master service.** In
 the main environment it runs at `clusteradmin.plainshow.se` on the Raspberry Pi.
 Its SQLite database stores global accounts, membership roles, network recovery
-keys and aggregate device health. The same process is the default live-editing
-WebSocket controller. It never runs jobs or stores projects, commands, logs,
-datasets, artifacts or peer addresses.
+keys, the controller registry and aggregate device health. It deliberately has
+no collaboration WebSocket route and never runs jobs or stores projects,
+commands, logs, datasets, artifacts or peer addresses.
 
-`pscluster-controller` remains available when a network wants a separate,
-self-hosted collaboration relay. Without either controller, Git collaboration
-continues to work offline.
+Live Cowork delivery belongs to the separate `cluster-controller` project. A
+controller owner signs in through the enterprise account service, selects
+networks they administer, and the controller registers its address and
+heartbeat centrally. Eligible nodes then discover it automatically. Without a
+controller, Git collaboration continues to work offline.
 
 Machines on different networks find each other through **tailscale**, which
 Plainshow drives rather than reimplements.
@@ -83,16 +85,9 @@ pscluster config [show | get KEY | set KEY VALUE | path | root]
 pscluster network [list | use ID | key ID]
 pscluster invite [--role member] [--network ID]
 pscluster join CODE [--endpoint URL]
-pscluster controller invite [--network ID]
 pscluster github [status | connect | disconnect]
 pscluster update [check | status | apply]
 pscluster version
-
-pscluster-controller init [--root DIR] [--name NAME] [--bind ADDR] [--port N]
-pscluster-controller serve [--root DIR]
-pscluster-controller attach CODE --advertise HTTPS_URL
-pscluster-controller status [--root DIR]
-pscluster-controller reset-admin-token [--root DIR]
 
 pscluster-admin init [--root DIR] [--public-url HTTPS_URL]
 pscluster-admin serve [--root DIR]
@@ -145,15 +140,14 @@ make build      # ./pscluster for this machine
 make dist       # linux/amd64 and linux/arm64
 make run        # throwaway node in ./.devnode
 sudo make install             # node
-sudo make install-controller  # optional collaboration controller
 sudo PSCLUSTER_ADMIN_URL=https://clusteradmin.example make install-admin
 ```
 
 A GitHub release is self-contained: download `install.sh`, `checksums.txt` and
 the binary matching the machine, verify with
 `sha256sum --ignore-missing -c checksums.txt`, then run for example
-`sudo ./install.sh node ./pscluster-linux-amd64`. Use
-`controller` or `admin` as the first argument for those components.
+`sudo ./install.sh node ./pscluster-linux-amd64`. Use `admin` as the first
+argument when installing the account/key service.
 
 `make race` runs the suite under the race detector. It needs a kernel with a
 48-bit VMA; some arm64 boards (including the Raspberry Pi 5) report 47 and
@@ -163,12 +157,8 @@ The interface is hand-written ES modules and CSS, embedded into the binary. What
 is served is exactly what is in `web/`. Typefaces are bundled too, so a node with
 no internet access renders identically to one with it.
 
-`make build` also produces `pscluster-controller`, the optional standalone HTTPS
-service for live collaboration and cross-network overview. It has a separate
-root, identity, certificate and configuration, and it cannot run node jobs.
-
-It also produces `pscluster-admin`, the enterprise account authority, network
-registry, default collaboration relay and global statistics page. The service
+`make build` also produces `pscluster-admin`, the enterprise account authority,
+network/key/controller registry and global statistics page. The service
 uses a dedicated SQLite database and binds to loopback for a public TLS reverse
 proxy. Its configured URL in the main Plainshow environment is
 `https://clusteradmin.plainshow.se`; that hostname is deployment configuration
@@ -212,13 +202,9 @@ util-linux `script` for interactive terminals, `jupyter_server` for notebooks,
 and PyTorch/`torchrun` plus the appropriate CUDA stack for distributed training.
 Missing optional tools produce an actionable message in the interface.
 
-To attach the optional controller, mint a code on any network-owner node and
-redeem it on the always-online machine:
-
-```sh
-pscluster controller invite
-pscluster-controller attach 'psc1_…' --advertise https://controller.example
-```
+Controller servers are built and operated from the separate PlainShow project
+`../cluster-controller`. They authenticate owners against this service and do
+not use peer invitation codes.
 
 ## Implementation status
 

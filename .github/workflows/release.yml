@@ -43,7 +43,6 @@ jobs:
           set -eu
           version="${GITHUB_REF_NAME#v}"
           for asset in pscluster-linux-amd64 pscluster-linux-arm64 \
-                       pscluster-controller-linux-amd64 pscluster-controller-linux-arm64 \
                        pscluster-admin-linux-amd64 pscluster-admin-linux-arm64 \
                        install.sh checksums.txt; do
             test -s "dist/$asset" || { echo "missing dist/$asset"; exit 1; }
@@ -64,8 +63,6 @@ jobs:
           files: |
             dist/pscluster-linux-amd64
             dist/pscluster-linux-arm64
-            dist/pscluster-controller-linux-amd64
-            dist/pscluster-controller-linux-arm64
             dist/pscluster-admin-linux-amd64
             dist/pscluster-admin-linux-arm64
             dist/install.sh

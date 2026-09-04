@@ -1,12 +1,10 @@
 # Plainshow Cluster
 #
-# `make` builds the device and the optional controller server. `make check` is
+# `make` builds the device and global account/key service. `make check` is
 # what CI runs.
 
 BINARY            := pscluster
 PKG               := ./cmd/pscluster
-CONTROLLER_BINARY := pscluster-controller
-CONTROLLER_PKG    := ./cmd/pscluster-controller
 ADMIN_BINARY      := pscluster-admin
 ADMIN_PKG         := ./cmd/pscluster-admin
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
@@ -15,16 +13,15 @@ LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build check test vet fmt web clean install install-controller install-admin dist release run smoke
+.PHONY: all build check test vet fmt web clean install install-admin dist release run smoke
 
 all: build
 
-## build: compile the device and controller binaries for this machine
+## build: compile the device and global admin binaries for this machine
 build: web
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
-	go build -trimpath -ldflags "$(LDFLAGS)" -o $(CONTROLLER_BINARY) $(CONTROLLER_PKG)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(ADMIN_BINARY) $(ADMIN_PKG)
-	@echo "built ./$(BINARY), ./$(CONTROLLER_BINARY), and ./$(ADMIN_BINARY)  $(VERSION)"
+	@echo "built ./$(BINARY) and ./$(ADMIN_BINARY)  $(VERSION)"
 
 ## web: verify the interface's module graph before embedding it
 web:
@@ -82,8 +79,6 @@ dist: web
 	@rm -rf dist && mkdir -p dist
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-amd64 $(PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(BINARY)-linux-arm64 $(PKG)
-	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-amd64 $(CONTROLLER_PKG)
-	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(CONTROLLER_BINARY)-linux-arm64 $(CONTROLLER_PKG)
 	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-amd64 $(ADMIN_PKG)
 	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/$(ADMIN_BINARY)-linux-arm64 $(ADMIN_PKG)
 	@cp install.sh dist/install.sh && chmod 755 dist/install.sh
@@ -109,9 +104,6 @@ release: check dist
 install: build
 	@./install.sh node ./$(BINARY)
 
-install-controller: build
-	@./install.sh controller ./$(CONTROLLER_BINARY)
-
 install-admin: build
 	@./install.sh admin ./$(ADMIN_BINARY)
 
@@ -121,4 +113,4 @@ run: build
 	./$(BINARY) serve --root ./.devnode
 
 clean:
-	rm -rf $(BINARY) $(CONTROLLER_BINARY) $(ADMIN_BINARY) dist .devnode .smokenode .smokepid
+	rm -rf $(BINARY) $(ADMIN_BINARY) dist .devnode .smokenode .smokepid

@@ -27,6 +27,20 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) networkControllers(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.NetworkControllers(r.PathValue("id"))
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for index := range items {
+		items[index].PublicKey = ""
+		items[index].Fingerprint = ""
+		items[index].CollabToken = ""
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (s *Server) createNetworkInvite(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !hasMembership(s.cfg, id) {

@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS network (
     name             TEXT NOT NULL,
     owner_account_id TEXT NOT NULL DEFAULT '',
     management_key   TEXT NOT NULL DEFAULT '',
-    collab_token     TEXT NOT NULL DEFAULT '',
     last_seen        TEXT NOT NULL,
     created_at       TEXT NOT NULL
 );
@@ -59,5 +58,28 @@ CREATE TABLE IF NOT EXISTS node_network (
     PRIMARY KEY (node_id, network_id)
 );
 
+-- Controller servers are independent applications. The account service only
+-- records their owner, address, heartbeat and network authorization; it never
+-- accepts or forwards Cowork WebSocket traffic.
+CREATE TABLE IF NOT EXISTS controller_server (
+    id               TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    public_url       TEXT NOT NULL UNIQUE,
+    credential_hash  TEXT NOT NULL,
+    last_seen        TEXT NOT NULL,
+    created_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS controller_network (
+    controller_id TEXT NOT NULL REFERENCES controller_server(id) ON DELETE CASCADE,
+    network_id    TEXT NOT NULL REFERENCES network(id) ON DELETE CASCADE,
+    relay_token   TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (controller_id, network_id)
+);
+
 CREATE INDEX IF NOT EXISTS session_expiry_idx ON login_session(expires_at);
 CREATE INDEX IF NOT EXISTS node_seen_idx ON node(last_seen DESC);
+CREATE INDEX IF NOT EXISTS controller_seen_idx ON controller_server(last_seen DESC);
+CREATE INDEX IF NOT EXISTS controller_network_network_idx ON controller_network(network_id);

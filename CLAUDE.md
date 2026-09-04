@@ -33,12 +33,14 @@ These are settled. Do not quietly reverse them.
    for more than local policy permits is refused *there*, not trimmed. A
    compromised coordinator cannot widen it. This is why it is reasonable to run
    someone else's code on your desktop. Terminal access is off by default.
-4. **The management plane and the data plane are separate.** The enterprise
-   Pi stores accounts, network membership/recovery keys and aggregate health,
-   and relays collaboration deltas without storing them. Jobs, logs, projects,
+4. **The management plane and collaboration plane are separate.** The
+   enterprise Pi service at `clusteradmin.plainshow.se` stores accounts,
+   network membership/recovery keys, controller registrations and aggregate
+   health. It has no collaboration WebSocket. Independent controller servers
+   relay collaboration deltas without storing them. Jobs, logs, projects,
    datasets, checkpoints, artifacts and gradients go **directly between peers,
-   never through it.** There must be
-   no code path that proxies bulk bytes.
+   never through either service.** There must be no code path that proxies bulk
+   bytes.
 5. **A job is a job.** Scripts, notebook kernels, terminals and training runs
    share one lifecycle, one log pipe, one stop button, one permission check.
    Resist adding a parallel mechanism for a new kind of work.
@@ -54,9 +56,9 @@ Three things, and only one of them is required.
 It is the one intentional central authority: `pscluster-admin`, backed by
 SQLite, hosted on the Plainshow Raspberry Pi at `clusteradmin.plainshow.se`.
 It manages global accounts, keeps recovery keys and membership roles for each
-independent network, relays live editor messages and provides the minimal global
-admin/statistics page. Network discovery, compute, project data and task traffic
-remain peer-to-peer.
+independent network, authorizes/registers controller servers and provides the
+minimal global admin/statistics page. It never accepts Cowork WebSockets.
+Network discovery, compute, project data and task traffic remain peer-to-peer.
 
 **Network.** A set of devices and people who work together. Anybody can create
 one; joining is a single-use code. A device can belong to several, and each
@@ -68,11 +70,14 @@ device can run tasks and connects directly to every other device on the network.
 What a device is willing to do is its own local policy — accept jobs, expose a
 GPU, allow a terminal — and nothing remote can widen it.
 
-**Controller Server** *(integrated by default, separately hostable).* The
-enterprise service holds the default collaboration WebSocket. The smaller
-`pscluster-controller` program remains available for networks that want their
-own relay and read-only overview. Neither form is a device role and neither runs
-jobs or holds projects.
+**Controller Server** *(always independent).* The `cluster-controller` project
+is a separately deployed PlainShow runtime. Its first owner signs in against
+the enterprise account authority and chooses among networks where they are an
+owner or administrator. Members of supplied networks may sign in and view it;
+only its owner changes the supplied-network set. Every instance registers and
+heartbeats with the enterprise service, which returns its address and a scoped
+relay credential to eligible nodes. A controller is not a device role and
+never runs jobs or holds projects.
 
 **Account/key registry.** The enterprise SQLite database is the explicit
 canonical holder for identity, network membership and high-entropy recovery
@@ -226,8 +231,9 @@ Assessed by running it, not by reading commit messages.
 | Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
 | Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
 | Terminal | implemented as a policy-controlled interactive PTY job |
-| Enterprise master | accounts, network/key registry, controller relay and admin statistics implemented |
-| Install hardening and docs | three component installer and deployment documentation implemented |
+| Enterprise master | accounts, network/key/controller registry and admin statistics implemented; no relay |
+| Controller | separate PlainShow project, global login, network selection, registry heartbeat and relay implemented |
+| Install hardening and docs | node/admin installer and separate controller runtime documentation implemented |
 
 The main enterprise service is deployed on this Pi at
 `https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
@@ -260,27 +266,27 @@ programs.
    the freshest complete record, never overwrite the local device, and
    converge without a coordinator when an offline peer returns.
 
-### B. Completed Controller Server
+### B. Completed independent Controller Server
 
-A second binary, `cmd/pscluster-controller`. It runs no jobs and stores no
-project data. Live editing is the feature it adds; git works without it.
+The controller was moved out of this repository into the separately managed
+PlainShow project `/var/www/html/projects/hugohansson/cluster-controller`. Live
+editing is the only data-plane feature it adds; Git works without it.
 
-4. ~~**The binary and its config.**~~ Done. `pscluster-controller` has its own
-   one-root config, identity keypair, pinned TLS certificate and HTTPS listener.
-   It creates none of the node's project, dataset, artifact, or job state.
-5. ~~**Attaching to a network.**~~ A network admin mints a controller token; the
-   controller presents it and enrols as a non-device member. Devices learn the
-   controller's address the same way they learn each other's. *1d*
-6. ~~**Live editing moves behind it.**~~ The controller relays live collaboration
+4. ~~**Independent application and state.**~~ Done. The controller is its own Go
+   module, embedded web application and PlainShow-isolated runtime. It creates
+   none of the node's project, dataset, artifact or job state.
+5. ~~**Global account attachment.**~~ Done. There are no peer-minted controller
+   invitations. The owner logs in through `clusteradmin.plainshow.se`, can select
+   only networks they own/administer, and the controller receives a durable
+   process credential plus per-network relay secrets from the registry.
+6. ~~**Live editing stays behind it.**~~ The controller relays live collaboration
    between browsers while each browser's node applies the operation to its own
    working tree. `internal/collab` remains the durable per-clone operation log,
    so controller loss removes live cross-node delivery and nothing else.
-   The original wording proposed storing documents on the controller, which
-   contradicted the rule that it holds no project data; the relay design avoids
-   that contradiction.
-7. ~~**Web overview.**~~ The controller serves a read-mostly view across its
-   networks: devices, jobs, projects. Reuses `web/` with a different data
-   source. *2d*
+7. ~~**Controller management page.**~~ Done. The branded page shows global-login
+   identity, selected networks, connection counts and registry health. Members
+   of a supplied network can view it; only the controller owner can change the
+   supplied-network set.
 
 ### C. Accounts across devices (revised: central account authority)
 
@@ -331,10 +337,11 @@ project data. Live editing is the feature it adds; git works without it.
     break.** *3d*
 17. **Cut v0.1.0 and test a real upgrade** — install an old build, publish a new
     one, watch a node take it. *2d*
-18. ~~**Install hardening and docs.**~~ `install.sh` installs the node,
-    controller or account service atomically, creates the matching one-root
-    configuration, and writes optional systemd integration. README and
-    `CODEX.md` describe operation and handover.
+18. ~~**Install hardening and docs.**~~ `install.sh` installs the node or account
+    service atomically, creates the matching one-root configuration, and writes
+    optional systemd integration. The independent controller is built and run
+    through its own PlainShow project/runtime. README and `CODEX.md` describe
+    operation and handover.
 
 ### Done and not to be redone
 

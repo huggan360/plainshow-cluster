@@ -161,31 +161,6 @@ func cmdJoin(args []string) error {
 	return nil
 }
 
-func cmdController(args []string) error {
-	f := parseFlags(args)
-	action := ""
-	if len(f.rest) > 0 {
-		action = f.rest[0]
-	}
-	if action != "invite" {
-		return errors.New("usage: pscluster controller invite [--network ID]")
-	}
-	d, _, cfg, err := openDaemon(f)
-	if err != nil {
-		return err
-	}
-	network := f.get("network", cfg.ActiveNetwork)
-	var out struct {
-		Code string `json:"code"`
-	}
-	if err := d.call("POST", "/api/networks/"+network+"/controller-invites", map[string]any{}, &out); err != nil {
-		return err
-	}
-	fmt.Printf("\n  Controller enrollment code\n\n  %s\n\n", out.Code)
-	fmt.Printf("  pscluster-controller attach %s --advertise https://controller.example\n\n", shorten(out.Code))
-	return nil
-}
-
 // ------------------------------------------------------------------ github --
 
 func cmdGitHub(args []string) error {
