@@ -59,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/controllers", s.requireAdmin(http.HandlerFunc(s.controllers)))
 	mux.Handle("POST /api/networks/sync", s.requireAccount(http.HandlerFunc(s.syncNetwork)))
 	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
+	mux.Handle("PUT /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.updateNetworkMember)))
+	mux.Handle("DELETE /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.removeNetworkMember)))
 	mux.Handle("POST /api/networks/{id}/rotate-key", s.requireAdmin(http.HandlerFunc(s.rotateNetworkKey)))
 	mux.Handle("POST /api/nodes/check-in", s.requireAccount(http.HandlerFunc(s.nodeCheckIn)))
 	mux.Handle("POST /api/tailnet/enrollment", s.requireAccount(http.HandlerFunc(s.tailnetEnrollment)))
@@ -288,9 +290,49 @@ func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
 		controller = map[string]string{"id": item.ID, "name": item.Name,
 			"address": item.PublicURL, "collab_token": relayToken}
 	}
+	members, err := s.store.NetworkMembers(input.ID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"network": network, "controller": controller,
+		"network": network, "controller": controller, "members": members,
 	})
+}
+
+func (s *Server) updateNetworkMember(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var body struct {
+		ManagementKey string `json:"management_key"`
+		Role          string `json:"role"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.SetNetworkMemberRole(account.ID, r.PathValue("id"), body.ManagementKey,
+		r.PathValue("account"), body.Role); err != nil {
+		fail(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) removeNetworkMember(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var body struct {
+		ManagementKey string `json:"management_key"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.RemoveNetworkMember(account.ID, r.PathValue("id"), body.ManagementKey,
+		r.PathValue("account")); err != nil {
+		fail(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 func (s *Server) controllerContext(w http.ResponseWriter, r *http.Request) {

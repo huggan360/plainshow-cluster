@@ -1,215 +1,214 @@
-// Home — the cluster at a glance: this machine, what is running, what exists.
+// Home — the Plainshow dashboard adapted to networks, GPUs and Ray work.
 
-import { el, mount, megabytes, meter, ago, stateDot, uptime } from '../lib/ui.js';
-import { state, refresh, on, navigate, api, toast } from '../lib/client.js';
-
-/** rayCard is where a machine joins its network's Ray cluster. */
-function rayCard() {
-    const box = el('div', { class: 'panel' });
-
-    const load = async () => {
-        let status = {};
-        try {
-            status = await api('/api/ray');
-        } catch (err) {
-            mount(box, el('div', { class: 'panel__head' }, 'Ray'),
-                el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message));
-            return;
-        }
-        const running = Boolean(status.running);
-
-        const act = async (path, label) => {
-            try {
-                toast(label);
-                await api(path, { method: 'POST', body: {} });
-                await load();
-            } catch (err) {
-                toast(err.message, 'err');
-                await load();
-            }
-        };
-
-        mount(box,
-            el('div', { class: 'panel__head' },
-                el('span', { class: 'grow' }, 'Ray'),
-                el('span', { class: `chip ${running ? 'chip--good' : 'chip--warn'}` },
-                    running ? 'running' : 'not running')),
-            running
-                ? el('div', {},
-                    el('div', { style: 'font-size:18px;font-weight:700' },
-                        `${status.total_gpu || 0} GPU · ${status.total_cpu || 0} CPU`),
-                    el('p', { class: 'mono', style: 'margin:4px 0 0;font-size:11px;color:#64748b' },
-                        `head ${status.head || 'unknown'}`))
-                : el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12.5px;line-height:1.6' },
-                    status.advice || status.detail ||
-                    'This machine is not part of a Ray cluster yet.'),
-            el('div', { style: 'display:flex;gap:8px;margin-top:14px' },
-                status.installed && !running
-                    ? el('button', {
-                        class: 'btn btn--primary btn--sm',
-                        onclick: () => act('/api/ray/start', 'Starting Ray…'),
-                    }, status.head ? 'Join the cluster' : 'Start Ray')
-                    : null,
-                running
-                    ? el('button', {
-                        class: 'btn btn--sm',
-                        onclick: () => act('/api/ray/stop', 'Stopping Ray…'),
-                    }, 'Leave the cluster')
-                    : null,
-                el('button', { class: 'btn btn--sm', onclick: () => navigate('howto') },
-                    'How to run something')));
-    };
-
-    load();
-    return box;
-}
+import { el, mount, megabytes, ago } from '../lib/ui.js';
+import { state, refresh, on, api } from '../lib/client.js';
 
 export async function renderHome(host) {
     await refresh();
     const page = el('div', { class: 'page' });
     mount(host, page);
+    let rayJobs = [];
 
-    const draw = () => {
-        mount(page, ...content());
-        // Paint the meters from the snapshot we already have, rather than
-        // leaving them blank until the first telemetry tick arrives.
-        paintMeters(page);
-    };
+    const draw = () => mount(page, ...content(rayJobs));
     draw();
+    api('/api/ray/jobs').then((data) => {
+        rayJobs = data.jobs || [];
+        draw();
+    }).catch(() => {});
 
-    // Redraw on anything that changes what this page shows. Telemetry updates
-    // the meters in place rather than rebuilding, so the page never flickers.
-    const offSystem = on('system', (info) => { state.system = info; paintMeters(page); });
-    const offJob = on('job.state', async () => { await refresh(); draw(); });
-    const offProject = on('project.created', async () => { await refresh(); draw(); });
-    return () => { offSystem(); offJob(); offProject(); };
+    const offSystem = on('system', (info) => { state.system = info; draw(); });
+    const redraw = async () => { await refresh(); draw(); };
+    const offProject = on('project.created', redraw);
+    const offNetwork = on('networks.changed', redraw);
+    const offGit = on('git.committed', redraw);
+    const offRay = on('ray.changed', async () => {
+        const data = await api('/api/ray/jobs').catch(() => ({ jobs: [] }));
+        rayJobs = data.jobs || [];
+        await redraw();
+    });
+    return () => { offSystem(); offProject(); offNetwork(); offGit(); offRay(); };
 }
 
-function content() {
-    const o = state.overview;
-    const sys = state.system || o.system;
+function content(rayJobs) {
+    const overview = state.overview;
+    const system = state.system || overview.system;
+    const name = overview.account?.display_name || overview.account?.username || overview.node.name;
+    const firstName = String(name).trim().split(/\s+/)[0];
+    const gpus = gpuInventory(overview, system);
 
     return [
-        el('div', { class: 'page__head' },
-            el('p', { class: 'page__eyebrow' }, 'Cluster'),
-            el('h1', { class: 'page__title' }, o.cluster.name),
-            el('p', { class: 'page__sub' },
-                `${o.machines.length} machine${o.machines.length === 1 ? '' : 's'} · ` +
-                `${o.projects.length} project${o.projects.length === 1 ? '' : 's'} · ` +
-                `${o.active_jobs.length} running`)),
-
-        el('div', { class: 'grid grid--2', style: 'margin-bottom:14px' },
-            rayCard(),
-            machineCard(o, sys),
-            runningCard(o)),
-
-        el('div', { class: 'grid grid--2' },
-            projectsCard(o),
-            recentCard(o)),
+        el('h1', { class: 'welcome-title' }, `Good to see you, ${firstName}.`),
+        el('section', { class: 'ps-metrics', 'aria-label': 'Cluster summary' },
+            projectMetric(overview), networkMetric(overview), gpuMetric(gpus), systemMetric(system)),
+        el('div', { class: 'ps-home-lower' },
+            activityPanel(overview, rayJobs),
+            el('section', {},
+                el('div', { class: 'section-heading' },
+                    el('strong', {}, 'Your networks'),
+                    el('a', { href: '#/networks' }, 'View all ',
+                        el('i', { class: 'bx bx-right-arrow-alt', 'aria-hidden': 'true' }))),
+                overview.networks.length
+                    ? el('div', { class: 'ps-card-grid' },
+                        ...overview.networks.slice(0, 9).map(networkPreview))
+                    : emptyPanel('bx-network-chart', 'No networks yet',
+                        'Create or join a network to connect machines and projects.'))),
     ];
 }
 
-function machineCard(o, sys) {
-    const gpuLine = sys.gpus.length
-        ? sys.gpus.map((g) => `${g.name} ${megabytes(g.vram_total_mb)}`).join(' · ')
-        : 'No GPU detected';
-
-    return el('div', { class: 'frame' }, el('div', { class: 'frame__in' },
-        el('div', { class: 'panel__head' },
-            el('span', { class: 'grow' }, 'This machine'),
-            el('span', { class: 'chip chip--good' }, 'online')),
-        el('div', { style: 'display:flex;align-items:baseline;gap:10px;margin-bottom:4px' },
-            el('span', { style: 'font-size:19px;font-weight:700;letter-spacing:-.02em' }, o.node.name),
-            el('span', { class: 'mono', style: 'font-size:10.5px;color:#475569' },
-                o.node.roles.join(' · '))),
-        el('p', { class: 'mono', style: 'font-size:11px;color:#64748b;margin:0 0 14px' },
-            `${sys.cpu_model || sys.arch} · ${sys.cpu_cores} cores · up ${uptime(sys.uptime_sec)}`),
-        el('div', { class: 'bars', id: 'meters' }),
-        el('p', { class: 'mono', style: 'font-size:11px;color:#475569;margin:12px 0 0' }, gpuLine)));
+function projectMetric(overview) {
+    return el('a', { class: 'ps-metric-card ps-metric-card--projects ps-metric-card--lift', href: '#/projects' },
+        el('div', { class: 'ps-metric-card__surface' },
+            el('div', { class: 'ps-metric-head' },
+                el('span', { class: 'ps-metric-card__icon' }, el('i', { class: 'bx bx-layer' })),
+                el('i', { class: 'bx bx-right-arrow-alt muted' })),
+            el('div', { class: 'ps-metric-values' },
+                metricValue(overview.projects.length, 'Projects'),
+                metricValue(overview.networks.length, 'Networks'))));
 }
 
-/** paintMeters redraws only the resource bars, from the latest telemetry. */
-export function paintMeters(root) {
-    const host = (root || document).querySelector('#meters');
-    if (!host) return;
-    const sys = state.system;
-    if (!sys) return;
+function networkMetric(overview) {
+    return el('div', { class: 'ps-metric-card ps-metric-card--networks' },
+        el('div', { class: 'ps-metric-card__surface' },
+            el('div', { class: 'ps-status-list' },
+                ...overview.networks.slice(0, 3).map((network) =>
+                    el('a', { class: 'ps-status-row', href: `#/networks/${encodeURIComponent(network.id)}`,
+                        title: network.name },
+                        el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
+                        el('span', { class: 'ps-status-row__main' },
+                            el('span', { class: 'ps-status-row__title' }, network.name),
+                            el('span', { class: 'ps-status-row__meta' },
+                                `${network.node_count} devices · ${network.project_count} projects`)),
+                        el('i', { class: 'bx bx-right-arrow-alt muted' }))),
+                overview.networks.length === 0
+                    ? el('div', { class: 'ps-status-empty' }, el('i', { class: 'bx bx-network-chart' }))
+                    : null)));
+}
 
-    const bars = [
-        meter('CPU load', sys.load_avg_1, sys.cpu_cores || 1,
-            `${sys.load_avg_1.toFixed(2)} / ${sys.cpu_cores}`, '#67e8f9'),
-        meter('Memory', sys.ram_used_mb, sys.ram_total_mb || 1,
-            `${megabytes(sys.ram_used_mb)} / ${megabytes(sys.ram_total_mb)}`, '#b481ff'),
-        meter('Disk', sys.disk_total_gb - sys.disk_free_gb, sys.disk_total_gb || 1,
-            `${(sys.disk_total_gb - sys.disk_free_gb).toFixed(0)} / ${sys.disk_total_gb.toFixed(0)} GB`,
-            '#34d399'),
-    ];
-    for (const gpu of sys.gpus) {
-        bars.push(meter(`GPU ${gpu.index}`, gpu.util_percent, 100,
-            `${gpu.util_percent}% · ${megabytes(gpu.vram_used_mb)}`, '#fdba74'));
+function gpuMetric(gpus) {
+    return el('div', { class: 'ps-metric-card ps-metric-card--gpus' },
+        el('div', { class: 'ps-metric-card__surface' },
+            el('div', { class: 'ps-status-list' },
+                ...gpus.slice(0, 3).map((gpu) => el('div', { class: 'ps-status-row' },
+                    el('i', { class: 'bx bx-chip ps-gpu-icon', 'aria-hidden': 'true' }),
+                    el('span', { class: 'ps-status-row__main' },
+                        el('span', { class: 'ps-status-row__title' }, gpu.name),
+                        el('span', { class: 'ps-status-row__meta' },
+                            `${gpu.machine} · ${megabytes(gpu.vram_total_mb)}`)))),
+                gpus.length === 0
+                    ? el('div', { class: 'ps-status-empty', title: 'No graphics card detected' },
+                        el('i', { class: 'bx bx-chip' })) : null)));
+}
+
+function systemMetric(system) {
+    const ram = percent(system.ram_used_mb, system.ram_total_mb);
+    const disk = percent(system.disk_total_gb - system.disk_free_gb, system.disk_total_gb);
+    const cpu = percent(system.load_avg_1, system.cpu_cores || 1);
+    const gpu = system.gpus?.length
+        ? Math.max(...system.gpus.map((item) => Number(item.util_percent) || 0)) : 0;
+    return el('div', { class: 'ps-metric-card ps-metric-card--system' },
+        el('div', { class: 'ps-metric-card__surface' },
+            el('div', { class: 'ps-health-list' },
+                healthBar('RAM used', ram, '#ef4444', '#fecaca', '#450a0a'),
+                healthBar('Disk used', disk, '#f97316', '#fed7aa', '#431407'),
+                healthBar('CPU load', cpu, '#eab308', '#fef08a', '#422006'),
+                healthBar('GPU load', gpu, '#ec4899', '#fbcfe8', '#500724'))));
+}
+
+function metricValue(value, label) {
+    return el('span', {}, el('span', { class: 'ps-metric-label' }, label),
+        el('strong', { class: 'ps-metric-value' }, String(value)));
+}
+
+function healthBar(label, value, color, track, text) {
+    const level = Math.round(Math.max(0, Math.min(100, value || 0)));
+    return el('div', { class: 'ps-health-bar', style: `color:${text};background:${track}`,
+        role: 'progressbar', 'aria-label': label, 'aria-valuenow': level,
+        'aria-valuemin': '0', 'aria-valuemax': '100' },
+        el('span', { class: 'ps-health-bar__fill', style: `width:${level}%;background:${color};color:${color}` }),
+        el('span', { class: 'ps-health-bar__content' }, el('span', {}, label), el('strong', {}, `${level}%`)));
+}
+
+function activityPanel(overview, rayJobs) {
+    const activity = [
+        ...(overview.recent_commits || []).map((commit) => ({
+            kind: 'commit', project: commit.project, branch: commit.branch,
+            text: commit.subject, detail: `${commit.author} committed ${commit.short}`,
+            at: Date.parse(commit.when) || 0,
+            href: `#/projects/${encodeURIComponent(commit.project)}/git`,
+        })),
+        ...(overview.recent_jobs || []).map((job) => ({
+            kind: 'job', project: job.project || 'Cluster', branch: '',
+            text: job.title || job.command, detail: `Job ${job.state} on ${job.machine || 'this machine'}`,
+            at: Date.parse(job.created_at) || 0, href: `#/jobs/${encodeURIComponent(job.id)}`,
+        })),
+        ...rayJobs.map((job) => ({
+            kind: 'job', project: 'Ray', branch: '', text: job.entrypoint || job.id,
+            detail: `Distributed job ${String(job.status || '').toLowerCase()}`,
+            at: timestamp(job.started_at || job.ended_at), href: '#/jobs',
+        })),
+    ].sort((a, b) => b.at - a.at).slice(0, 12);
+
+    return el('section', { class: 'ps-server-card', 'aria-label': 'Recent activity' },
+        el('div', { class: 'ps-server-card__surface' }, activity.length
+            ? el('div', { class: 'ps-notice-list' }, ...activity.map(activityRow))
+            : el('div', { class: 'empty', style: 'min-height:176px' },
+                el('i', { class: 'bx bx-broadcast empty__ico' }),
+                el('span', { class: 'empty__text' }, 'Commits and jobs will appear here.'))));
+}
+
+function activityRow(item) {
+    const tone = item.kind === 'commit' ? '#67e8f9' : '#fdba74';
+    return el('a', { class: 'ps-notice', href: item.href },
+        el('span', { class: 'ps-notice__kind', style: `color:${tone};background:${tone}12` },
+            el('i', { class: `bx ${item.kind === 'commit' ? 'bx-git-commit' : 'bx-task'}` })),
+        el('span', { class: 'ps-notice__main' },
+            el('span', { class: 'ps-notice__top' },
+                el('span', { class: 'ps-notice__project' }, item.project),
+                item.branch ? el('span', { class: 'chip', style: 'padding:2px 6px;font-size:8px' }, item.branch) : null,
+                el('span', { class: 'ps-notice__time' }, item.at ? ago(new Date(item.at).toISOString()) : 'recent')),
+            el('span', { class: 'ps-notice__text' },
+                el('strong', { style: `color:${tone}` }, item.text), ` · ${item.detail}`)),
+        el('span', { class: 'ps-notice__action' }, el('i', { class: 'bx bx-right-arrow-alt' })));
+}
+
+function networkPreview(network) {
+    return el('a', { class: 'panel ps-project-card', href: `#/networks/${encodeURIComponent(network.id)}` },
+        el('div', { class: 'ps-project-card__top' },
+            el('span', { class: 'ps-project-mark ps-network-mark' }, el('i', { class: 'bx bx-network-chart' })),
+            el('span', { class: 'ps-project-card__copy' },
+                el('strong', {}, network.name), el('span', {}, network.role || 'member')),
+            el('span', { class: 'ps-project-card__status' },
+                el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
+                network.enabled ? 'Active' : 'Paused')),
+        el('div', { class: 'ps-project-card__foot' },
+            el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count}`),
+            el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count}`),
+            el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`),
+            el('i', { class: 'bx bx-right-arrow-alt' })));
+}
+
+function gpuInventory(overview, system) {
+    const inventory = [];
+    for (const machine of overview.machines || []) {
+        const items = machine.is_self ? (system.gpus || []) : (machine.capacity?.gpus || []);
+        for (const gpu of items) inventory.push({ ...gpu, machine: machine.name });
     }
-    mount(host, ...bars);
+    if (!overview.machines?.some((machine) => machine.is_self)) {
+        for (const gpu of system.gpus || []) inventory.push({ ...gpu, machine: overview.node.name });
+    }
+    return inventory;
 }
 
-function runningCard(o) {
-    const body = o.active_jobs.length
-        ? el('div', { class: 'rows' }, ...o.active_jobs.map(jobRow))
-        : el('div', { class: 'empty' },
-            el('span', { class: 'empty__ico' }, '○'),
-            el('span', { class: 'empty__text' }, 'Nothing is running right now.'));
-
-    return el('div', { class: 'panel' },
-        el('div', { class: 'panel__head' },
-            el('span', { class: 'grow' }, 'Running'),
-            el('span', { class: 'chip' }, String(o.active_jobs.length))),
-        body);
+function percent(value, total) {
+    return total > 0 ? (Number(value || 0) / Number(total)) * 100 : 0;
 }
 
-function jobRow(job) {
-    return el('a', { class: 'row', href: `#/jobs/${job.id}` },
-        stateDot(job.state),
-        el('span', { class: 'row__main' },
-            el('span', { class: 'row__title' }, job.title || job.command),
-            el('span', { class: 'row__meta' },
-                `${job.project || 'no project'} · ${job.machine} · ${ago(job.created_at)}`)));
+function timestamp(value) {
+    const numeric = Number(value || 0);
+    return numeric > 0 && numeric < 1e12 ? numeric * 1000 : numeric;
 }
 
-function projectsCard(o) {
-    const body = o.projects.length
-        ? el('div', { class: 'rows' }, ...o.projects.slice(0, 6).map((p) =>
-            el('a', { class: 'row', href: `#/workspace/${encodeURIComponent(p.name)}` },
-                el('span', { class: 'dot dot--off' }),
-                el('span', { class: 'row__main' },
-                    el('span', { class: 'row__title' }, p.name),
-                    el('span', { class: 'row__meta' },
-                        p.description || `updated ${ago(p.updated_at)}`)))))
-        : el('div', { class: 'empty' },
-            el('span', { class: 'empty__ico' }, '◫'),
-            el('span', { class: 'empty__text' },
-                'No projects yet. A project is a folder of code you can edit and run.'),
-            el('button', {
-                class: 'btn btn--primary btn--sm',
-                onclick: () => navigate('workspace'),
-            }, 'Go to Workspace'));
-
-    return el('div', { class: 'panel' },
-        el('div', { class: 'panel__head' },
-            el('span', { class: 'grow' }, 'Projects'),
-            el('a', { class: 'chip chip--cyan', href: '#/workspace' }, 'open')),
-        body);
-}
-
-function recentCard(o) {
-    const jobs = o.recent_jobs.filter((j) => j.state !== 'running' && j.state !== 'queued');
-    const body = jobs.length
-        ? el('div', { class: 'rows' }, ...jobs.slice(0, 6).map(jobRow))
-        : el('div', { class: 'empty' },
-            el('span', { class: 'empty__ico' }, '▤'),
-            el('span', { class: 'empty__text' }, 'Nothing has run on this node yet.'));
-
-    return el('div', { class: 'panel' },
-        el('div', { class: 'panel__head' },
-            el('span', { class: 'grow' }, 'Recent'),
-            el('a', { class: 'chip chip--cyan', href: '#/jobs' }, 'all jobs')),
-        body);
+function emptyPanel(icon, title, detail) {
+    return el('div', { class: 'panel empty' }, el('i', { class: `bx ${icon} empty__ico` }),
+        el('strong', {}, title), el('span', { class: 'empty__text' }, detail));
 }

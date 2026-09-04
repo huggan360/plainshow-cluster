@@ -6,9 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -28,24 +27,16 @@ type daemon struct {
 
 // connect prepares a client for the node at a layout, and fails with something
 // actionable when the daemon is not running.
-func connect(l config.Layout, cfg *config.Config) (*daemon, error) {
+func connect(l config.Layout, _ *config.Config) (*daemon, error) {
 	token, err := config.EnsureCLIToken(l)
 	if err != nil {
 		return nil, fmt.Errorf("could not read this node's local token: %w", err)
 	}
-	host := cfg.Network.Bind
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
+	if runtime, runtimeErr := config.LoadRuntime(l); runtimeErr == nil {
+		return &daemon{base: strings.TrimRight(runtime.URL, "/"), token: token,
+			client: &http.Client{Timeout: 2 * time.Minute}}, nil
 	}
-	port := cfg.Network.Port
-	if port == 0 {
-		port = config.DefaultPort
-	}
-	return &daemon{
-		base:   "http://" + net.JoinHostPort(host, strconv.Itoa(port)),
-		token:  token,
-		client: &http.Client{Timeout: 2 * time.Minute},
-	}, nil
+	return nil, errors.New("this node is not running\n\n  start it:  pscluster serve")
 }
 
 // call performs a request against the daemon and decodes the result.

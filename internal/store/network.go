@@ -129,6 +129,12 @@ func (s *Store) AddNetworkMember(networkID, accountID, role string) error {
 	return err
 }
 
+func (s *Store) RemoveNetworkMember(networkID, accountID string) error {
+	_, err := s.db.Exec(`DELETE FROM network_member WHERE network_id=? AND account_id=?`,
+		networkID, accountID)
+	return err
+}
+
 // NetworkMember returns one account's durable role in a network.
 func (s *Store) NetworkMember(networkID, accountID string) (NetworkMemberRow, error) {
 	var member NetworkMemberRow

@@ -69,6 +69,16 @@ func TestNotInstalledAndNotRunningAreStates(t *testing.T) {
 	}
 }
 
+func TestRunningLocalUsesRayStatus(t *testing.T) {
+	args := stubRunner(t, "cluster healthy", nil)
+	if !RunningLocal(context.Background()) {
+		t.Fatal("a successful ray status was reported as stopped")
+	}
+	if strings.Join(*args, " ") != "status" {
+		t.Fatalf("ran ray %q, want status", strings.Join(*args, " "))
+	}
+}
+
 func TestUnreachableDashboardExplainsItself(t *testing.T) {
 	stubRunner(t, "ray, version 2.9.0", nil)
 	stubFetch(t, "", context.DeadlineExceeded)
@@ -109,16 +119,45 @@ func TestJobsWithoutAClusterSaysSo(t *testing.T) {
 	}
 }
 
+func TestSubmitUsesManagedRayJobProtocol(t *testing.T) {
+	args := stubRunner(t, "Job submission server address: ok", nil)
+	if _, err := Submit(context.Background(), "http://100.64.0.1:8265/",
+		"/work/my project", "python main.py", "plainshow_1"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(*args, "|")
+	for _, want := range []string{"job|submit", "--address=http://100.64.0.1:8265",
+		"--submission-id=plainshow_1", "--working-dir=/work/my project", "--no-wait",
+		"/bin/sh|-lc|python main.py"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("ran %q, missing %q", joined, want)
+		}
+	}
+}
+
+func TestStopJobNamesTheSubmission(t *testing.T) {
+	args := stubRunner(t, "", nil)
+	if err := StopJob(context.Background(), "http://100.64.0.1:8265", "raysubmit_1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(*args, " "); !strings.Contains(got, "job stop") ||
+		!strings.HasSuffix(got, "raysubmit_1") {
+		t.Errorf("ran %q", got)
+	}
+}
+
 // The head must bind to the address other machines can reach it on, not to
 // everything and not to loopback.
 func TestStartHeadBindsToTheGivenAddress(t *testing.T) {
 	args := stubRunner(t, "", nil)
-	if err := StartHead(context.Background(), "100.64.0.1", 0, 0); err != nil {
+	if err := StartHead(context.Background(), "100.64.0.1", 0, 0,
+		ResourcePolicy{MaxCPU: 6, MaxRAMMB: 2048, AllowGPU: false}); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(*args, " ")
 	for _, want := range []string{"start", "--head", "--node-ip-address=100.64.0.1",
-		"--port=6379", "--dashboard-host=100.64.0.1", "--dashboard-port=8265"} {
+		"--port=6379", "--dashboard-host=100.64.0.1", "--dashboard-port=8265",
+		"--num-cpus=6", "--memory=2147483648", "--num-gpus=0"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("ran %q, missing %q", joined, want)
 		}
@@ -127,14 +166,15 @@ func TestStartHeadBindsToTheGivenAddress(t *testing.T) {
 
 func TestStartHeadRefusesWithoutAnAddress(t *testing.T) {
 	stubRunner(t, "", nil)
-	if err := StartHead(context.Background(), "  ", 0, 0); err == nil {
+	if err := StartHead(context.Background(), "  ", 0, 0, ResourcePolicy{}); err == nil {
 		t.Error("a head was started with no address to bind to")
 	}
 }
 
 func TestStartWorkerAttachesToTheHead(t *testing.T) {
 	args := stubRunner(t, "", nil)
-	if err := StartWorker(context.Background(), "100.64.0.2", "100.64.0.1:6379"); err != nil {
+	if err := StartWorker(context.Background(), "100.64.0.2", "100.64.0.1:6379",
+		ResourcePolicy{AllowGPU: true}); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(*args, " ")
@@ -146,7 +186,7 @@ func TestStartWorkerAttachesToTheHead(t *testing.T) {
 
 func TestStartWorkerRefusesWithoutAHead(t *testing.T) {
 	stubRunner(t, "", nil)
-	if err := StartWorker(context.Background(), "100.64.0.2", ""); err == nil {
+	if err := StartWorker(context.Background(), "100.64.0.2", "", ResourcePolicy{}); err == nil {
 		t.Error("a worker attached to nothing")
 	}
 }

@@ -132,10 +132,27 @@ type Status struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
+// ResourcePolicy controls what a Plainshow-managed Ray process advertises to
+// the scheduler. A machine that forbids jobs is never started at all by the
+// API; these limits describe an admitted worker.
+type ResourcePolicy struct {
+	MaxCPU   int  `json:"max_cpu"`
+	MaxRAMMB int  `json:"max_ram_mb"`
+	AllowGPU bool `json:"allow_gpu"`
+}
+
 // Installed reports whether the ray command exists.
 func Installed(ctx context.Context) bool {
 	_, err := runner(ctx, "--version")
 	return !errors.Is(err, ErrNotInstalled)
+}
+
+// RunningLocal reports whether this machine currently has a live Ray process.
+// It is intentionally separate from Probe: a worker has no local dashboard,
+// but still needs to be recognised after the Plainshow daemon restarts.
+func RunningLocal(ctx context.Context) bool {
+	_, err := runner(ctx, "status")
+	return err == nil
 }
 
 // Probe asks the dashboard what the cluster looks like.
@@ -269,11 +286,51 @@ func Jobs(ctx context.Context, dashboard string) ([]Job, error) {
 	return jobs, nil
 }
 
+// Submit packages a project directory and asks Ray's job server to execute the
+// command on the cluster. The managed Ray CLI owns the upload protocol, so this
+// stays compatible with the exact Ray version installed beside the node.
+func Submit(ctx context.Context, dashboard, workdir, command, id string) (string, error) {
+	if strings.TrimSpace(dashboard) == "" {
+		return "", errors.New("no Ray cluster is running for this network")
+	}
+	if strings.TrimSpace(workdir) == "" || strings.TrimSpace(command) == "" || strings.TrimSpace(id) == "" {
+		return "", errors.New("a project, command and job id are required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	out, err := runner(ctx, "job", "submit", "--address="+strings.TrimRight(dashboard, "/"),
+		"--submission-id="+id, "--working-dir="+workdir, "--no-wait",
+		"--", "/bin/sh", "-lc", command)
+	return strings.TrimSpace(string(out)), err
+}
+
+// JobLogs returns the current stdout/stderr text for a submitted Ray job.
+func JobLogs(ctx context.Context, dashboard, id string) (string, error) {
+	if strings.TrimSpace(dashboard) == "" || strings.TrimSpace(id) == "" {
+		return "", errors.New("a Ray cluster and job id are required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := runner(ctx, "job", "logs", "--address="+strings.TrimRight(dashboard, "/"), id)
+	return string(out), err
+}
+
+// StopJob asks Ray to stop one submitted job.
+func StopJob(ctx context.Context, dashboard, id string) error {
+	if strings.TrimSpace(dashboard) == "" || strings.TrimSpace(id) == "" {
+		return errors.New("a Ray cluster and job id are required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	_, err := runner(ctx, "job", "stop", "--address="+strings.TrimRight(dashboard, "/"), id)
+	return err
+}
+
 // StartHead brings up the head of a network's cluster on this machine.
 //
 // It binds to the machine's tailnet address so the other machines in the
 // network can attach, and to nothing else.
-func StartHead(ctx context.Context, address string, port, dashboardPort int) error {
+func StartHead(ctx context.Context, address string, port, dashboardPort int, policy ResourcePolicy) error {
 	if strings.TrimSpace(address) == "" {
 		return errors.New("this machine has no address to start a Ray head on")
 	}
@@ -286,17 +343,19 @@ func StartHead(ctx context.Context, address string, port, dashboardPort int) err
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	_, err := runner(ctx, "start", "--head",
-		"--node-ip-address="+address,
-		"--port="+strconv.Itoa(port),
-		"--dashboard-host="+address,
-		"--dashboard-port="+strconv.Itoa(dashboardPort),
-	)
+	args := []string{"start", "--head",
+		"--node-ip-address=" + address,
+		"--port=" + strconv.Itoa(port),
+		"--dashboard-host=" + address,
+		"--dashboard-port=" + strconv.Itoa(dashboardPort),
+	}
+	args = append(args, resourceArguments(policy)...)
+	_, err := runner(ctx, args...)
 	return err
 }
 
 // StartWorker attaches this machine to an existing head.
-func StartWorker(ctx context.Context, address, head string) error {
+func StartWorker(ctx context.Context, address, head string, policy ResourcePolicy) error {
 	if strings.TrimSpace(head) == "" {
 		return errors.New("no Ray head address to attach to")
 	}
@@ -307,8 +366,23 @@ func StartWorker(ctx context.Context, address, head string) error {
 	if strings.TrimSpace(address) != "" {
 		args = append(args, "--node-ip-address="+address)
 	}
+	args = append(args, resourceArguments(policy)...)
 	_, err := runner(ctx, args...)
 	return err
+}
+
+func resourceArguments(policy ResourcePolicy) []string {
+	args := []string{}
+	if policy.MaxCPU > 0 {
+		args = append(args, "--num-cpus="+strconv.Itoa(policy.MaxCPU))
+	}
+	if policy.MaxRAMMB > 0 {
+		args = append(args, "--memory="+strconv.FormatInt(int64(policy.MaxRAMMB)*1024*1024, 10))
+	}
+	if !policy.AllowGPU {
+		args = append(args, "--num-gpus=0")
+	}
+	return args
 }
 
 // Stop leaves the cluster. Ray is left installed; only this machine's

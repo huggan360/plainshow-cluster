@@ -1,8 +1,9 @@
 #!/bin/sh
 # Install one Plainshow Cluster component and its node runtime dependencies.
-# Usage: ./install.sh [node|admin] [binary]
+# Usage: ./install.sh [node|admin] [binary] [desktop-binary]
 #
 # Environment:
+#   PSCLUSTER_ACCOUNT_SERVER=…    account service (empty means standalone)
 #   PSCLUSTER_SKIP_DEPENDENCIES=1  keep package management untouched
 #   PSCLUSTER_TAILSCALE_AUTH_KEY=… advanced: pre-enrol without PlainShow login
 #   PSCLUSTER_TAILSCALE_LOGIN_SERVER=https://… advanced control-server override
@@ -11,6 +12,8 @@
 set -eu
 
 PSCLUSTER_TAILSCALE_LOGIN_SERVER="${PSCLUSTER_TAILSCALE_LOGIN_SERVER:-https://tailnet.plainshow.se}"
+PSCLUSTER_RAY_VERSION="${PSCLUSTER_RAY_VERSION:-2.58.0}"
+PSCLUSTER_ACCOUNT_SERVER="${PSCLUSTER_ACCOUNT_SERVER-https://clusteradmin.plainshow.se}"
 
 note() {
     printf '%s\n' "install: $*"
@@ -18,17 +21,29 @@ note() {
 
 missing_node_commands() {
     missing=""
+    command -v curl >/dev/null 2>&1 || missing="$missing curl"
     command -v git >/dev/null 2>&1 || missing="$missing git"
     command -v tailscale >/dev/null 2>&1 || missing="$missing tailscale"
     command -v script >/dev/null 2>&1 || missing="$missing script"
+    command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+    if command -v python3 >/dev/null 2>&1 &&
+       ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
+        missing="$missing python3-venv"
+    fi
     printf '%s' "$missing"
 }
 
 missing_core_commands() {
     missing=""
+    command -v curl >/dev/null 2>&1 || missing="$missing curl"
     command -v git >/dev/null 2>&1 || missing="$missing git"
     command -v tailscale >/dev/null 2>&1 || missing="$missing tailscale"
     command -v script >/dev/null 2>&1 || missing="$missing script"
+    command -v python3 >/dev/null 2>&1 || missing="$missing python3"
+    if command -v python3 >/dev/null 2>&1 &&
+       ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
+        missing="$missing python3-venv"
+    fi
     printf '%s' "$missing"
 }
 
@@ -95,21 +110,22 @@ configure_tailscale_apt_repository() {
 # rule and leaves the machine's Python untouched.
 install_ray() {
     root="$1"
-    if [ -x "$root/runtime/bin/ray" ]; then
+    if [ -x "$root/runtime/bin/ray" ] &&
+       "$root/runtime/bin/ray" --version 2>/dev/null | grep -Fq "$PSCLUSTER_RAY_VERSION"; then
         note "Ray is already installed for this node"
         return 0
     fi
     note "installing Ray into $root/runtime"
     if ! python3 -m venv "$root/runtime" 2>/dev/null; then
         echo "install: could not create the Python environment for Ray" >&2
-        echo "install: install python3-venv and re-run, or install Ray yourself" >&2
-        return 0
+        echo "install: install python3-venv and re-run" >&2
+        exit 1
     fi
     if ! "$root/runtime/bin/pip" install --quiet --upgrade pip 2>/dev/null ||
-       ! "$root/runtime/bin/pip" install --quiet "ray[default]"; then
+       ! "$root/runtime/bin/pip" install --quiet --upgrade "ray[default]==$PSCLUSTER_RAY_VERSION"; then
         echo "install: Ray could not be installed automatically" >&2
-        echo "install: run  $root/runtime/bin/pip install 'ray[default]'" >&2
-        return 0
+        echo "install: run  $root/runtime/bin/pip install 'ray[default]==$PSCLUSTER_RAY_VERSION'" >&2
+        exit 1
     fi
     note "Ray installed"
 }
@@ -190,6 +206,31 @@ install_zypper_dependencies() {
     configure_tailscale_zypper_repository
     zypper --non-interactive refresh
     zypper --non-interactive install tailscale
+}
+
+install_desktop_dependencies() {
+    [ -n "${DESKTOP_SRC:-}" ] || return 0
+    if [ "${PSCLUSTER_SKIP_DEPENDENCIES:-0}" = 1 ]; then
+        note "desktop runtime dependency installation skipped"
+        return 0
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "install: the native desktop runtime must be installed by root" >&2
+        exit 1
+    fi
+    note "installing the native desktop runtime"
+    if command -v pacman >/dev/null 2>&1; then
+        pacman -S --needed --noconfirm gtk3 webkit2gtk-4.1
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y gtk3 webkit2gtk4.1
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install libgtk-3-0 libwebkit2gtk-4_1-0
+    else
+        echo "install: install GTK 3 and WebKit2GTK 4.1 for the desktop program" >&2
+        exit 1
+    fi
 }
 
 # install_desktop_entry makes Plainshow Cluster appear in the desktop's
@@ -284,13 +325,19 @@ case "$COMPONENT" in
 esac
 
 BINARY_SRC="${2:-./$BINARY_NAME}"
+DESKTOP_SRC="${3:-}"
 if [ ! -x "$BINARY_SRC" ]; then
     echo "install: $BINARY_SRC not found; run 'make build' first" >&2
+    exit 1
+fi
+if [ "$COMPONENT" = node ] && [ -n "$DESKTOP_SRC" ] && [ ! -x "$DESKTOP_SRC" ]; then
+    echo "install: desktop binary $DESKTOP_SRC is not executable" >&2
     exit 1
 fi
 
 if [ "$COMPONENT" = node ]; then
     install_node_dependencies
+    install_desktop_dependencies
     start_tailnet
 fi
 
@@ -299,6 +346,7 @@ if [ "$(id -u)" -ne 0 ] && [ "${ROOT#/opt/}" != "$ROOT" ]; then
 fi
 
 mkdir -p "$ROOT/bin"
+chmod 755 "$ROOT" "$ROOT/bin"
 if [ "$COMPONENT" = node ]; then
     install_ray "$ROOT"
     install_desktop_entry
@@ -307,6 +355,12 @@ temporary="$ROOT/bin/.${BINARY_NAME}.new"
 cp "$BINARY_SRC" "$temporary"
 chmod 755 "$temporary"
 mv "$temporary" "$ROOT/bin/$BINARY_NAME"
+if [ "$COMPONENT" = node ] && [ -n "$DESKTOP_SRC" ]; then
+    desktop_temporary="$ROOT/bin/.plainshow-cluster-desktop.new"
+    cp "$DESKTOP_SRC" "$desktop_temporary"
+    chmod 755 "$desktop_temporary"
+    mv "$desktop_temporary" "$ROOT/bin/plainshow-cluster-desktop"
+fi
 
 case "$COMPONENT" in
     node)

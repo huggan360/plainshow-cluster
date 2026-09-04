@@ -29,8 +29,8 @@ const EnvRoot = "PSCLUSTER_ROOT"
 // EnvAccountServer overrides the global account authority URL.
 const EnvAccountServer = "PSCLUSTER_ACCOUNT_SERVER"
 
-// DefaultPort is where the web interface listens when nothing else is asked
-// for. Init probes upward from here for a free port rather than assuming it.
+// DefaultPort is retained for explicitly configured and older nodes. New
+// desktop installations use an ephemeral loopback port published at runtime.
 const DefaultPort = 9999
 
 // DefaultUpdateRepository is where a node looks for new releases until it is
@@ -132,8 +132,10 @@ type MembershipConfig struct {
 	// RayHead is "host:port" of the machine running this network's Ray head.
 	// Ray needs one; recording which machine it is lets the others attach and
 	// lets the interface say plainly where it is.
-	RayHead string       `yaml:"ray_head,omitempty" json:"ray_head"`
-	Policy  WorkerConfig `yaml:"policy" json:"policy"`
+	RayHead        string       `yaml:"ray_head,omitempty" json:"ray_head"`
+	RayHeadNode    string       `yaml:"ray_head_node,omitempty" json:"ray_head_node"`
+	RayHeadUpdated string       `yaml:"ray_head_updated,omitempty" json:"ray_head_updated"`
+	Policy         WorkerConfig `yaml:"policy" json:"policy"`
 }
 
 // UpdateConfig controls how this node keeps itself current.
@@ -180,7 +182,7 @@ type ClusterConfig struct {
 }
 
 // NetworkConfig controls where the node listens. Nothing here is compiled in:
-// a zero Port means "probe for a free one starting at DefaultPort".
+// a zero Port asks the operating system for a free ephemeral loopback port.
 type NetworkConfig struct {
 	Bind      string `yaml:"bind" json:"bind"`
 	Port      int    `yaml:"port" json:"port"`
@@ -389,6 +391,11 @@ func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "psclu
 // it installed, not whatever a system Python happens to provide.
 func (l Layout) RayBinary() string { return filepath.Join(l.Root, "runtime", "bin", "ray") }
 
+// RayState records which network the one local Ray process currently serves.
+// Ray itself survives daemon restarts, while this small marker lets a restarted
+// node reattach it to the selected network instead of guessing.
+func (l Layout) RayState() string { return filepath.Join(l.Root, "keys", "ray-state.json") }
+
 // GitHubToken is where this node keeps its GitHub credential. It is inside the
 // install root like everything else, and readable only by the owner.
 func (l Layout) GitHubToken() string   { return filepath.Join(l.Root, "keys", "github.token") }
@@ -397,6 +404,7 @@ func (l Layout) TailnetServer() string { return filepath.Join(l.Root, "keys", "t
 func (l Layout) DeviceKey() string     { return filepath.Join(l.Root, "keys", "device.key") }
 func (l Layout) DeviceCert() string    { return filepath.Join(l.Root, "keys", "device.crt") }
 func (l Layout) PIDFile() string       { return filepath.Join(l.Root, "run", "pscluster.pid") }
+func (l Layout) RuntimeFile() string   { return filepath.Join(l.Root, "run", "node.json") }
 
 func (l Layout) AdminConfigFile() string { return filepath.Join(l.Root, "admin.yaml") }
 func (l Layout) AdminDatabase() string   { return filepath.Join(l.Root, "accounts.db") }
@@ -417,6 +425,14 @@ func (l Layout) EnsureDirs() error {
 	for _, d := range l.Dirs() {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
+		}
+	}
+	// The installed command and desktop program must be executable by the
+	// signed-in desktop user even when the daemon owns the system node. Data,
+	// keys and projects remain private in their 0750 child directories.
+	for _, d := range []string{l.Root, l.Bin(), l.Run()} {
+		if err := os.Chmod(d, 0o755); err != nil {
+			return fmt.Errorf("make %s executable: %w", d, err)
 		}
 	}
 	return nil

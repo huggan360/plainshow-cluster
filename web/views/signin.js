@@ -81,7 +81,7 @@ function card(firstRun, status, done, switchMode) {
 				plainshowLogo('cluster')),
 
             el('p', { class: 'page__eyebrow' },
-				status.central ? 'Plainshow account' : (firstRun ? 'First run' : 'Secure workspace')),
+				status.central ? 'Plainshow account' : (firstRun ? 'First run' : 'Secure node')),
             el('h1', { class: 'page__title' },
 				firstRun ? (status.central ? 'Create an account' : 'Claim this node') : 'Sign in'),
             el('p', { class: 'page__sub', style: 'margin-bottom:20px' },

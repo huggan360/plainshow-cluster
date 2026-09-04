@@ -3,17 +3,21 @@
 # node keeps its own. A failure here is a warning: the node is useful before
 # anybody runs anything.
 _install_ray() {
-    [[ -x /opt/plainshow-cluster/runtime/bin/ray ]] && return 0
+    local ray_version=2.58.0
+    if [[ -x /opt/plainshow-cluster/runtime/bin/ray ]] &&
+       /opt/plainshow-cluster/runtime/bin/ray --version 2>/dev/null | grep -Fq "$ray_version"; then
+        return 0
+    fi
     echo 'Installing Ray for Plainshow Cluster...'
     if ! python3 -m venv /opt/plainshow-cluster/runtime 2>/dev/null ||
-       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet "ray[default]"; then
+       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet --upgrade "ray[default]==$ray_version"; then
         echo 'Ray could not be installed automatically. Run:'
-        echo '  sudo /opt/plainshow-cluster/runtime/bin/pip install "ray[default]"'
+        echo "  sudo /opt/plainshow-cluster/runtime/bin/pip install 'ray[default]==$ray_version'"
     fi
 }
 
 post_install() {
-    install -d -m 0750 /opt/plainshow-cluster/bin
+    install -d -m 0755 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
     if [[ ! -f /opt/plainshow-cluster/config.yaml ]]; then
@@ -30,14 +34,14 @@ post_install() {
     fi
 
 	if ! tailscale status >/dev/null 2>&1; then
-		echo 'PlainShow Cluster installed. Open http://127.0.0.1:9999 and sign in; private networking connects automatically.'
+		echo 'Plainshow Cluster installed. Open it from the application menu and sign in; private networking connects automatically.'
     else
-        echo 'PlainShow Cluster installed and started.'
+        echo 'Plainshow Cluster installed and started.'
     fi
 }
 
 post_upgrade() {
-    install -d -m 0750 /opt/plainshow-cluster/bin
+    install -d -m 0755 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
     _install_ray
@@ -57,6 +61,6 @@ post_remove() {
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
     fi
-    echo 'PlainShow node data remains in /opt/plainshow-cluster.'
+    echo 'Plainshow Cluster node data remains in /opt/plainshow-cluster.'
     echo 'To remove it as well:  sudo rm -rf /opt/plainshow-cluster'
 }

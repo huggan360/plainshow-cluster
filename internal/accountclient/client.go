@@ -37,13 +37,28 @@ type SessionResponse struct {
 // NetworkResponse connects a peer network to the enterprise management plane
 // and its single collaboration controller.
 type NetworkResponse struct {
-	Network    accountserver.EnterpriseNetwork `json:"network"`
+	Network    accountserver.EnterpriseNetwork  `json:"network"`
+	Members    []accountserver.EnterpriseMember `json:"members"`
 	Controller struct {
 		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Address     string `json:"address"`
 		CollabToken string `json:"collab_token"`
 	} `json:"controller"`
+}
+
+func (c *Client) SetNetworkMemberRole(ctx context.Context, token, networkID,
+	managementKey, accountID, role string) error {
+	return c.call(ctx, http.MethodPut, "/api/networks/"+url.PathEscape(networkID)+
+		"/members/"+url.PathEscape(accountID), token,
+		map[string]string{"management_key": managementKey, "role": role}, nil)
+}
+
+func (c *Client) RemoveNetworkMember(ctx context.Context, token, networkID,
+	managementKey, accountID string) error {
+	return c.call(ctx, http.MethodDelete, "/api/networks/"+url.PathEscape(networkID)+
+		"/members/"+url.PathEscape(accountID), token,
+		map[string]string{"management_key": managementKey}, nil)
 }
 
 // New validates a configured account-server URL. Plain HTTP is accepted only

@@ -130,10 +130,12 @@ type joinResponse struct {
 	Role          string              `json:"role"`
 	ManagementKey string              `json:"management_key"`
 	Nodes         []store.NetworkNode `json:"nodes"`
+	Ray           rayAnnouncement     `json:"ray"`
 }
 
 type peerExchange struct {
 	Nodes []store.NetworkNode `json:"nodes"`
+	Ray   rayAnnouncement     `json:"ray"`
 }
 
 // MeshHandler is the deliberately narrow API exposed on the encrypted peer
@@ -270,7 +272,7 @@ func (s *Server) acceptJoin(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.store.NetworkNodes(networkID)
 	s.hub.Publish("networks.changed", network)
 	writeJSON(w, 201, joinResponse{Network: network, Role: accountRole,
-		ManagementKey: managementKey, Nodes: nodes})
+		ManagementKey: managementKey, Nodes: nodes, Ray: s.rayAnnouncement(networkID)})
 }
 
 // StartPeerDiscovery periodically exchanges each network's directory with
@@ -310,12 +312,12 @@ func (s *Server) syncPeersOnce(ctx context.Context) {
 }
 
 func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
-	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
+	s.refreshLocalNodeSnapshot(ctx, networkID)
 	nodes, err := s.store.NetworkNodes(networkID)
 	if err != nil {
 		return
 	}
-	request := peerExchange{Nodes: nodes}
+	request := peerExchange{Nodes: nodes, Ray: s.rayAnnouncement(networkID)}
 	var wg sync.WaitGroup
 	for _, node := range nodes {
 		if node.NodeID == s.cfg.Node.ID || node.Address == "" || node.Fingerprint == "" {
@@ -336,9 +338,46 @@ func (s *Server) syncNetworkPeers(ctx context.Context, networkID string) {
 				return
 			}
 			s.mergePeerNodes(networkID, response.Nodes)
+			s.mergeRayAnnouncement(networkID, response.Ray)
 		}(node)
 	}
 	wg.Wait()
+}
+
+// refreshLocalNodeSnapshot keeps the resources other machines show current.
+// The peer directory is also the network overview's telemetry source, so a GPU
+// added after enrollment must not remain invisible until the node rejoins.
+func (s *Server) refreshLocalNodeSnapshot(ctx context.Context, networkID string) {
+	if s.device == nil {
+		return
+	}
+	var membership *config.MembershipConfig
+	for index := range s.cfg.Memberships {
+		if s.cfg.Memberships[index].ID == networkID {
+			membership = &s.cfg.Memberships[index]
+			break
+		}
+	}
+	if membership == nil {
+		return
+	}
+	info := sysinfo.Probe(s.layout.Root)
+	roles := make([]string, 0, len(membership.Roles))
+	for _, role := range membership.Roles {
+		roles = append(roles, string(role))
+	}
+	_ = s.store.UpsertNetworkNode(store.NetworkNode{
+		NetworkID: networkID, NodeID: s.cfg.Node.ID, Name: s.cfg.Node.Name,
+		Roles: roles, OS: info.OS, Arch: info.Arch,
+		PublicKey:   base64.RawURLEncoding.EncodeToString(s.device.Public),
+		Fingerprint: s.fingerprint,
+		Address:     advertisedEndpointFor(s.cfg, tailnet.Probe(ctx)),
+		Policy:      policyMap(membership.Policy), IsSelf: true, LastSeen: store.Now(),
+		Capacity: map[string]any{
+			"cpu_cores": info.CPUCores, "ram_total_mb": info.RAMTotalMB,
+			"disk_total_gb": info.DiskTotalGB, "gpus": info.GPUs,
+		},
+	})
 }
 
 func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
@@ -353,13 +392,21 @@ func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mergePeerNodes(networkID, exchange.Nodes)
-	_ = s.store.TouchNetworkNode(networkID, s.cfg.Node.ID, store.Now())
+	s.mergeRayAnnouncement(networkID, exchange.Ray)
+	s.refreshLocalNodeSnapshot(r.Context(), networkID)
 	nodes, err := s.store.NetworkNodes(networkID)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, peerExchange{Nodes: nodes})
+	writeJSON(w, 200, peerExchange{Nodes: nodes, Ray: s.rayAnnouncement(networkID)})
+}
+
+func (s *Server) mergeRayAnnouncement(networkID string, announcement rayAnnouncement) {
+	changed, err := s.storeRayAnnouncement(networkID, announcement)
+	if err == nil && changed {
+		s.hub.Publish("ray.changed", map[string]any{"head": announcement.Head})
+	}
 }
 
 // mergePeerNodes accepts only complete, newer records and never lets gossip

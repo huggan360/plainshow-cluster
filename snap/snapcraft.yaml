@@ -1,22 +1,20 @@
-# Snap packaging for Plainshow Cluster.
+# Native Snap package for Plainshow Cluster.
 #
-# The node is confined, but the two programs it drives — tailscale and ray —
-# are not things a snap can carry: tailscale needs its own daemon and kernel
-# access, and Ray runs the user's Python with their own packages and GPU
-# drivers. Both are therefore host requirements, and the interface says so when
-# they are missing rather than pretending to bundle them.
+# Classic confinement is intentional: Ray must execute each project's own
+# Python environment and GPU libraries, while the node talks to the host's
+# tailscaled daemon. The portable distro installer remains the recommended
+# install because it can install and enable that host daemon automatically.
 name: plainshow-cluster
-base: core22
+base: core24
 adopt-info: pscluster
-summary: Connect your machines into networks and run work across them
+summary: Connect your Linux machines and run AI work with Ray
 description: |
-  Plainshow Cluster joins the computers you already own into private networks,
-  keeps projects in step through git, and runs work across the machines with
-  Ray. It is an interface over Tailscale, Ray and Git rather than an
-  implementation of any of them.
+  Plainshow Cluster provides a native collaborative project workspace, private
+  multi-machine networks, account-managed access, and distributed Ray jobs.
 
-  Tailscale and Ray must be installed on the host: a confined snap cannot
-  provide a VPN daemon or run your Python with your GPU drivers.
+  The snap includes the desktop, node and Ray. A Tailscale client and daemon
+  must already be installed on the host; Plainshow account login then enrols
+  it with the self-hosted Headscale service automatically.
 
 grade: devel
 confinement: classic
@@ -27,36 +25,75 @@ architectures:
 
 parts:
   pscluster:
-    plugin: go
+    plugin: nil
     source: .
+    # The desktop and several Ray dependencies are dynamically linked. Classic
+    # snaps do not receive strict confinement's automatic library-path setup,
+    # so let Snapcraft patch their ELF search paths into the staged payload.
+    build-attributes:
+      - enable-patchelf
     build-snaps:
       - go/1.25/stable
     build-packages:
+      - gcc
       - git
+      - libgtk-3-dev
+      - libwebkit2gtk-4.1-dev
+      - pkg-config
+    stage-packages:
+      - ca-certificates
+      - git
+      - libgtk-3-0t64
+      - libwebkit2gtk-4.1-0
+      - procps
     override-pull: |
       craftctl default
-      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.1-dev)"
       craftctl set version="${version#v}"
     override-build: |
-      # The same flags the Makefile uses, so a snap reports the version it was
-      # built from and the updater can compare it.
+      set -eu
       commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
-      go build -trimpath \
-        -ldflags "-s -w \
-          -X github.com/huggan360/plainshow-cluster/internal/version.Version=${version#v} \
-          -X github.com/huggan360/plainshow-cluster/internal/version.Commit=$commit" \
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.1-dev)"
+      flags="-s -w -X github.com/huggan360/plainshow-cluster/internal/version.Version=${version#v} -X github.com/huggan360/plainshow-cluster/internal/version.Commit=$commit"
+      go build -trimpath -ldflags "$flags" \
         -o "$CRAFT_PART_INSTALL/bin/pscluster" ./cmd/pscluster
+      go build -trimpath -tags "desktop,webkit2_41,production" -ldflags "$flags" \
+        -o "$CRAFT_PART_INSTALL/bin/plainshow-cluster-desktop" \
+        ./cmd/plainshow-cluster-desktop
+      install -Dm0755 snap/local/plainshow-cluster-launch \
+        "$CRAFT_PART_INSTALL/bin/plainshow-cluster-launch"
+      install -Dm0755 snap/local/plainshow-cluster-node \
+        "$CRAFT_PART_INSTALL/bin/plainshow-cluster-node"
+      install -Dm0755 snap/local/plainshow-cluster-cli \
+        "$CRAFT_PART_INSTALL/bin/plainshow-cluster-cli"
       install -Dm0644 packaging/desktop/plainshow-cluster.desktop \
+        "$CRAFT_PART_INSTALL/share/applications/plainshow-cluster.desktop"
+      sed -i 's|^Exec=.*|Exec=plainshow-cluster|' \
         "$CRAFT_PART_INSTALL/share/applications/plainshow-cluster.desktop"
       for size in 48 64 128 256; do
         install -Dm0644 "packaging/desktop/plainshow-cluster-$size.png" \
           "$CRAFT_PART_INSTALL/share/icons/hicolor/${size}x${size}/apps/plainshow-cluster.png"
       done
 
+  ray-runtime:
+    plugin: python
+    source: snap/ray
+    build-attributes:
+      - enable-patchelf
+    stage-packages:
+      - libpython3.12-minimal
+      - libpython3.12-stdlib
+      - python3.12-minimal
+    python-packages:
+      - ray[default]==2.58.0
+
 apps:
   plainshow-cluster:
-    command: bin/pscluster
+    command: bin/plainshow-cluster-launch
     desktop: share/applications/plainshow-cluster.desktop
   pscluster:
-    command: bin/pscluster
+    command: bin/plainshow-cluster-cli
+  node:
+    command: bin/plainshow-cluster-node
+    daemon: simple
+    restart-condition: on-failure

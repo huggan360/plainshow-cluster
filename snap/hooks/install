@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+root="$SNAP_COMMON/node"
+if [ ! -f "$root/config.yaml" ]; then
+    "$SNAP/bin/pscluster" init --root "$root" \
+        --account-server https://clusteradmin.plainshow.se
+fi
+
+# snapd owns atomic snap refreshes and rollback. The binary updater cannot
+# replace files below the read-only $SNAP mount.
+"$SNAP/bin/pscluster" config --root "$root" set update.enabled false

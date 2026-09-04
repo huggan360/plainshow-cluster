@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -33,34 +31,33 @@ var appBrowsers = []struct{ command, flag string }{
 
 // cmdApp opens Plainshow Cluster as a desktop program.
 //
-// It is deliberately not an embedded browser engine. Bundling one would mean
-// cgo and GTK development headers, which would cost the single static binary
-// that can be cross-compiled for every machine in a cluster — a heavy price for
-// a window. Instead it starts the node if it is not already running and opens
-// a chromeless window pointing at it.
+// Installed packages hand off to the native GTK/WebKit application. A source
+// build without that optional binary still has a browser-app fallback.
 func cmdApp(args []string) error {
-	f := parseFlags(args)
-	l, cfg, err := openNode(f)
+	f := parseFlags(args, "browser")
+	if !f.has("browser") {
+		if launched, err := launchNativeDesktop(f); launched {
+			return err
+		}
+	}
+	l, _, err := openNode(f)
 	if err != nil {
 		return err
 	}
 
-	host := cfg.Network.Bind
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
+	url := ""
+	if runtime, runtimeErr := config.LoadRuntime(l); runtimeErr == nil {
+		url = runtime.URL
 	}
-	port := cfg.Network.Port
-	if port == 0 {
-		port = config.DefaultPort
-	}
-	url := "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 
 	if !nodeAnswering(url) {
 		if err := startNodeInBackground(l); err != nil {
 			return err
 		}
-		if !waitForNode(url, 30*time.Second) {
+		if discovered := waitForRuntimeNode(l, url, 30*time.Second); discovered == "" {
 			return fmt.Errorf("the node did not start; try: pscluster serve --root %s", l.Root)
+		} else {
+			url = discovered
 		}
 	}
 
@@ -75,7 +72,53 @@ func cmdApp(args []string) error {
 	return nil
 }
 
+func waitForRuntimeNode(l config.Layout, fallback string, within time.Duration) string {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if runtime, err := config.LoadRuntime(l); err == nil && nodeAnswering(runtime.URL) {
+			return runtime.URL
+		}
+		if fallback != "" && nodeAnswering(fallback) {
+			return fallback
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return ""
+}
+
+// launchNativeDesktop hands off to the GTK/WebKit program when the installed
+// package includes it. Keeping that program separate preserves the node's
+// portable static binary and still makes `pscluster app` the one stable entry
+// point. Source builds without desktop libraries retain the browser fallback.
+func launchNativeDesktop(f flags) (bool, error) {
+	candidates := []string{}
+	desktopArgs := []string{}
+	if explicit := os.Getenv("PSCLUSTER_DESKTOP"); explicit != "" {
+		candidates = append(candidates, explicit)
+	}
+	if l, err := layoutFrom(f); err == nil {
+		candidates = append(candidates, l.Root+"/bin/plainshow-cluster-desktop")
+		desktopArgs = []string{"--root", l.Root}
+	}
+	candidates = append(candidates,
+		"/usr/lib/plainshow-cluster/plainshow-cluster-desktop",
+		"/usr/local/lib/plainshow-cluster/plainshow-cluster-desktop")
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		cmd := exec.Command(candidate, desktopArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return true, cmd.Run()
+	}
+	return false, nil
+}
+
 func nodeAnswering(url string) bool {
+	if url == "" {
+		return false
+	}
 	client := &http.Client{Timeout: 2 * time.Second}
 	res, err := client.Get(url + "/api/auth/status")
 	if err != nil {
@@ -83,17 +126,6 @@ func nodeAnswering(url string) bool {
 	}
 	res.Body.Close()
 	return true
-}
-
-func waitForNode(url string, within time.Duration) bool {
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
-		if nodeAnswering(url) {
-			return true
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return false
 }
 
 // startNodeInBackground launches the daemon so opening the program is one step.

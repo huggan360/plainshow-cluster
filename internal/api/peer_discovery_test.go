@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/events"
+	"github.com/huggan360/plainshow-cluster/internal/ray"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
@@ -23,6 +25,102 @@ func discoveryNode(networkID, nodeID, name, seen string) store.NetworkNode {
 		Policy:   map[string]any{},
 		Capacity: map[string]any{},
 		LastSeen: seen,
+	}
+}
+
+func TestRayAnnouncementsConvergeAndRespectTombstones(t *testing.T) {
+	l, err := config.NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.Node.ID = "bravo"
+	cfg.Memberships = []config.MembershipConfig{{ID: "network", Enabled: true}}
+	cfg.ActiveNetwork = "network"
+	srv := &Server{cfg: cfg, layout: l, hub: events.NewHub()}
+
+	started := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha",
+		Updated: "2026-09-04T10:00:00Z"}
+	srv.mergeRayAnnouncement("network", started)
+	if got := srv.rayAnnouncement("network"); got != started {
+		t.Fatalf("announcement = %+v, want %+v", got, started)
+	}
+
+	// An older returning peer cannot resurrect an obsolete head after the
+	// machine that owned it has stopped it.
+	stopped := rayAnnouncement{NodeID: "alpha", Updated: "2026-09-04T10:01:00Z"}
+	srv.mergeRayAnnouncement("network", stopped)
+	srv.mergeRayAnnouncement("network", started)
+	if got := srv.rayAnnouncement("network"); got != stopped {
+		t.Fatalf("stale head was resurrected: %+v", got)
+	}
+}
+
+func TestRayAnnouncementTieBreakIsDeterministic(t *testing.T) {
+	at := "2026-09-04T10:00:00.123456789Z"
+	a := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha", Updated: at}
+	b := rayAnnouncement{Head: "100.64.0.2:6379", NodeID: "bravo", Updated: at}
+	if !rayAnnouncementNewer(b, a) || rayAnnouncementNewer(a, b) {
+		t.Fatal("simultaneous head announcements do not have one stable winner")
+	}
+}
+
+func TestLocalRayStateRoundTrip(t *testing.T) {
+	l, err := config.NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{layout: l}
+	want := localRayState{NetworkID: "network", Head: "100.64.0.1:6379", Role: "worker",
+		Policy: ray.ResourcePolicy{MaxCPU: 4, MaxRAMMB: 8192, AllowGPU: true}}
+	if err := srv.writeLocalRayState(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := srv.readLocalRayState()
+	if err != nil || got != want {
+		t.Fatalf("state = %+v, %v; want %+v", got, err, want)
+	}
+	if err := srv.clearLocalRayState(); err != nil {
+		t.Fatal(err)
+	}
+	got, err = srv.readLocalRayState()
+	if err != nil || got != (localRayState{}) {
+		t.Fatalf("cleared state = %+v, %v", got, err)
+	}
+}
+
+func TestRayPolicyIntersectsDeviceAndNetworkLimits(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.ActiveNetwork = "network"
+	cfg.Worker = config.WorkerConfig{
+		Enabled: true, AllowJobs: true, AllowGPU: true, MaxCPU: 12, MaxRAMMB: 32000,
+	}
+	cfg.Memberships = []config.MembershipConfig{{
+		ID: "network", Enabled: true,
+		Policy: config.WorkerConfig{
+			Enabled: true, AllowJobs: true, AllowGPU: false, MaxCPU: 6, MaxRAMMB: 64000,
+		},
+	}}
+	srv := &Server{cfg: cfg}
+
+	policy, eligible := srv.rayPolicy("network")
+	want := ray.ResourcePolicy{MaxCPU: 6, MaxRAMMB: 32000, AllowGPU: false}
+	if !eligible || policy != want {
+		t.Fatalf("policy = %+v, eligible %v; want %+v, true", policy, eligible, want)
+	}
+
+	cfg.Memberships[0].Policy.AllowJobs = false
+	if _, eligible := srv.rayPolicy("network"); eligible {
+		t.Fatal("network that forbids jobs was eligible for Ray")
+	}
+	if _, eligible := srv.rayPolicy("missing"); eligible {
+		t.Fatal("machine was eligible for a network it has not joined")
 	}
 }
 

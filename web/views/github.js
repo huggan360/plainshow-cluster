@@ -13,13 +13,13 @@ export async function renderGitHub(host) {
     const draw = async () => {
         const status = await api('/api/github');
         mount(page,
-            el('div', { class: 'page__head' },
-                el('p', { class: 'page__eyebrow' }, 'Account'),
-                el('h1', { class: 'page__title' }, 'GitHub'),
-                el('p', { class: 'page__sub' },
-                    'One token connects this node to your repositories. Projects can then ' +
-                    'be pushed and pulled, and the people who may work on a project stay in ' +
-                    'step with the repository’s collaborators in both directions.')),
+            el('div', { class: 'detail-head', style: 'margin-bottom:24px' },
+                el('span', { class: 'ps-project-mark' }, el('i', { class: 'bx bxl-github' })),
+                el('div', { class: 'detail-head__copy' },
+                    el('p', { class: 'page__eyebrow' }, 'Source control'),
+                    el('h1', { class: 'page__title' }, 'GitHub'),
+                    el('p', { class: 'page__sub' },
+                        'Connect once to clone repositories, push changes and keep project access in sync.'))),
             status.connected ? connected(status, draw) : disconnected(status, draw));
     };
 
@@ -50,11 +50,11 @@ function connected(status, draw) {
                 : null,
             el('div', { style: 'display:flex;gap:8px;margin-top:20px' },
                 el('button', { class: 'btn btn--sm', onclick: () => connectForm(draw, true) },
-                    'Replace token'),
+                    el('i', { class: 'bx bx-refresh' }), 'Replace token'),
                 el('button', {
                     class: 'btn btn--sm btn--danger',
                     onclick: () => disconnect(draw),
-                }, 'Disconnect')))),
+                }, el('i', { class: 'bx bx-unlink' }), 'Disconnect')))),
 
         el('div', { class: 'panel' },
             el('div', { class: 'panel__head' }, 'What you can do now'),
@@ -64,10 +64,10 @@ function connected(status, draw) {
                     () => cloneForm()),
                 action('Connect a project to a repository',
                     'Open a project, then use the Repository panel.',
-                    () => navigate('workspace')),
+                    () => navigate('projects')),
                 action('Share a project with someone',
                     'Add their GitHub username under Team; they are invited to the repository too.',
-                    () => navigate('workspace')))));
+                    () => navigate('projects')))));
 }
 
 function stat(value, label, colour) {
@@ -89,13 +89,13 @@ function action(title, description, onclick) {
         el('span', { class: 'row__main' },
             el('span', { class: 'row__title' }, title),
             el('span', { class: 'row__meta' }, description)),
-        el('span', { class: 'dim' }, '→'));
+		el('i', { class: 'bx bx-right-arrow-alt dim' }));
 }
 
 function disconnected(status, draw) {
     return el('div', { class: 'panel', style: 'max-width:620px' },
         el('div', { class: 'empty', style: 'padding-bottom:12px' },
-            el('span', { class: 'empty__ico' }, '○'),
+			el('i', { class: 'bx bxl-github empty__ico' }),
             el('span', { class: 'empty__text' },
                 'No GitHub account is connected to this node yet.')),
         status.error
@@ -105,7 +105,7 @@ function disconnected(status, draw) {
             : null,
         el('div', { style: 'display:flex;justify-content:center' },
             el('button', { class: 'btn btn--primary', onclick: () => connectForm(draw, false) },
-                'Connect GitHub')));
+                el('i', { class: 'bx bxl-github' }), 'Connect GitHub')));
 }
 
 function connectForm(draw, replacing) {
@@ -126,7 +126,7 @@ function connectForm(draw, replacing) {
             el('a', {
                 class: 'btn btn--sm', href: TOKEN_URL, target: '_blank', rel: 'noreferrer',
                 style: 'margin-bottom:16px',
-            }, 'Create a token on GitHub  ↗'),
+            }, el('i', { class: 'bx bx-link-external' }), 'Create a token on GitHub'),
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, 'Token'), token),
             el('p', { class: 'muted', style: 'margin:0;font-size:11.5px' },
@@ -205,7 +205,7 @@ export function cloneForm(after) {
             toast(`Cloned into ${project.name}.`);
             await refresh();
             if (after) await after();
-            navigate(`workspace/${encodeURIComponent(project.name)}`);
+            navigate(`projects/${encodeURIComponent(project.name)}`);
         },
     });
 }

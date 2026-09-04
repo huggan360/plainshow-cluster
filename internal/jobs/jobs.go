@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -44,9 +45,13 @@ type running struct {
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	tail   []LogLine
-	seq    int
-	mu     sync.Mutex
+	// stopping is set before TERM is sent. On a fast machine the child can
+	// exit between that signal and cancel(), so ctx.Err() alone cannot tell a
+	// requested stop from an ordinary non-zero exit.
+	stopping atomic.Bool
+	tail     []LogLine
+	seq      int
+	mu       sync.Mutex
 }
 
 // Supervisor starts, tracks and stops jobs on this machine.
@@ -255,7 +260,7 @@ func (s *Supervisor) exec(job store.Job, environment map[string]string) {
 	delete(s.live, job.ID)
 	s.mu.Unlock()
 
-	state, code, msg := classify(ctx, waitErr)
+	state, code, msg := classify(ctx, waitErr, live.stopping.Load())
 	_ = s.store.FinishJob(job.ID, state, code, msg)
 
 	job.State = state
@@ -298,8 +303,8 @@ func (s *Supervisor) recordOutput(live *running, jobID, stream, text string, log
 }
 
 // classify turns a Wait error into the job's terminal state.
-func classify(ctx context.Context, err error) (state string, code int, msg string) {
-	if ctx.Err() != nil {
+func classify(ctx context.Context, err error, stopping bool) (state string, code int, msg string) {
+	if stopping || ctx.Err() != nil {
 		return store.JobStopped, -1, "stopped"
 	}
 	if err == nil {
@@ -371,6 +376,7 @@ func (s *Supervisor) Stop(id string) error {
 	if !ok {
 		return fmt.Errorf("job %s is not running", id)
 	}
+	live.stopping.Store(true)
 	if live.cmd.Process != nil {
 		pgid, err := syscall.Getpgid(live.cmd.Process.Pid)
 		if err == nil {

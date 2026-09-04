@@ -1,5 +1,5 @@
 [Unit]
-Description=PlainShow Cluster node
+Description=Plainshow Cluster node
 After=network-online.target tailscaled.service
 Wants=network-online.target tailscaled.service
 

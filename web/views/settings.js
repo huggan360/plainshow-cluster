@@ -125,7 +125,7 @@ export async function renderSettings(host) {
                 toggle(worker, 'enabled', 'Accept work',
                     'Turn this off and the machine stays in the cluster but runs nothing.'),
                 toggle(worker, 'allow_jobs', 'Scripts and commands',
-                    'Run project code submitted from the workspace.'),
+                    'Run project code submitted from the branch editor.'),
                 toggle(worker, 'allow_gpu', 'GPU access',
                     'Let jobs use the accelerators on this machine.'),
                 toggle(worker, 'allow_terminal', 'Terminal access',

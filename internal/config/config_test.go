@@ -18,7 +18,7 @@ func TestLayoutStaysUnderOneRoot(t *testing.T) {
 		t.Fatalf("NewLayout: %v", err)
 	}
 	paths := append(l.Dirs(),
-		l.ConfigFile(), l.Database(), l.DeviceKey(), l.PIDFile())
+		l.ConfigFile(), l.Database(), l.DeviceKey(), l.PIDFile(), l.RuntimeFile(), l.RayState())
 
 	for _, p := range paths {
 		if p != l.Root && !strings.HasPrefix(p, l.Root+string(filepath.Separator)) {

@@ -4,7 +4,7 @@
 // job model for work Ray owns.
 
 import { el, mount, ago } from '../lib/ui.js';
-import { api, on, navigate } from '../lib/client.js';
+import { api, on, navigate, modal, toast } from '../lib/client.js';
 
 export async function renderJobs(host) {
     const page = el('div', { class: 'page' });
@@ -32,13 +32,13 @@ export async function renderJobs(host) {
                         el('span', { class: 'grow' }, 'Running'),
                         el('span', { class: 'chip' }, String(running.length))),
                     running.length
-                        ? el('div', { class: 'rows' }, ...running.map(jobRow))
+                        ? el('div', { class: 'rows' }, ...running.map((job) => jobRow(job, draw)))
                         : empty('Nothing is running right now.'))),
 
             el('div', { class: 'panel' },
                 el('div', { class: 'panel__head' }, 'Recent'),
                 jobs.length
-                    ? el('div', { class: 'rows' }, ...jobs.slice(0, 25).map(jobRow))
+                    ? el('div', { class: 'rows' }, ...jobs.slice(0, 25).map((job) => jobRow(job, draw)))
                     : empty(listing.detail || 'Ray has not run anything yet.',
                         'Read How to for the three commands that start a run.')));
     };
@@ -80,7 +80,7 @@ function clusterCard(status) {
                     }, 'How to start one'))));
 }
 
-function jobRow(job) {
+function jobRow(job, redraw) {
     const tone = { RUNNING: 'chip--cyan', PENDING: 'chip--warn', SUCCEEDED: 'chip--good',
         FAILED: 'chip--bad', STOPPED: '' }[job.status] || '';
     return el('div', { class: 'row', style: 'cursor:default;align-items:flex-start' },
@@ -90,12 +90,37 @@ function jobRow(job) {
             el('span', { class: 'row__meta' },
                 [job.id, job.started_at ? ago(new Date(job.started_at).toISOString()) : null,
                     job.message].filter(Boolean).join(' · '))),
-        el('span', { class: `chip ${tone}` }, (job.status || '').toLowerCase()));
+        el('span', { class: `chip ${tone}` }, (job.status || '').toLowerCase()),
+		el('button', { class: 'btn btn--sm', onclick: () => showLogs(job) }, 'Logs'),
+		['PENDING', 'RUNNING'].includes(job.status) ? el('button', {
+			class: 'btn btn--sm btn--danger',
+			onclick: async () => {
+				try {
+					await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/stop`, { method: 'POST' });
+					toast('Ray is stopping the job.');
+					await redraw();
+				} catch (error) { toast(error.message, 'err'); }
+			},
+		}, 'Stop') : null);
+}
+
+async function showLogs(job) {
+	let text = 'Loading logs…';
+	try {
+		const response = await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/logs`);
+		text = response.logs || 'This job has not written any output.';
+	} catch (error) { text = error.message; }
+	modal({
+		title: `Logs · ${job.id}`,
+		confirmLabel: 'Close',
+		body: () => el('pre', { class: 'console', style: 'max-height:60vh;white-space:pre-wrap' }, text),
+		onConfirm: (close) => close(),
+	});
 }
 
 function empty(text, hint) {
     return el('div', { class: 'empty' },
-        el('span', { class: 'empty__ico' }, '○'),
+		el('i', { class: 'bx bx-task empty__ico' }),
         el('span', { class: 'empty__text' }, text),
         hint ? el('span', { class: 'muted', style: 'font-size:12px' }, hint) : null);
 }

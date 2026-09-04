@@ -79,6 +79,16 @@ type EnterpriseNetwork struct {
 	Created        string `json:"created_at"`
 }
 
+// EnterpriseMember is the non-secret account identity and role shared with
+// devices that have proved membership in the same network.
+type EnterpriseMember struct {
+	AccountID   string `json:"account_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	Joined      string `json:"joined_at"`
+}
+
 // NodeCheckIn is aggregate metadata only. It intentionally has no project
 // names, commands, logs, addresses, keys, datasets or artifacts.
 type NodeCheckIn struct {
@@ -497,6 +507,80 @@ func (s *Store) GrantNetworkMember(actorID, networkID, managementKey, accountID,
 	}
 	if _, err := tx.Exec(`INSERT INTO network_member(network_id,account_id,role,joined_at)
         VALUES(?,?,?,?)`, networkID, accountID, role, now()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// NetworkMembers lists identities inside one network. Callers authenticate
+// and prove network membership before this is returned by the HTTP layer.
+func (s *Store) NetworkMembers(networkID string) ([]EnterpriseMember, error) {
+	rows, err := s.db.Query(`SELECT m.account_id,a.username,a.display_name,m.role,m.joined_at
+		FROM network_member m JOIN account a ON a.id=m.account_id
+		WHERE m.network_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+		lower(a.username)`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	members := []EnterpriseMember{}
+	for rows.Next() {
+		var member EnterpriseMember
+		if err := rows.Scan(&member.AccountID, &member.Username, &member.DisplayName,
+			&member.Role, &member.Joined); err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	return members, rows.Err()
+}
+
+// SetNetworkMemberRole changes a non-owner member. The enterprise registry is
+// authoritative, so devices cannot create a local privilege that disappears
+// on the next account check-in.
+func (s *Store) SetNetworkMemberRole(actorID, networkID, managementKey, accountID, role string) error {
+	if !validNetworkRole(role) || role == "owner" {
+		return errors.New("invalid network role")
+	}
+	return s.changeNetworkMember(actorID, networkID, managementKey, accountID, role, false)
+}
+
+// RemoveNetworkMember removes a non-owner account from a network.
+func (s *Store) RemoveNetworkMember(actorID, networkID, managementKey, accountID string) error {
+	return s.changeNetworkMember(actorID, networkID, managementKey, accountID, "", true)
+}
+
+func (s *Store) changeNetworkMember(actorID, networkID, managementKey, accountID, role string, remove bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var key, actorRole, targetRole string
+	if err := tx.QueryRow(`SELECT management_key FROM network WHERE id=?`, networkID).Scan(&key); err != nil {
+		return ErrNotFound
+	}
+	if subtle.ConstantTimeCompare([]byte(key), []byte(managementKey)) != 1 {
+		return ErrNetworkKey
+	}
+	if err := tx.QueryRow(`SELECT role FROM network_member WHERE network_id=? AND account_id=?`,
+		networkID, actorID).Scan(&actorRole); err != nil || (actorRole != "owner" && actorRole != "admin") {
+		return errors.New("network administrator access is required")
+	}
+	if err := tx.QueryRow(`SELECT role FROM network_member WHERE network_id=? AND account_id=?`,
+		networkID, accountID).Scan(&targetRole); err != nil {
+		return ErrNotFound
+	}
+	if targetRole == "owner" {
+		return errors.New("the network owner cannot be changed or removed")
+	}
+	if remove {
+		_, err = tx.Exec(`DELETE FROM network_member WHERE network_id=? AND account_id=?`, networkID, accountID)
+	} else {
+		_, err = tx.Exec(`UPDATE network_member SET role=? WHERE network_id=? AND account_id=?`,
+			role, networkID, accountID)
+	}
+	if err != nil {
 		return err
 	}
 	return tx.Commit()

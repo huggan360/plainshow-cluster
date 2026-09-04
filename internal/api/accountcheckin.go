@@ -77,6 +77,7 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		if syncErr != nil {
 			continue
 		}
+		s.syncEnterpriseMembers(membership.ID, access.Members)
 		var selected *store.NetworkController
 		if access.Controller.Address != "" {
 			selected = &store.NetworkController{NetworkID: membership.ID, ID: access.Controller.ID,
@@ -94,4 +95,39 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	_ = client.CheckIn(requestCtx, token, checkIn)
+}
+
+func (s *Server) syncEnterpriseMembers(networkID string, members []accountserver.EnterpriseMember) {
+	seen := make(map[string]bool, len(members))
+	configurationChanged := false
+	for _, member := range members {
+		if member.AccountID == "" || !store.ValidNetworkRole(member.Role) {
+			continue
+		}
+		seen[member.AccountID] = true
+		_ = s.store.UpsertAccount(store.Account{ID: member.AccountID, Username: member.Username,
+			DisplayName: member.DisplayName})
+		_ = s.store.AddNetworkMember(networkID, member.AccountID, member.Role)
+		if member.AccountID == s.cfg.Account.ID {
+			for index := range s.cfg.Memberships {
+				membership := &s.cfg.Memberships[index]
+				if membership.ID == networkID && membership.AccountRole != member.Role {
+					membership.AccountRole = member.Role
+					configurationChanged = true
+				}
+			}
+		}
+	}
+	current, err := s.store.NetworkMembers(networkID)
+	if err != nil {
+		return
+	}
+	for _, member := range current {
+		if !seen[member.Account.ID] {
+			_ = s.store.RemoveNetworkMember(networkID, member.Account.ID)
+		}
+	}
+	if configurationChanged {
+		_ = config.Save(s.layout, s.cfg)
+	}
 }

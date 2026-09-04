@@ -7,13 +7,15 @@ BINARY            := pscluster
 PKG               := ./cmd/pscluster
 ADMIN_BINARY      := pscluster-admin
 ADMIN_PKG         := ./cmd/pscluster-admin
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0-dev)
+DESKTOP_BINARY    := plainshow-cluster-desktop
+DESKTOP_PKG       := ./cmd/plainshow-cluster-desktop
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.1-dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build check test vet fmt web installer-check clean install install-admin dist arch-package release run smoke
+.PHONY: all build desktop check test vet fmt web installer-check clean install install-admin dist arch-package release run smoke
 
 all: build
 
@@ -22,6 +24,10 @@ build: web
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(ADMIN_BINARY) $(ADMIN_PKG)
 	@echo "built ./$(BINARY) and ./$(ADMIN_BINARY)  $(VERSION)"
+
+## desktop: build the real Linux GTK/WebKit application for this machine
+desktop:
+	go build -trimpath -tags "desktop,webkit2_41,production" -ldflags "$(LDFLAGS)" -o $(DESKTOP_BINARY) $(DESKTOP_PKG)
 
 ## web: verify the interface's module graph before embedding it
 web:
@@ -33,6 +39,7 @@ installer-check:
 	@bash -n packaging/arch/plainshow-cluster.install
 	@sed -e 's/@VERSION@/1.0.0/g' -e 's/@ARCH@/x86_64/g' \
 		-e 's/@BINARY_SHA256@/abc/g' -e 's/@WRAPPER_SHA256@/def/g' \
+		-e 's/@DESKTOP_BINARY_SHA256@/456/g' \
 		-e 's/@SERVICE_SHA256@/123/g' \
 		packaging/arch/PKGBUILD.in | bash -n
 	@echo "installer and Arch packaging syntax clean"
@@ -102,7 +109,7 @@ dist: web
 ##
 ## makepkg is deliberately not installed by this target. On Arch it comes from
 ## pacman/base-devel; release CI also builds and publishes the x86_64 package.
-arch-package: dist
+arch-package: dist desktop
 	@command -v makepkg >/dev/null 2>&1 || { \
 		echo "makepkg is required; on Arch install the base-devel group"; exit 1; \
 	}
@@ -116,11 +123,13 @@ arch-package: dist
 	work=dist/arch-package; \
 	mkdir -p "$$work"; \
 	cp "dist/$(BINARY)-linux-$$asset_arch" "$$work/pscluster.seed"; \
+	cp "$(DESKTOP_BINARY)" "$$work/plainshow-cluster-desktop"; \
 	cp packaging/arch/pscluster-wrapper packaging/arch/plainshow-cluster.service \
 		packaging/arch/plainshow-cluster.install "$$work/"; \
 	cp packaging/desktop/plainshow-cluster.desktop \
 		packaging/desktop/plainshow-cluster-*.png "$$work/"; \
 	binary_sha=$$(sha256sum "$$work/pscluster.seed" | cut -d ' ' -f 1); \
+	desktop_binary_sha=$$(sha256sum "$$work/plainshow-cluster-desktop" | cut -d ' ' -f 1); \
 	wrapper_sha=$$(sha256sum "$$work/pscluster-wrapper" | cut -d ' ' -f 1); \
 	service_sha=$$(sha256sum "$$work/plainshow-cluster.service" | cut -d ' ' -f 1); \
 	desktop_sha=$$(sha256sum "$$work/plainshow-cluster.desktop" | cut -d ' ' -f 1); \
@@ -130,6 +139,7 @@ arch-package: dist
 	icon256_sha=$$(sha256sum "$$work/plainshow-cluster-256.png" | cut -d ' ' -f 1); \
 	sed -e "s/@VERSION@/$$version/g" -e "s/@ARCH@/$$package_arch/g" \
 		-e "s/@BINARY_SHA256@/$$binary_sha/g" -e "s/@WRAPPER_SHA256@/$$wrapper_sha/g" \
+		-e "s/@DESKTOP_BINARY_SHA256@/$$desktop_binary_sha/g" \
 		-e "s/@SERVICE_SHA256@/$$service_sha/g" \
 		-e "s/@DESKTOP_SHA256@/$$desktop_sha/g" \
 		-e "s/@ICON48_SHA256@/$$icon48_sha/g" -e "s/@ICON64_SHA256@/$$icon64_sha/g" \
@@ -165,4 +175,4 @@ run: build
 	./$(BINARY) serve --root ./.devnode
 
 clean:
-	rm -rf $(BINARY) $(ADMIN_BINARY) dist .devnode .smokenode .smokepid
+	rm -rf $(BINARY) $(ADMIN_BINARY) $(DESKTOP_BINARY) dist .devnode .smokenode .smokepid

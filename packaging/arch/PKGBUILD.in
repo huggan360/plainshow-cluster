@@ -6,16 +6,17 @@ pkgdesc='Peer-to-peer AI task cluster and collaborative PlainShow workspace'
 arch=('@ARCH@')
 url='https://github.com/huggan360/plainshow-cluster'
 license=('custom')
-depends=('ca-certificates' 'git' 'tailscale' 'util-linux' 'python' 'python-pip')
+depends=('ca-certificates' 'git' 'tailscale' 'util-linux' 'python' 'python-pip'
+         'gtk3' 'webkit2gtk-4.1')
 provides=('plainshow-cluster')
 conflicts=('plainshow-cluster-git')
 options=('!debug')
 install=plainshow-cluster.install
-source=('pscluster.seed' 'pscluster-wrapper' 'plainshow-cluster.service'
+source=('pscluster.seed' 'plainshow-cluster-desktop' 'pscluster-wrapper' 'plainshow-cluster.service'
         'plainshow-cluster.desktop'
         'plainshow-cluster-48.png' 'plainshow-cluster-64.png'
         'plainshow-cluster-128.png' 'plainshow-cluster-256.png')
-sha256sums=('@BINARY_SHA256@' '@WRAPPER_SHA256@' '@SERVICE_SHA256@'
+sha256sums=('@BINARY_SHA256@' '@DESKTOP_BINARY_SHA256@' '@WRAPPER_SHA256@' '@SERVICE_SHA256@'
             '@DESKTOP_SHA256@'
             '@ICON48_SHA256@' '@ICON64_SHA256@'
             '@ICON128_SHA256@' '@ICON256_SHA256@')
@@ -23,6 +24,8 @@ sha256sums=('@BINARY_SHA256@' '@WRAPPER_SHA256@' '@SERVICE_SHA256@'
 package() {
     install -Dm755 "$srcdir/pscluster.seed" \
         "$pkgdir/usr/lib/plainshow-cluster/pscluster"
+    install -Dm755 "$srcdir/plainshow-cluster-desktop" \
+        "$pkgdir/usr/lib/plainshow-cluster/plainshow-cluster-desktop"
     install -Dm755 "$srcdir/pscluster-wrapper" "$pkgdir/usr/bin/pscluster"
     install -Dm644 "$srcdir/plainshow-cluster.desktop" \
         "$pkgdir/usr/share/applications/plainshow-cluster.desktop"

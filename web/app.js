@@ -7,7 +7,7 @@ import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized, toast } from './lib/client.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
-import { renderProjects } from './views/projects.js';
+import { newProject, renderProjects } from './views/projects.js';
 import { renderHowTo } from './views/howto.js';
 import { renderSettings } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
@@ -15,13 +15,13 @@ import { renderGate } from './views/signin.js';
 import { renderNetworks } from './views/networks.js';
 
 const ROUTES = [
-    { id: 'home', label: 'Home', icon: '⌂', render: renderHome },
-    { id: 'networks', label: 'Networks', icon: '◇', render: renderNetworks },
-    { id: 'projects', label: 'Projects', icon: '◫', render: renderProjects },
-    { id: 'jobs', label: 'Jobs', icon: '▤', render: renderJobs },
-    { id: 'github', label: 'GitHub', icon: '⑂', render: renderGitHub },
-    { id: 'howto', label: 'How to', icon: '?', render: renderHowTo },
-    { id: 'settings', label: 'Settings', icon: '⚙', render: renderSettings },
+    { id: 'home', label: 'Home', icon: 'bx-home-alt-2', render: renderHome },
+    { id: 'networks', label: 'Networks', icon: 'bx-network-chart', render: renderNetworks },
+    { id: 'projects', label: 'Projects', icon: 'bx-layer', render: renderProjects },
+    { id: 'jobs', label: 'Jobs', icon: 'bx-task', render: renderJobs },
+    { id: 'github', label: 'GitHub', icon: 'bxl-github', render: renderGitHub },
+    { id: 'howto', label: 'How to', icon: 'bx-help-circle', render: renderHowTo },
+    { id: 'settings', label: 'Settings', icon: 'bx-cog', render: renderSettings },
 ];
 
 /** parseRoute reads the hash as a route id plus its arguments. */
@@ -45,7 +45,8 @@ async function renderRoute() {
         node.classList.toggle('nav__item--on', on);
         node.querySelector('.nav__dot').classList.toggle('hide', !on);
     });
-    document.getElementById('top-title').textContent = route.label;
+    const title = document.getElementById('top-title');
+    if (title) title.textContent = route.label;
 
     const host = document.getElementById('view');
     mount(host, el('div', { class: 'page' },
@@ -65,6 +66,7 @@ async function renderRoute() {
 /** shell builds the sidebar and page frame around the routed view. */
 function shell(overview) {
     const node = overview.node;
+	const account = overview.account || {};
 	let railScrim;
 	const closeRail = () => {
 		rail.classList.remove('rail--open');
@@ -79,27 +81,35 @@ function shell(overview) {
         el('div', { class: 'brand' },
 			plainshowLogo('cluster')),
         el('nav', { class: 'nav' },
-            el('p', { class: 'nav__label' }, 'Cluster'),
+            el('p', { class: 'nav__label' }, 'Workspace'),
             ...ROUTES.map((r) => el('a', {
                 class: 'nav__item', href: `#/${r.id}`, dataset: { route: r.id },
 				onclick: closeRail,
             },
-                el('span', { class: 'nav__ico' }, r.icon),
+                el('i', { class: `bx ${r.icon} nav__ico`, 'aria-hidden': 'true' }),
                 el('span', {}, r.label),
                 el('span', { class: 'nav__dot hide' })))),
         el('div', { class: 'nodecard' },
             el('div', { class: 'nodecard__row' },
                 el('span', { class: 'nodecard__avatar' }, initials(node.name)),
                 el('span', { style: 'min-width:0;flex:1' },
-                    el('span', { class: 'nodecard__name' }, node.name),
-                    el('span', { class: 'nodecard__meta' }, node.roles.join(' · ')))),
+                    el('span', { class: 'nodecard__name' }, account.display_name || node.name),
+                    el('span', { class: 'nodecard__meta' }, account.username
+						? `@${account.username}` : node.name))),
             el('div', { class: 'nodecard__foot' },
                 el('span', {}, `v${overview.version}`),
                 el('span', { style: 'display:flex;align-items:center;gap:6px' },
                     el('span', { class: 'dot dot--off', id: 'conn-dot' }),
                     el('span', {
                         class: 'mono', id: 'conn-label', style: 'font-size:10px',
-                    }, 'offline')))));
+                    }, 'offline')),
+				el('button', {
+					class: 'tree__action', title: 'Sign out', 'aria-label': 'Sign out',
+					onclick: async () => {
+						await api('/api/auth/logout', { method: 'POST', body: {} });
+						location.reload();
+					},
+				}, el('i', { class: 'bx bx-log-out' })))));
 	railScrim = el('button', {
 		class: 'rail-scrim', 'aria-label': 'Close navigation', onclick: closeRail,
 	});
@@ -128,10 +138,12 @@ function shell(overview) {
 				class: 'btn btn--icon btn--sm mobile-menu', id: 'menu',
                 'aria-label': 'Toggle navigation',
 				onclick: toggleRail,
-            }, '☰'),
-            el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
+            }, el('i', { class: 'bx bx-menu' })),
+			el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
-            networkPicker),
+            networkPicker,
+			el('button', { class: 'btn btn--sm', onclick: () => newProject(), title: 'New project' },
+				el('i', { class: 'bx bx-plus' }), el('span', {}, 'New project'))),
         el('div', { id: 'view' }));
 
     return [railScrim, rail, main];

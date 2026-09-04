@@ -33,12 +33,12 @@ export function teamPanel(project, onChange) {
                     ? el('button', {
                         class: 'btn btn--sm', title: 'Match this list with the repository',
                         onclick: () => sync(project, load),
-                    }, 'Sync')
+                    }, el('i', { class: 'bx bx-sync' }), 'Sync')
                     : null,
                 el('button', {
                     class: 'btn btn--sm btn--primary',
                     onclick: () => addPerson(project, load),
-                }, '+ Add')),
+                }, el('i', { class: 'bx bx-user-plus' }), 'Add')),
 
             el('div', { class: 'rows' },
                 ...data.members.map((m) => memberRow(project, m, load))),
@@ -79,7 +79,7 @@ function memberRow(project, member, reload) {
                 ? el('button', {
                     class: 'btn btn--sm btn--icon', title: 'Change access',
                     onclick: () => editAccess(project, member, reload),
-                }, '⋯')
+                }, el('i', { class: 'bx bx-dots-horizontal-rounded' }))
                 : null));
 }
 
@@ -255,7 +255,7 @@ export function repositoryPanel(project, reloadTree) {
                         class: 'mono', style: 'font-size:11.5px',
                         href: `https://github.com/${git.repository}`,
                         target: '_blank', rel: 'noreferrer',
-                    }, git.repository, ' ↗'),
+                    }, git.repository, ' ', el('i', { class: 'bx bx-link-external' })),
                     el('span', { style: 'flex:1' }),
                     el('button', {
                         class: 'btn btn--sm', onclick: () => unlink(project, load),
@@ -405,7 +405,7 @@ function unlink(project, reload) {
 
 function commit(project, reload) {
     const message = el('input', {
-        class: 'input', placeholder: 'What changed?', value: 'Update from the workspace',
+        class: 'input', placeholder: 'What changed?', value: 'Update current branch',
     });
     modal({
         title: 'Commit changes',

@@ -1,0 +1,53 @@
+/* Boxicons 2.1.4 — locally bundled so the desktop UI keeps its real icons
+ * when the machine has no public internet connection. Only the glyph classes
+ * used by Plainshow Cluster are retained from the upstream icon stylesheet. */
+@font-face {
+    font-family: boxicons;
+    font-style: normal;
+    font-weight: 400;
+    font-display: block;
+    src: url('/fonts/boxicons.woff2') format('woff2');
+}
+.bx {
+    display: inline-block;
+    font-family: boxicons !important;
+    font-style: normal;
+    font-variant: normal;
+    font-weight: 400;
+    line-height: 1;
+    text-rendering: auto;
+    text-transform: none;
+    speak: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.bx-home-alt-2:before{content:"\ef2d"}.bx-network-chart:before{content:"\eb9e"}
+.bx-grid-alt:before{content:"\eafb"}
+.bx-folder:before{content:"\eadf"}.bx-task:before{content:"\ec3e"}
+.bxl-github:before{content:"\e93a"}.bx-help-circle:before{content:"\eb0d"}
+.bx-cog:before{content:"\ea6e"}.bx-layer:before{content:"\eb2e"}
+.bx-right-arrow-alt:before{content:"\ebe6"}.bx-left-arrow-alt:before{content:"\eb33"}
+.bx-broadcast:before{content:"\ea05"}.bx-git-commit:before{content:"\eaf1"}
+.bx-play:before{content:"\ebbd"}.bx-stop-circle:before{content:"\ec2c"}
+.bx-chip:before{content:"\ea5a"}.bx-server:before{content:"\ebfd"}
+.bx-memory-card:before{content:"\eb5e"}.bx-hdd:before{content:"\eb06"}
+.bx-devices:before{content:"\ea98"}.bx-slider-alt:before{content:"\ec17"}
+.bx-user:before{content:"\ec63"}.bx-group:before{content:"\eaff"}
+.bx-plus:before{content:"\ebc0"}.bx-link-external:before{content:"\eb3e"}
+.bx-upload:before{content:"\ec5f"}.bx-refresh:before{content:"\ebd9"}
+.bx-file:before{content:"\ead5"}.bx-save:before{content:"\ebf4"}
+.bx-download:before{content:"\eab9"}.bx-edit-alt:before{content:"\eac0"}
+.bx-trash:before{content:"\ec50"}.bx-x:before{content:"\ec8d"}
+.bx-search:before{content:"\ebf7"}.bx-code-alt:before{content:"\ea69"}
+.bx-terminal:before{content:"\ec42"}.bx-git-branch:before{content:"\eaf0"}
+.bx-history:before{content:"\eb10"}.bx-check-circle:before{content:"\ea46"}
+.bx-error-circle:before{content:"\eac7"}.bx-link:before{content:"\eb3c"}
+.bx-unlink:before{content:"\ec5b"}.bx-bell:before{content:"\e9d2"}
+.bx-rocket:before{content:"\ebeb"}.bx-show:before{content:"\ec0c"}
+.bx-map-alt:before{content:"\eb57"}.bx-globe:before{content:"\eaf8"}
+.bx-menu:before{content:"\eb5f"}.bx-log-out:before{content:"\eb4f"}
+.bx-chevron-right:before{content:"\ea50"}.bx-chevron-down:before{content:"\ea4a"}
+.bx-user-plus:before{content:"\ec68"}.bx-copy:before{content:"\ea84"}
+.bx-wifi:before{content:"\ec7c"}.bx-wifi-off:before{content:"\ec80"}
+.bx-dots-horizontal-rounded:before{content:"\eab2"}.bx-file-blank:before{content:"\ead6"}
+.bx-folder-plus:before{content:"\eae2"}.bx-sync:before{content:"\ec37"}

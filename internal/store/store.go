@@ -232,6 +232,7 @@ type Project struct {
 	Repository  string `json:"repository"`
 	Created     string `json:"created_at"`
 	Updated     string `json:"updated_at"`
+	Branch      string `json:"branch,omitempty"`
 }
 
 // CreateProject records a new project, filling in its timestamps so the caller
@@ -244,6 +245,22 @@ func (s *Store) CreateProject(p *Project) error {
         VALUES (?, ?, ?, ?, ?, ?)`,
 		p.ID, p.NetworkID, p.Name, p.Description, now, now)
 	return err
+}
+
+func (s *Store) UpdateProjectDescription(id, description string) error {
+	result, err := s.db.Exec(`UPDATE project SET description=?, updated_at=? WHERE id=?`,
+		description, Now(), id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Projects lists all projects, most recently touched first.

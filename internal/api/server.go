@@ -28,6 +28,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/huggan360/plainshow-cluster/internal/brand"
+	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
@@ -48,11 +49,14 @@ type Server struct {
 	store         *store.Store
 	hub           *events.Hub
 	sup           *jobs.Supervisor
+	collab        *collab.Manager
 	updater       *updater.Updater
 	device        *identity.Device
 	fingerprint   string
 	remoteMu      sync.RWMutex
 	tailnetMu     sync.Mutex
+	rayMu         sync.RWMutex
+	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
 	remoteClients map[string]peerTransport
 	remoteLogs    map[string][]jobs.LogLine
@@ -65,7 +69,7 @@ func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
 	sup *jobs.Supervisor, up *updater.Updater,
 	device *identity.Device, fingerprint string, web fs.FS) *Server {
 	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
-		updater: up, device: device, fingerprint: fingerprint,
+		collab: collab.New(st), updater: up, device: device, fingerprint: fingerprint,
 		remoteClients: make(map[string]peerTransport), remoteLogs: make(map[string][]jobs.LogLine),
 		web: web}
 }
@@ -102,11 +106,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ray/start", s.startRay)
 	mux.HandleFunc("POST /api/ray/stop", s.stopRay)
 	mux.HandleFunc("GET /api/ray/jobs", s.getRayJobs)
+	mux.HandleFunc("POST /api/ray/jobs", s.submitRayJob)
+	mux.HandleFunc("GET /api/ray/jobs/{id}/logs", s.rayJobLogs)
+	mux.HandleFunc("POST /api/ray/jobs/{id}/stop", s.stopRayJob)
 	mux.HandleFunc("GET /api/networks", s.listNetworks)
 	mux.HandleFunc("POST /api/networks", s.createNetwork)
+	mux.HandleFunc("GET /api/networks/{id}", s.networkDetail)
 	mux.HandleFunc("PUT /api/networks/{id}/active", s.activateNetwork)
 	mux.HandleFunc("GET /api/networks/{id}/nodes", s.networkNodes)
 	mux.HandleFunc("GET /api/networks/{id}/members", s.networkMembers)
+	mux.HandleFunc("PUT /api/networks/{id}/members/{account}", s.updateNetworkMember)
+	mux.HandleFunc("DELETE /api/networks/{id}/members/{account}", s.removeNetworkMember)
 	mux.HandleFunc("PUT /api/networks/{id}/policy", s.updateNetworkPolicy)
 	mux.HandleFunc("PUT /api/networks/{id}/management-key", s.updateNetworkManagementKey)
 	mux.HandleFunc("POST /api/networks/{id}/invites", s.createNetworkInvite)
@@ -115,12 +125,14 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("POST /api/projects", s.createProject)
+	mux.HandleFunc("PUT /api/projects/{name}", s.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{name}", s.deleteProject)
 	mux.HandleFunc("GET /api/projects/{name}/tree", s.projectTree)
 	mux.HandleFunc("GET /api/projects/{name}/file", s.readFile)
 	mux.HandleFunc("PUT /api/projects/{name}/file", s.writeFile)
 	mux.HandleFunc("GET /api/projects/{name}/raw", s.downloadFile)
 	mux.HandleFunc("POST /api/projects/{name}/upload", s.uploadFile)
+	mux.HandleFunc("GET /api/projects/{name}/collab", s.openCollabDocument)
 	mux.HandleFunc("POST /api/projects/{name}/dir", s.createDir)
 	mux.HandleFunc("POST /api/projects/{name}/rename", s.renameEntry)
 	mux.HandleFunc("DELETE /api/projects/{name}/entry", s.deleteEntry)
@@ -250,6 +262,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	s.decorateProjects(projects)
 	active, err := s.store.ActiveJobs()
 	if err != nil {
 		fail(w, 500, err.Error())
@@ -260,7 +273,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	networks, _ := s.store.Networks(s.cfg.AccountID())
+	networks, _ := s.networkSummaries()
 	controllers, _ := s.store.NetworkControllers(s.cfg.ActiveNetwork)
 	var activeController any
 	if len(controllers) > 0 {
@@ -283,6 +296,10 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 			"roles": s.cfg.RoleNames(),
 			"root":  s.layout.Root,
 		},
+		"account": map[string]string{
+			"id": s.cfg.Account.ID, "username": s.cfg.Account.Username,
+			"display_name": s.cfg.Account.DisplayName,
+		},
 		"version":        version.Version,
 		"networks":       networks,
 		"active_network": s.cfg.ActiveNetwork,
@@ -290,6 +307,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		"projects":       projects,
 		"active_jobs":    active,
 		"recent_jobs":    recent,
+		"recent_commits": s.recentCommits(projects, 12),
 		"system":         sysinfo.Probe(s.layout.Root),
 		"git_available":  gitrepo.Available(),
 		"github":         map[string]bool{"connected": s.tokenStore().Connected()},
@@ -319,6 +337,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	s.decorateProjects(projects)
 	writeJSON(w, 200, projects)
 }
 
@@ -371,6 +390,32 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	s.seedOwner(p)
 	s.hub.Publish("project.created", p)
 	writeJSON(w, 201, p)
+}
+
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
+	p, _, err := s.project(r.PathValue("name"))
+	if err != nil {
+		fail(w, http.StatusNotFound, "No such project.")
+		return
+	}
+	var body struct {
+		Description string `json:"description"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(body.Description) > 500 {
+		fail(w, http.StatusBadRequest, "The project description may be at most 500 characters.")
+		return
+	}
+	if err := s.store.UpdateProjectDescription(p.ID, strings.TrimSpace(body.Description)); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	p.Description = strings.TrimSpace(body.Description)
+	s.hub.Publish("project.updated", p)
+	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +491,10 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
+	if err := s.collab.Reset(p.NetworkID, p.ID, body.Path); err != nil {
+		fail(w, 500, "The file was saved, but its live-editing state could not be refreshed. Retry the save.")
+		return
+	}
 	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("file.saved", map[string]string{"project": name, "path": body.Path})
 	s.hub.Publish("file.replaced", map[string]string{"project": name, "path": body.Path})
@@ -503,6 +552,10 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if uploadErr != nil {
 			fsError(w, uploadErr)
+			return
+		}
+		if err := s.collab.Reset(p.NetworkID, p.ID, rel); err != nil {
+			fail(w, 500, "The upload finished, but its live-editing state could not be refreshed. Retry the upload.")
 			return
 		}
 		_ = s.store.TouchProjectID(p.ID)
@@ -591,6 +644,14 @@ func (s *Server) renameEntry(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.From); err != nil {
+		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
+		return
+	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.To); err != nil {
+		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
+		return
+	}
 	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("entry.renamed", map[string]string{"project": name, "from": body.From, "to": body.To})
 	s.hub.Publish("tree.changed", map[string]string{"project": name})
@@ -607,6 +668,10 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	if err := fsys.Remove(rel); err != nil {
 		fsError(w, err)
+		return
+	}
+	if err := s.collab.ResetTree(p.NetworkID, p.ID, rel); err != nil {
+		fail(w, 500, "The entry was deleted, but its live-editing state could not be refreshed. Reload the workspace.")
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
@@ -969,7 +1034,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 				sub.Close()
 				return
 			}
-			_ = raw
+			s.handleClientEvent(raw)
 		}
 	}()
 
@@ -1049,7 +1114,6 @@ func (s *Server) ListenAndServe(ctx context.Context, onReady func(addr string)) 
 	if err != nil {
 		return err
 	}
-	s.cfg.Network.Port = port
 	if onReady != nil {
 		onReady(fmt.Sprintf("http://%s:%d", displayHost(bind), port))
 	}
@@ -1075,8 +1139,8 @@ func (s *Server) ListenAndServe(ctx context.Context, onReady func(addr string)) 
 	return nil
 }
 
-// listen binds the requested port, or probes upward from the default when the
-// configured port is zero. Nothing assumes a port is free.
+// listen binds the requested port. A zero port lets the operating system choose
+// an unused private port; the desktop and CLI read it from the runtime file.
 func listen(bind string, port int) (net.Listener, int, error) {
 	if port > 0 {
 		ln, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(port)))
@@ -1085,14 +1149,11 @@ func listen(bind string, port int) (net.Listener, int, error) {
 		}
 		return ln, port, nil
 	}
-	for p := config.DefaultPort; p < config.DefaultPort+40; p++ {
-		ln, err := net.Listen("tcp", net.JoinHostPort(bind, strconv.Itoa(p)))
-		if err == nil {
-			return ln, p, nil
-		}
+	ln, err := net.Listen("tcp", net.JoinHostPort(bind, "0"))
+	if err != nil {
+		return nil, 0, fmt.Errorf("could not allocate a private port on %s: %w", bind, err)
 	}
-	return nil, 0, fmt.Errorf("no free port found between %d and %d on %s",
-		config.DefaultPort, config.DefaultPort+40, bind)
+	return ln, ln.Addr().(*net.TCPAddr).Port, nil
 }
 
 func displayHost(bind string) string {

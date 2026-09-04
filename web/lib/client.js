@@ -205,7 +205,9 @@ export function toast(message, kind = 'ok') {
     dismiss.className = 'toast__x';
     dismiss.title = 'Dismiss';
     dismiss.setAttribute('aria-label', 'Dismiss');
-    dismiss.textContent = '×';
+    const dismissIcon = document.createElement('i');
+    dismissIcon.className = 'bx bx-x';
+    dismiss.append(dismissIcon);
     dismiss.addEventListener('click', close);
 
     const node = document.createElement('div');

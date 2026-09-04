@@ -5,10 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
@@ -16,8 +19,69 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 )
 
-func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
+type networkSummary struct {
+	store.Network
+	ProjectCount int  `json:"project_count"`
+	NodeCount    int  `json:"node_count"`
+	GPUCount     int  `json:"gpu_count"`
+	Enabled      bool `json:"enabled"`
+}
+
+func (s *Server) networkSummaries() ([]networkSummary, error) {
 	networks, err := s.store.Networks(s.cfg.AccountID())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]networkSummary, 0, len(networks))
+	for _, network := range networks {
+		projects, projectErr := s.store.ProjectsInNetwork(network.ID)
+		if projectErr != nil {
+			return nil, projectErr
+		}
+		nodes, nodeErr := s.store.NetworkNodes(network.ID)
+		if nodeErr != nil {
+			return nil, nodeErr
+		}
+		summary := networkSummary{Network: network, ProjectCount: len(projects), NodeCount: len(nodes)}
+		for _, membership := range s.cfg.Memberships {
+			if membership.ID == network.ID {
+				summary.Enabled = membership.Enabled
+				break
+			}
+		}
+		for _, node := range nodes {
+			summary.GPUCount += capacityGPUCount(node.Capacity)
+		}
+		out = append(out, summary)
+	}
+	return out, nil
+}
+
+func capacityGPUCount(capacity map[string]any) int {
+	raw, ok := capacity["gpus"]
+	if !ok || raw == nil {
+		return 0
+	}
+	switch values := raw.(type) {
+	case []any:
+		return len(values)
+	case []sysinfo.GPU:
+		return len(values)
+	default:
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return 0
+		}
+		var gpus []sysinfo.GPU
+		if json.Unmarshal(encoded, &gpus) != nil {
+			return 0
+		}
+		return len(gpus)
+	}
+}
+
+func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
+	networks, err := s.networkSummaries()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -25,6 +89,112 @@ func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"active": s.cfg.ActiveNetwork, "networks": networks,
 	})
+}
+
+func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !hasMembership(s.cfg, id) {
+		fail(w, http.StatusNotFound, "This device does not belong to that network.")
+		return
+	}
+	network, err := s.store.NetworkByID(id)
+	if err != nil {
+		fail(w, http.StatusNotFound, "No such network.")
+		return
+	}
+	projects, err := s.store.ProjectsInNetwork(id)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.decorateProjects(projects)
+	nodes, err := s.store.NetworkNodes(id)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	members, err := s.store.NetworkMembers(id)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	controllers, _ := s.store.NetworkControllers(id)
+	for index := range controllers {
+		controllers[index].PublicKey = ""
+		controllers[index].Fingerprint = ""
+		controllers[index].CollabToken = ""
+	}
+	membership := config.MembershipConfig{}
+	for _, item := range s.cfg.Memberships {
+		if item.ID == id {
+			membership = item
+			membership.ManagementKey = ""
+			break
+		}
+	}
+	summary := networkSummary{Network: network, ProjectCount: len(projects), NodeCount: len(nodes),
+		Enabled: membership.Enabled}
+	for _, node := range nodes {
+		summary.GPUCount += capacityGPUCount(node.Capacity)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"network": summary, "membership": membership, "projects": projects,
+		"nodes": nodes, "members": members, "controllers": controllers,
+		"active": id == s.cfg.ActiveNetwork,
+	})
+}
+
+type recentCommit struct {
+	Project string `json:"project"`
+	Branch  string `json:"branch"`
+	Hash    string `json:"hash"`
+	Short   string `json:"short"`
+	Author  string `json:"author"`
+	When    string `json:"when"`
+	Subject string `json:"subject"`
+}
+
+func (s *Server) decorateProjects(projects []store.Project) {
+	for index := range projects {
+		repo := gitrepo.Open(s.projectDir(projects[index]))
+		if repo.IsRepo() {
+			projects[index].Branch = repo.Branch()
+		}
+		if projects[index].Branch == "" {
+			projects[index].Branch = "main"
+		}
+	}
+}
+
+func (s *Server) recentCommits(projects []store.Project, limit int) []recentCommit {
+	if limit <= 0 {
+		return []recentCommit{}
+	}
+	commits := []recentCommit{}
+	for index, project := range projects {
+		if index >= 12 {
+			break
+		}
+		repo := gitrepo.Open(s.projectDir(project))
+		if !repo.IsRepo() {
+			continue
+		}
+		branch := repo.Branch()
+		entries, err := repo.Log(3)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			commits = append(commits, recentCommit{Project: project.Name, Branch: branch,
+				Hash: entry.Hash, Short: entry.Short, Author: entry.Author,
+				When: entry.When, Subject: entry.Subject})
+		}
+	}
+	sort.Slice(commits, func(i, j int) bool { return commits[i].When > commits[j].When })
+	if len(commits) > limit {
+		commits = commits[:limit]
+	}
+	return commits
 }
 
 func (s *Server) networkControllers(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +342,9 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 	membership := config.MembershipConfig{ID: response.Network.ID, Name: response.Network.Name,
 		Roles: []config.Role{config.RoleWorker}, Enabled: true,
 		AccountRole: response.Role, ManagementKey: response.ManagementKey,
-		Coordinator: []string{invite.Endpoint}, Policy: s.cfg.Worker}
+		Coordinator: []string{invite.Endpoint}, Policy: s.cfg.Worker,
+		RayHead: response.Ray.Head, RayHeadNode: response.Ray.NodeID,
+		RayHeadUpdated: response.Ray.Updated}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	s.cfg.SetActiveNetwork(membership.ID)
 	s.cfg.Network.Advertise = strings.TrimRight(body.Endpoint, "/")
@@ -276,6 +448,71 @@ func (s *Server) networkMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, members)
+}
+
+func (s *Server) updateNetworkMember(w http.ResponseWriter, r *http.Request) {
+	s.changeNetworkMember(w, r, false)
+}
+
+func (s *Server) removeNetworkMember(w http.ResponseWriter, r *http.Request) {
+	s.changeNetworkMember(w, r, true)
+}
+
+func (s *Server) changeNetworkMember(w http.ResponseWriter, r *http.Request, remove bool) {
+	networkID, accountID := r.PathValue("id"), r.PathValue("account")
+	actor, err := s.store.NetworkMember(networkID, s.cfg.AccountID())
+	if err != nil || !actor.Permissions.ManageMembers {
+		fail(w, http.StatusForbidden, "Your account cannot manage this network's members.")
+		return
+	}
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !remove && (!store.ValidNetworkRole(body.Role) || body.Role == store.NetworkOwner) {
+		fail(w, http.StatusBadRequest, "Choose admin, operator, member or viewer.")
+		return
+	}
+	managementKey := ""
+	for _, membership := range s.cfg.Memberships {
+		if membership.ID == networkID {
+			managementKey = membership.ManagementKey
+			break
+		}
+	}
+	if s.usesCentralAccounts() {
+		token, tokenErr := config.LoadAccountToken(s.layout)
+		client, clientErr := accountclient.New(s.cfg.Account.Server)
+		if tokenErr != nil || clientErr != nil || token == "" {
+			fail(w, http.StatusServiceUnavailable, "The account service is unavailable; member changes cannot be saved globally.")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		if remove {
+			err = client.RemoveNetworkMember(ctx, token, networkID, managementKey, accountID)
+		} else {
+			err = client.SetNetworkMemberRole(ctx, token, networkID, managementKey, accountID, body.Role)
+		}
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	if remove {
+		err = s.store.RemoveNetworkMember(networkID, accountID)
+	} else {
+		err = s.store.AddNetworkMember(networkID, accountID, body.Role)
+	}
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.Publish("networks.changed", map[string]any{"id": networkID})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) updateNetworkPolicy(w http.ResponseWriter, r *http.Request) {

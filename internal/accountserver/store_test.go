@@ -117,3 +117,41 @@ func TestNetworkRegistryRequiresKeyAndRecordsMembers(t *testing.T) {
 		t.Fatalf("networks = %+v, %v", networks, err)
 	}
 }
+
+func TestNetworkAdministratorsCanChangeAndRemoveMembers(t *testing.T) {
+	store := openTestStore(t)
+	_ = store.InitialiseBootstrap(TokenHash("secret"))
+	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("secret"), true)
+	_ = store.CreateAccount(Account{ID: "admin", Username: "admin", DisplayName: "Admin", PasswordHash: "hash"}, "", true)
+	_ = store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, "", true)
+	key := "0123456789012345678901234567890123456789"
+	if _, err := store.RegisterNetwork("owner", NetworkRegistration{ID: "network", Name: "Lab", ManagementKey: key, Role: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.GrantNetworkMember("owner", "network", key, "admin", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.GrantNetworkMember("owner", "network", key, "member", "member"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNetworkMemberRole("admin", "network", key, "member", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	members, err := store.NetworkMembers("network")
+	if err != nil || len(members) != 3 || members[2].AccountID != "member" || members[2].Role != "operator" {
+		t.Fatalf("members after role update = %+v, %v", members, err)
+	}
+	if err := store.SetNetworkMemberRole("admin", "network", key, "owner", "viewer"); err == nil {
+		t.Fatal("network owner was demoted")
+	}
+	if err := store.RemoveNetworkMember("admin", "network", key, "owner"); err == nil {
+		t.Fatal("network owner was removed")
+	}
+	if err := store.RemoveNetworkMember("admin", "network", key, "member"); err != nil {
+		t.Fatal(err)
+	}
+	members, err = store.NetworkMembers("network")
+	if err != nil || len(members) != 2 {
+		t.Fatalf("members after removal = %+v, %v", members, err)
+	}
+}

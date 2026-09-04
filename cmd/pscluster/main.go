@@ -14,7 +14,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -97,20 +96,19 @@ func usage() {
       Create a node. Everything it stores lives under one directory.
 
   pscluster serve [--root DIR]
-      Run the node and serve the web interface.
+      Run the local node service used by the desktop application.
 
   pscluster status [--root DIR]
       Show what this node is and what it holds.
 
   pscluster run [--root DIR] <command...>
-      Run a command as a job and stream its output.
+      Submit a project command to Ray and stream its output.
 
   pscluster config [--root DIR] [get KEY | set KEY VALUE | path]
       Read or change settings.
 
   pscluster app
-      Open Plainshow Cluster as a desktop program, starting the node if it is
-      not already running.
+      Open the installed Plainshow Cluster desktop application.
 
   pscluster network [list | use ID]
       Show the networks this machine belongs to, or switch the active one.
@@ -468,12 +466,17 @@ func cmdServe(args []string) error {
 	ray.UseManaged(l.RayBinary())
 	srv.StartTelemetry(ctx, 3*time.Second)
 	srv.StartPeerDiscovery(ctx, 30*time.Second)
+	srv.StartRayReconciler(ctx, 15*time.Second)
 	srv.StartAccountCheckIn(ctx, time.Minute)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())
+	defer os.Remove(l.RuntimeFile())
 
 	ready := func(addr string) {
+		if err := config.SaveRuntime(l, config.Runtime{URL: addr, PID: os.Getpid()}); err != nil {
+			log.Printf("could not publish desktop address: %v", err)
+		}
 		fmt.Printf("\n  %s  ·  %s\n\n", version.Product, cfg.Cluster.Name)
 		fmt.Printf("  %s\n\n", addr)
 		fmt.Printf("  node    %s   %s\n", cfg.Node.Name, strings.Join(cfg.RoleNames(), " · "))
@@ -523,9 +526,11 @@ func cmdStatus(args []string) error {
 	defer st.Close()
 
 	projects, _ := st.Projects()
-	active, _ := st.ActiveJobs()
-	recent, _ := st.Jobs(5)
 	info := sysinfo.Probe(l.Root)
+	rayHead := cfg.ActiveMembership().RayHead
+	if rayHead == "" {
+		rayHead = "not started"
+	}
 
 	fmt.Printf("\n  %s  ·  %s\n\n", version.Product, cfg.Cluster.Name)
 	fmt.Printf("  node      %s   %s\n", cfg.Node.Name, strings.Join(cfg.RoleNames(), " · "))
@@ -536,15 +541,7 @@ func cmdStatus(args []string) error {
 	fmt.Printf("  gpu       %s\n", gpuSummary(info))
 	fmt.Printf("  disk      %.0f GB free of %.0f GB\n", info.DiskFreeGB, info.DiskTotalGB)
 	fmt.Printf("  projects  %d\n", len(projects))
-	fmt.Printf("  running   %d\n\n", len(active))
-
-	if len(recent) > 0 {
-		fmt.Printf("  recent jobs\n")
-		for _, j := range recent {
-			fmt.Printf("    %-10s %-9s %s\n", j.ID[:8], j.State, truncate(j.Title, 48))
-		}
-		fmt.Println()
-	}
+	fmt.Printf("  Ray head  %s\n\n", rayHead)
 	return nil
 }
 
@@ -582,65 +579,65 @@ func truncate(s string, n int) string {
 func cmdRun(args []string) error {
 	f := parseFlags(args)
 	if len(f.rest) == 0 {
-		return errors.New("nothing to run\n\n  example:  pscluster run python train.py")
+		return errors.New("nothing to run\n\n  example:  pscluster run --project my-project python train.py")
 	}
-	l, cfg, err := openNode(f)
+	project := strings.TrimSpace(f.get("project", ""))
+	if project == "" {
+		return errors.New("Ray jobs need a project\n\n  example:  pscluster run --project my-project python train.py")
+	}
+	d, _, _, err := openDaemon(f)
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(l.Database())
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	hub := events.NewHub()
-	sup := jobs.NewSupervisor(st, hub, l, cfg)
-
 	command := strings.Join(f.rest, " ")
-	req := jobs.Request{Kind: "script", Command: command, Workdir: l.Root}
-	if name := f.get("project", ""); name != "" {
-		p, err := st.ProjectByNameInNetwork(cfg.ActiveNetwork, name)
-		if err != nil {
-			return fmt.Errorf("no project called %q", name)
-		}
-		req.ProjectID, req.Project = p.ID, p.Name
-		req.Workdir = filepath.Join(l.Projects(), p.NetworkID, p.Name)
-		if _, statErr := os.Stat(req.Workdir); errors.Is(statErr, os.ErrNotExist) {
-			req.Workdir = filepath.Join(l.Projects(), p.Name)
-		}
+	var submitted struct {
+		ID string `json:"id"`
 	}
-
-	sub := hub.Subscribe()
-	defer sub.Close()
-
-	job, err := sup.Start(req)
-	if err != nil {
+	if err := d.call("POST", "/api/ray/jobs", map[string]string{
+		"project": project, "command": command,
+	}, &submitted); err != nil {
 		return err
 	}
-	fmt.Printf("job %s  ·  %s\n\n", job.ID[:8], command)
-
-	for ev := range sub.C {
-		switch ev.Topic {
-		case "job.log":
-			if line, ok := ev.Data.(jobs.LogLine); ok && line.JobID == job.ID {
-				if line.Stream == "stderr" {
-					fmt.Fprintln(os.Stderr, line.Text)
-				} else {
-					fmt.Println(line.Text)
-				}
+	fmt.Printf("Ray job %s  ·  %s\n\n", submitted.ID, command)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	printed := 0
+	for {
+		select {
+		case <-ctx.Done():
+			_ = d.call("POST", "/api/ray/jobs/"+submitted.ID+"/stop", map[string]string{}, nil)
+			return errors.New("job stopped")
+		case <-ticker.C:
+			var logs struct {
+				Logs string `json:"logs"`
 			}
-		case "job.state":
-			if j, ok := ev.Data.(store.Job); ok && j.ID == job.ID && j.Terminal() {
-				fmt.Printf("\n%s (exit %d)\n", j.State, j.ExitCode)
-				if j.State != store.JobSucceeded {
-					os.Exit(1)
+			if err := d.call("GET", "/api/ray/jobs/"+submitted.ID+"/logs", nil, &logs); err == nil && len(logs.Logs) > printed {
+				fmt.Print(logs.Logs[printed:])
+				printed = len(logs.Logs)
+			}
+			var listing struct {
+				Jobs []struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+				} `json:"jobs"`
+			}
+			if err := d.call("GET", "/api/ray/jobs", nil, &listing); err != nil {
+				continue
+			}
+			for _, job := range listing.Jobs {
+				if job.ID != submitted.ID || job.Status == "PENDING" || job.Status == "RUNNING" {
+					continue
+				}
+				fmt.Printf("\n%s\n", strings.ToLower(job.Status))
+				if job.Status != "SUCCEEDED" {
+					return fmt.Errorf("Ray job %s", strings.ToLower(job.Status))
 				}
 				return nil
 			}
 		}
 	}
-	return nil
 }
 
 // --------------------------------------------------------------- config ----
@@ -713,6 +710,16 @@ func configGet(c *config.Config, l config.Layout, key string) (string, error) {
 		return strconv.FormatBool(c.Worker.Enabled), nil
 	case "worker.allow_terminal":
 		return strconv.FormatBool(c.Worker.AllowTerminal), nil
+	case "update.enabled":
+		return strconv.FormatBool(c.Update.Enabled), nil
+	case "update.channel":
+		return c.Update.Channel, nil
+	case "update.automatic":
+		return strconv.FormatBool(c.Update.Automatic), nil
+	case "update.check_every":
+		return c.Update.CheckEvery, nil
+	case "update.repository":
+		return c.Update.Repository, nil
 	case "root":
 		return l.Root, nil
 	default:
@@ -776,6 +783,35 @@ func configSet(c *config.Config, key, value string) error {
 			return err
 		}
 		c.Worker.AllowTerminal = b
+	case "update.enabled":
+		b, err := parseBool()
+		if err != nil {
+			return err
+		}
+		c.Update.Enabled = b
+	case "update.channel":
+		if value != "stable" && value != "beta" && value != "any" {
+			return errors.New("update.channel expects stable, beta, or any")
+		}
+		c.Update.Channel = value
+	case "update.automatic":
+		b, err := parseBool()
+		if err != nil {
+			return err
+		}
+		c.Update.Automatic = b
+	case "update.check_every":
+		interval, err := time.ParseDuration(value)
+		if err != nil || interval < time.Minute {
+			return errors.New("update.check_every expects a duration of at least one minute, such as 6h")
+		}
+		c.Update.CheckEvery = value
+	case "update.repository":
+		parts := strings.Split(value, "/")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return errors.New("update.repository expects owner/repository")
+		}
+		c.Update.Repository = value
 	default:
 		return fmt.Errorf("unknown key %q", key)
 	}

@@ -10,7 +10,7 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html app.css app.js fonts.css lib views fonts
+//go:embed index.html app.css app.js fonts.css boxicons.css lib views fonts
 var files embed.FS
 
 // Assets is the interface, rooted at index.html.

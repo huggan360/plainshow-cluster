@@ -1,7 +1,7 @@
 // End-to-end check against a running node.
 //
 // Usage:  make smoke
-//     or  PSCLUSTER_URL=http://127.0.0.1:9999 node scripts/smoke.mjs
+//     or  PSCLUSTER_URL=http://127.0.0.1:9971 node scripts/smoke.mjs
 //
 // The Go tests cover the packages; this covers the wiring between them and the
 // exact HTTP shapes the interface depends on, which is where the bugs that
@@ -31,8 +31,9 @@ const j = async (p, o) => {
 
 console.log('\nSTATIC');
 for (const [path, type] of [['/', 'text/html'], ['/app.js', 'javascript'], ['/app.css', 'css'],
-                            ['/fonts.css', 'css'], ['/lib/client.js', 'javascript'],
+                            ['/fonts.css', 'css'], ['/boxicons.css', 'css'], ['/lib/client.js', 'javascript'],
                             ['/views/home.js', 'javascript'], ['/fonts/ibm-plex-mono-400.woff2', 'font'],
+                            ['/fonts/boxicons.woff2', 'font'],
                             ['/brand/plainshow-icon.webp', 'image/webp']]) {
   const r = await fetch(B + path);
   ok(`serves ${path}`, r.ok && r.headers.get('content-type').includes(type),
@@ -61,6 +62,11 @@ ok('duplicate name refused', (await j('/api/projects', { method: 'POST', body: {
 ok('bad name refused', (await j('/api/projects', { method: 'POST', body: { name: '../evil' } })).status === 400);
 ok('starter files present', (await j('/api/projects/demo/tree')).body.length === 2);
 ok('missing project 404s', (await j('/api/projects/ghost/tree')).status === 404);
+const updatedProject = await j('/api/projects/demo', {
+  method: 'PUT', body: { description: 'Updated from project settings' },
+});
+ok('project details update', updatedProject.status === 200 &&
+  updatedProject.body.description === 'Updated from project settings');
 
 console.log('\nTEAM / GITHUB');
 const members = (await j('/api/projects/demo/members')).body;
@@ -178,6 +184,10 @@ ok('network has this device',
   (await j(`/api/networks/${secondNetwork.body.id}/nodes`)).body.length === 1);
 ok('network has its owner account',
   (await j(`/api/networks/${secondNetwork.body.id}/members`)).body[0].role === 'owner');
+const networkDetail = await j(`/api/networks/${secondNetwork.body.id}`);
+ok('network workspace has projects, devices and policy', networkDetail.status === 200 &&
+  networkDetail.body.projects.length === 1 && networkDetail.body.nodes.length === 1 &&
+  networkDetail.body.membership.id === secondNetwork.body.id);
 ok('switch back to original network',
   (await j(`/api/networks/${defaultNetwork}/active`, { method: 'PUT' })).status === 200);
 ok('second network project is hidden after switching', (await j('/api/projects')).body.length === 0);
