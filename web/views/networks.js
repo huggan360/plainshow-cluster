@@ -171,7 +171,7 @@ function rayMetric(data, ray) {
                         el('i', { class: 'bx bx-play' }), ray.head ? 'Attach' : 'Start') : null,
                 data.active && running
                     ? el('button', { class: 'btn btn--sm', onclick: () => action('/api/ray/stop') },
-                        el('i', { class: 'bx bx-stop-circle' }), 'Stop') : null))));
+                        el('i', { class: 'bx bx-stop-circle' }), 'Stop') : null)));
 }
 
 function deviceCard(node) {

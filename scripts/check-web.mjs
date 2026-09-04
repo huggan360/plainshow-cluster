@@ -6,13 +6,19 @@
 // statically: every relative import resolves to a file, and every named import
 // is actually exported by it.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve, relative } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const ROOTS = ['web', 'adminweb'];
 const problems = [];
 
+/**
+ * unbalanced reports the first bracket that closes something never opened, or
+ * what is left open at the end. Strings, template literals and comments are
+ * blanked first so only structural brackets are counted.
+ */
 /** walk lists every .js file under dir. */
 function walk(dir) {
     return readdirSync(dir).flatMap((name) => {
@@ -49,7 +55,20 @@ const exportCache = new Map();
 for (const file of files) {
     const source = readFileSync(file, 'utf8');
     try {
-        execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+        // Checked as a module, not a script.
+        //
+        // `node --check name.js` parses as CommonJS and is lenient about things
+        // a module parse rejects: a file with one closing paren too many passed
+        // here on Node 24 and was rejected by Node 26 in CI, so the gate stayed
+        // silent until a release failed. Everything under web/ is loaded as a
+        // module by the browser, so it is checked as one.
+        const asModule = join(tmpdir(), `pscluster-check-${process.pid}.mjs`);
+        try {
+            writeFileSync(asModule, source);
+            execFileSync(process.execPath, ['--check', asModule], { stdio: 'pipe' });
+        } finally {
+            try { unlinkSync(asModule); } catch { /* nothing to clean up */ }
+        }
     } catch (error) {
         problems.push(`${file}: ${String(error.stderr || error.message).trim()}`);
     }
