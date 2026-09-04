@@ -1,9 +1,0 @@
-#!/bin/sh
-set -eu
-
-root="$SNAP_COMMON/node"
-if [ -f "$root/config.yaml" ]; then
-    # Preserve this invariant when upgrading installations created before the
-    # snap-specific updater setting was introduced.
-    "$SNAP/bin/pscluster" config --root "$root" set update.enabled false
-fi

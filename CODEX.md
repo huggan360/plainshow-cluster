@@ -62,7 +62,6 @@ the `v0.1.1-alpha.1` release:
   complete tarballs, and classic Snap packages on native amd64/arm64 GitHub
   runners, plus an x86_64 Arch package. The Snap contains Git, GTK/WebKit,
   Python and pinned Ray, stores its system node below `$SNAP_COMMON`, and lets
-  snapd own updates. It still requires host Tailscale/tailscaled and requires
   separate Snap Store registration/classic-confinement approval to publish.
 
 ## Verification completed
@@ -110,7 +109,7 @@ The tag triggers `.github/workflows/release.yml`. Confirm native desktop and
 Snap builds for both architectures, the release-assets job, and the Arch
 package job. Expected end-user downloads include
 `plainshow-cluster-linux-amd64.tar.gz`, the arm64 equivalent, and matching
-`.snap` files. Each tarball contains the CLI, native app, installer, checksums,
+Each tarball contains the CLI, native app, installer, checksums,
 desktop entry, and icons. The GitHub release must be marked prerelease
 automatically because the tag contains `-alpha.1`.
 
@@ -127,7 +126,6 @@ automatically because the tag contains `-alpha.1`.
 - `internal/collab`, `internal/store/collab_ops.go`: OT transformation,
   deduplication, revision persistence, and operation application.
 - `web`: dependency-free node UI embedded in the node binary.
-- `install.sh`, `packaging/arch`, `packaging/desktop`, `snap`: distribution.
 - `deploy`: account server and Headscale reference configuration. Do not alter
   the production Pi's services, Apache, firewall, or Headscale just to build a
   release.
@@ -154,7 +152,6 @@ automatically because the tag contains `-alpha.1`.
 - The built-in updater replaces and verifies the static node binary. Re-running
   the release installer also refreshes the native desktop and system runtime
   dependencies; it preserves all node data. Snap installations disable that
-  binary updater because snapd provides their atomic refresh and rollback.
 
 ## Recommended next work after alpha
 
