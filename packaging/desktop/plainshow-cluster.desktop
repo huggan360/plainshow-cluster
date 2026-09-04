@@ -9,3 +9,5 @@ Terminal=false
 Categories=Development;Utility;
 Keywords=cluster;ray;tailscale;git;machine learning;
 StartupNotify=true
+# Matches --class on the app window, so the taskbar uses this entry's icon.
+StartupWMClass=plainshow-cluster

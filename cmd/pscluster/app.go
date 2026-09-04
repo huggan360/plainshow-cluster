@@ -14,6 +14,10 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/config"
 )
 
+// windowClass ties the window to plainshow-cluster.desktop, which is what
+// makes the desktop show our icon and name for it.
+const windowClass = "plainshow-cluster"
+
 // appBrowsers open a URL in their own window with no tabs, address bar or
 // bookmarks — which is what makes this a program rather than a browser tab.
 var appBrowsers = []struct{ command, flag string }{
@@ -130,7 +134,11 @@ func openAppWindow(url string) error {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := exec.CommandContext(ctx, path, browser.flag+url)
+		// --class makes the window match the desktop entry, so the taskbar
+		// shows the PlainShow mark rather than a generic browser icon and
+		// groups it under the application rather than under Chromium.
+		cmd := exec.CommandContext(ctx, path, browser.flag+url,
+			"--class="+windowClass, "--name="+windowClass)
 		if err := cmd.Start(); err != nil {
 			cancel()
 			continue

@@ -202,9 +202,15 @@ install_desktop_entry() {
     note "adding the desktop entry"
     install -m 0644 "$source_dir/plainshow-cluster.desktop" \
         /usr/share/applications/plainshow-cluster.desktop
-    install -d -m 0755 /usr/share/icons/hicolor/scalable/apps
-    install -m 0644 "$source_dir/plainshow-cluster.svg" \
-        /usr/share/icons/hicolor/scalable/apps/plainshow-cluster.svg
+    # The real PlainShow mark, at the sizes icon themes look for.
+    for size in 48 64 128 256; do
+        [ -f "$source_dir/plainshow-cluster-$size.png" ] || continue
+        install -d -m 0755 "/usr/share/icons/hicolor/${size}x${size}/apps"
+        install -m 0644 "$source_dir/plainshow-cluster-$size.png" \
+            "/usr/share/icons/hicolor/${size}x${size}/apps/plainshow-cluster.png"
+    done
+    command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+        gtk-update-icon-cache -qtf /usr/share/icons/hicolor 2>/dev/null || true
     command -v update-desktop-database >/dev/null 2>&1 &&
         update-desktop-database /usr/share/applications 2>/dev/null || true
 }

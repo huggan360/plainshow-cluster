@@ -49,8 +49,10 @@ parts:
         -o "$CRAFT_PART_INSTALL/bin/pscluster" ./cmd/pscluster
       install -Dm0644 packaging/desktop/plainshow-cluster.desktop \
         "$CRAFT_PART_INSTALL/share/applications/plainshow-cluster.desktop"
-      install -Dm0644 packaging/desktop/plainshow-cluster.svg \
-        "$CRAFT_PART_INSTALL/share/icons/hicolor/scalable/apps/plainshow-cluster.svg"
+      for size in 48 64 128 256; do
+        install -Dm0644 "packaging/desktop/plainshow-cluster-$size.png" \
+          "$CRAFT_PART_INSTALL/share/icons/hicolor/${size}x${size}/apps/plainshow-cluster.png"
+      done
 
 apps:
   plainshow-cluster:
