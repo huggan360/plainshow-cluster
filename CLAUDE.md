@@ -336,6 +336,39 @@ editing is the only data-plane feature it adds; Git works without it.
     Plainshow launches and reverse-proxies the machine's installed Jupyter
     Server, gaining its kernels, widgets, rich MIME output and completions.
 
+### Verified by running it, not by assertion
+
+The resilience claim in section C is the one most likely to be quietly untrue,
+so it has been exercised: stand up `pscluster-admin`, sign a node in against it,
+kill the authority, and confirm the node keeps going.
+
+```sh
+pscluster-admin init  --root /tmp/acct --port 9988 --registration-open true
+pscluster-admin serve --root /tmp/acct &
+pscluster      init  --root /tmp/node --port 9977
+# point account.server at http://127.0.0.1:9988, then serve, then:
+#   POST /api/auth/setup with the bootstrap token   -> signed in
+#   kill the admin process
+#   GET  /api/overview   -> 200
+#   POST /api/projects   -> 201
+#   POST /api/jobs       -> runs and logs
+#   POST /api/auth/login -> fails, naming the unreachable authority
+```
+
+Confirmed on this build. Sign-in also survives a **failed tailnet enrolment**:
+the response carries `private_network_connected: false` and a reason rather than
+refusing the login, which is the right way round — a private network that will
+not come up must not lock somebody out of their own machine.
+
+Two things this run also settled, both of which looked like defects and were
+not. Startup with an unreachable authority is 223 ms, the same as with none
+configured: the check-in is already backgrounded. And a node that has an
+authority configured but no session answers 401 to everything, which is correct
+rather than an outage symptom — configuring an authority is what turns
+authentication on. Anyone re-testing this should know `curl -sf` treats 401 as
+failure, which will make a readiness loop spin its whole retry budget and look
+like a thirty-second startup hang.
+
 ### F. External release gates
 
 15. ~~**`internal/api` coverage.**~~ Core network, account authority, registry,
