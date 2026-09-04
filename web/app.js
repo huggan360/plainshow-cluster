@@ -6,29 +6,21 @@
 import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized, toast } from './lib/client.js';
 import { renderHome } from './views/home.js';
-import { renderWorkspace } from './views/workspace.js';
 import { renderJobs } from './views/jobs.js';
-import { renderMachines } from './views/machines.js';
+import { renderProjects } from './views/projects.js';
+import { renderHowTo } from './views/howto.js';
 import { renderSettings } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
 import { renderGate } from './views/signin.js';
-import { renderNotebooks } from './views/notebooks.js';
 import { renderNetworks } from './views/networks.js';
-import { renderDatasets } from './views/datasets.js';
-import { renderTrain } from './views/train.js';
-import { renderTerminal } from './views/terminal.js';
 
 const ROUTES = [
     { id: 'home', label: 'Home', icon: '⌂', render: renderHome },
-    { id: 'networks', label: 'Networks', icon: '◎', render: renderNetworks },
-    { id: 'workspace', label: 'Workspace', icon: '◫', render: renderWorkspace },
-    { id: 'notebooks', label: 'Notebooks', icon: '▦', render: renderNotebooks },
-	{ id: 'datasets', label: 'Datasets', icon: '◈', render: renderDatasets },
-	{ id: 'train', label: 'Train', icon: '△', render: renderTrain },
-    { id: 'terminal', label: 'Terminal', icon: '›_', render: renderTerminal },
+    { id: 'networks', label: 'Networks', icon: '◇', render: renderNetworks },
+    { id: 'projects', label: 'Projects', icon: '◫', render: renderProjects },
     { id: 'jobs', label: 'Jobs', icon: '▤', render: renderJobs },
-    { id: 'machines', label: 'Machines', icon: '▣', render: renderMachines },
     { id: 'github', label: 'GitHub', icon: '⑂', render: renderGitHub },
+    { id: 'howto', label: 'How to', icon: '?', render: renderHowTo },
     { id: 'settings', label: 'Settings', icon: '⚙', render: renderSettings },
 ];
 

@@ -23,14 +23,11 @@ import (
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/api"
-	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
-	"github.com/huggan360/plainshow-cluster/internal/dataset"
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
-	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
@@ -446,12 +443,8 @@ func cmdServe(args []string) error {
 
 	hub := events.NewHub()
 	sup := jobs.NewSupervisor(st, hub, l, cfg)
-	notebooks := notebook.NewManager()
-	defer notebooks.Close()
-	collaboration := collab.New(st)
-	datasets := dataset.New(l, st)
 	up := updater.New(cfg, l, hub)
-	srv := api.New(cfg, l, st, hub, sup, notebooks, collaboration, datasets, up, device, fingerprint, web.Assets)
+	srv := api.New(cfg, l, st, hub, sup, up, device, fingerprint, web.Assets)
 
 	// The command line reaches this daemon with the install root's local token,
 	// which keeps it working once the node has an owner account.

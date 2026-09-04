@@ -50,68 +50,35 @@ These are settled. Do not quietly reverse them.
 
 ## Shape of the system
 
-Three things, and only one of them is required.
+Plainshow Cluster is an **environment that wires together Tailscale, Ray and
+Git**. It runs nothing itself.
 
-**Enterprise master.** You register once with the Plainshow enterprise service.
-It is the one intentional central authority: `pscluster-admin`, backed by
-SQLite, hosted on the Plainshow Raspberry Pi at `clusteradmin.plainshow.se`.
-It manages global accounts, keeps recovery keys and membership roles for each
-independent network, authorizes/registers controller servers and provides the
-minimal global admin/statistics page. It never accepts Cowork WebSockets.
-Network discovery, compute, project data and task traffic remain peer-to-peer.
+| Borrowed | Does |
+|---|---|
+| **Tailscale** | Makes the machines reachable from each other, anywhere |
+| **Git / GitHub** | Moves code between them |
+| **Ray** | Runs the work across them |
+| **Plainshow** | Sets those three up and shows what is happening |
 
-**Network.** A set of devices and people who work together. Anybody can create
-one; joining is a single-use code. A device can belong to several, and each
-membership keeps its own projects, people and policy.
+**Account** — registered once, and what a device is enrolled as.
+**Network** — a set of devices and people. Every device in one is equal, can run
+tasks, and reaches every other one.
+**Project** — an ordinary folder, kept in step through git. Data lives in it
+like any other file. You open it in your own editor.
 
-**Device.** Any machine that has joined a network. **Every device is equal.**
-There is no master, no coordinator, no machine that holds the real copy. Every
-device can run tasks and connects directly to every other device on the network.
-What a device is willing to do is its own local policy — accept jobs, expose a
-GPU, allow a terminal — and nothing remote can widen it.
+Seven pages: Home, Networks, Projects, Jobs, GitHub, How to, Settings.
 
-**Controller Server** *(always independent).* The `cluster-controller` project
-is a separately deployed PlainShow runtime. Its first owner signs in against
-the enterprise account authority and chooses among networks where they are an
-owner or administrator. Members of supplied networks may sign in and view it;
-only its owner changes the supplied-network set. Every instance registers and
-heartbeats with the enterprise service, which returns its address and a scoped
-relay credential to eligible nodes. A controller is not a device role and
-never runs jobs or holds projects.
+### What we do not build
 
-**Account/key registry.** The enterprise SQLite database is the explicit
-canonical holder for identity, network membership and high-entropy recovery
-keys. Raw keys are intentionally retained because recovery is a product
-requirement. Access to the database/root is therefore equivalent to enterprise
-administrator access. It never stores project files, datasets, artifacts, job
-payloads, logs or peer addresses.
+No editor, no notebook, no dataset registry, no scheduler, no training launcher.
+Ray decides how work is distributed and it is better at it than anything we
+would write; git moves the code; the folder holds the data. `ray.init()` in
+somebody's ordinary Python finds the network because Plainshow started a head on
+one machine and attached the rest — that is the whole integration.
 
-### Where project state lives
-
-**Git is the source of truth, and every device has a full clone.** There is no
-canonical holder to be offline. Two people can work while disconnected from each
-other and reconcile with a real three-way merge, which is the one thing that has
-to keep working when the network does not.
-
-So collaboration has two tiers, and the difference is honest:
-
-- **Without a controller server** — the stock experience. Edit, commit, pull.
-  Asynchronous, works with nobody online but you, needs nothing extra installed.
-- **With a controller server** — the same projects, plus live editing over its
-  socket. Real-time collaboration needs something always reachable by everyone,
-  which is exactly what a device on a home connection is not.
-
-Live editing is a *feature the controller adds*, never a thing the cluster
-degrades without. Git keeps working either way.
-
-### What this replaces
-
-Earlier versions had `master`, `worker` and `controller` as roles on a device,
-with the master holding canonical state. That is gone. It made one machine
-special, made its being offline everybody's problem, and put the thing most
-likely to be a gaming desktop in the critical path. `master` and `controller`
-are still parsed from old configs and treated as an ordinary device, so an
-existing install keeps working.
+Ray has a head node. That is Ray's architecture, not a return to master nodes,
+but one machine per network is special while a cluster is up and the interface
+says which. `MembershipConfig.RayHead` records it.
 
 ## The most important rule: bundle, do not rebuild
 

@@ -145,7 +145,6 @@ func (s *Server) MeshHandler() http.Handler {
 	authed := http.NewServeMux()
 	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
-	authed.HandleFunc("POST /mesh/v1/datasets/sync", s.acceptDatasetSync)
 	authed.HandleFunc("POST /mesh/v1/reach", s.acceptReachCheck)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}", s.remoteJob)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}/logs", s.remoteJobLogs)
@@ -482,37 +481,6 @@ func (s *Server) acceptRemoteJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, job)
-}
-
-type datasetSyncRequest struct {
-	Dataset  store.Dataset     `json:"dataset"`
-	Manifest string            `json:"manifest"`
-	Chunks   map[string][]byte `json:"chunks"`
-}
-
-func (s *Server) acceptDatasetSync(w http.ResponseWriter, r *http.Request) {
-	networkID := r.Header.Get("X-Plainshow-Network")
-	var body datasetSyncRequest
-	if err := decode(r, &body); err != nil {
-		fail(w, 400, err.Error())
-		return
-	}
-	if body.Dataset.NetworkID != networkID {
-		fail(w, 403, "Dataset belongs to a different network.")
-		return
-	}
-	body.Dataset.Manifest = body.Manifest
-	if err := s.datasets.Import(body.Dataset, body.Chunks, s.cfg.Node.ID); err != nil {
-		fail(w, 400, err.Error())
-		return
-	}
-	target := filepath.Join(s.layout.Datasets(), "materialized", body.Dataset.ID)
-	if err := s.datasets.Materialize(body.Dataset, target); err != nil {
-		fail(w, 500, err.Error())
-		return
-	}
-	s.hub.Publish("dataset.placement", store.DatasetPlacement{DatasetID: body.Dataset.ID, NodeID: s.cfg.Node.ID, State: "ready", BytesDone: body.Dataset.SizeBytes})
-	writeJSON(w, 200, map[string]any{"status": "ready", "path": target, "bytes": body.Dataset.SizeBytes})
 }
 
 func (s *Server) remoteJob(w http.ResponseWriter, r *http.Request) {

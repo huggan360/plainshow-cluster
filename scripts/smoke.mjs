@@ -91,34 +91,10 @@ ok('download names the attachment', downloaded.headers.get('content-disposition'
 const esc = await j('/api/projects/demo/file?path=../../../etc/passwd');
 ok('traversal read refused', esc.status === 404 || esc.status === 400, JSON.stringify(esc.body));
 
-console.log('\nNOTEBOOKS');
-const notebook = await j('/api/projects/demo/notebooks', {
-  method: 'POST', body: { path: 'notebooks/experiment.ipynb' },
-});
-ok('create standard notebook', notebook.status === 201 && notebook.body.path.endsWith('.ipynb'));
-const notebookFile = (await j(`/api/projects/demo/file?path=${encodeURIComponent(notebook.body.path)}`)).body;
-ok('notebook is nbformat 4', JSON.parse(notebookFile.content).nbformat === 4);
-const jupyterStatus = (await j('/api/projects/demo/kernel')).body;
-ok('Jupyter availability is reported', typeof jupyterStatus.available === 'boolean');
-const openedJupyter = await j('/api/projects/demo/jupyter', { method: 'POST' });
-if (jupyterStatus.available) {
-  ok('Jupyter Server launches', openedJupyter.status === 200 && openedJupyter.body.url.startsWith('/jupyter/'));
-  ok('Jupyter restart succeeds',
-    (await j('/api/projects/demo/kernel/restart', { method: 'POST' })).status === 200);
-} else {
-  ok('missing Jupyter has an actionable response',
-    openedJupyter.status === 412 && openedJupyter.body.error.includes('jupyter_server'));
-}
-
 console.log('\nCOLLABORATION');
-const shared = await j('/api/projects/demo/collab?path=main.py');
-ok('shared document opens with revision', shared.status === 200 && shared.body.revision === 0 && shared.body.content.includes('Hello'));
 await j('/api/projects/demo/file', {
   method: 'PUT', body: { path: 'main.py', content: 'print("replacement")\n' },
 });
-const replacedShared = await j('/api/projects/demo/collab?path=main.py');
-ok('external replacement refreshes shared document', replacedShared.status === 200 &&
-  replacedShared.body.revision === 0 && replacedShared.body.content === 'print("replacement")\n');
 
 console.log('\nGIT');
 // Make a change to observe: the file operations above net out to nothing.
@@ -149,26 +125,6 @@ const failed = await waitFor(async () => {
 });
 ok('failure keeps exit code', failed && failed.exit_code === 3, failed && failed.exit_code);
 
-console.log('\nDATASETS / TRAINING');
-const allSettings = (await j('/api/settings')).body;
-const datasetSource = `${allSettings.paths.projects}/${defaultNetwork}/demo`;
-const dataset = await j('/api/datasets', { method: 'POST', body: { name: 'smoke-data', version: 'v1', source: datasetSource } });
-ok('dataset registered and hashed', dataset.status === 201 && dataset.body.file_count > 0 && dataset.body.root_hash.length === 64, JSON.stringify(dataset.body));
-const datasets = (await j('/api/datasets')).body;
-ok('dataset has local placement', datasets[0].placements.some((p) => p.state === 'ready'));
-const advice = await j('/api/training/advisor', { method: 'POST', body: { parameters: 1000000000, bandwidth_mbps: 100, observed_step_seconds: 1, machines: ['a', 'b'] } });
-ok('bandwidth advisor warns honestly', advice.body.communication_percent > 50 && advice.body.verdict.includes('dominates'));
-const selfID = ov.node.id;
-const preflight = await j('/api/training/preflight', { method: 'POST', body: { project: 'demo', framework: 'shell', entry: 'echo rank-$PLAINSHOW_RANK', machines: [selfID] } });
-ok('training preflight builds rank plan', preflight.status === 200 && preflight.body.ready && preflight.body.plan.ranks.length === 1, JSON.stringify(preflight.body));
-const train = await j('/api/training/run', { method: 'POST', body: { project: 'demo', framework: 'shell', entry: 'echo rank-$PLAINSHOW_RANK', machines: [selfID], dataset: dataset.body.id } });
-ok('gang training launch accepted', train.status === 201 && train.body.ranks.length === 1, JSON.stringify(train.body));
-const trained = await waitFor(async () => {
-  const runs = (await j('/api/training')).body;
-  return runs.find((run) => run.id === train.body.id && ['succeeded', 'failed'].includes(run.state));
-});
-ok('training run completes as one lifecycle', trained && trained.state === 'succeeded', trained && trained.state);
-
 console.log('\nSTOP');
 const long = (await j('/api/jobs', { method: 'POST', body: { command: 'sleep 30' } })).body;
 // Wait until it is actually running before stopping it: stopping a job that has
@@ -194,6 +150,14 @@ ok('update endpoint reports current version', !!updateStatus.current && updateSt
 ok('invalid update repository refused', (await j('/api/settings', {
   method: 'PUT', body: { update: { ...settings.update, repository: 'not-a-repository' } },
 })).status === 400);
+
+console.log('\nRAY');
+const rayStatus = (await j('/api/ray')).body;
+ok('ray surface answers', typeof rayStatus.installed === 'boolean', JSON.stringify(rayStatus));
+ok('ray says what to do when absent',
+   rayStatus.installed || (rayStatus.advice || '').includes('Install Ray'), rayStatus.advice);
+const rayJobs = (await j('/api/ray/jobs')).body;
+ok('ray jobs answers without a cluster', Array.isArray(rayJobs.jobs), JSON.stringify(rayJobs));
 
 console.log('\nDELETE PROJECT');
 ok('delete project', (await j('/api/projects/demo', { method: 'DELETE' })).status === 200);

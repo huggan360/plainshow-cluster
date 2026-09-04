@@ -122,14 +122,18 @@ type AccountConfig struct {
 // MembershipConfig describes how this device participates in one independent
 // cluster network. A single installation may carry many memberships.
 type MembershipConfig struct {
-	ID            string       `yaml:"id" json:"id"`
-	Name          string       `yaml:"name" json:"name"`
-	Roles         []Role       `yaml:"roles" json:"roles"`
-	AccountRole   string       `yaml:"account_role,omitempty" json:"account_role"`
-	ManagementKey string       `yaml:"management_key" json:"-"`
-	Enabled       bool         `yaml:"enabled" json:"enabled"`
-	Coordinator   []string     `yaml:"coordinator,omitempty" json:"coordinator"`
-	Policy        WorkerConfig `yaml:"policy" json:"policy"`
+	ID            string   `yaml:"id" json:"id"`
+	Name          string   `yaml:"name" json:"name"`
+	Roles         []Role   `yaml:"roles" json:"roles"`
+	AccountRole   string   `yaml:"account_role,omitempty" json:"account_role"`
+	ManagementKey string   `yaml:"management_key" json:"-"`
+	Enabled       bool     `yaml:"enabled" json:"enabled"`
+	Coordinator   []string `yaml:"coordinator,omitempty" json:"coordinator"`
+	// RayHead is "host:port" of the machine running this network's Ray head.
+	// Ray needs one; recording which machine it is lets the others attach and
+	// lets the interface say plainly where it is.
+	RayHead string       `yaml:"ray_head,omitempty" json:"ray_head"`
+	Policy  WorkerConfig `yaml:"policy" json:"policy"`
 }
 
 // UpdateConfig controls how this node keeps itself current.

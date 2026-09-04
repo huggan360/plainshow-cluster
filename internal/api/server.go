@@ -28,19 +28,15 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/huggan360/plainshow-cluster/internal/brand"
-	"github.com/huggan360/plainshow-cluster/internal/collab"
 	"github.com/huggan360/plainshow-cluster/internal/config"
-	"github.com/huggan360/plainshow-cluster/internal/dataset"
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
-	"github.com/huggan360/plainshow-cluster/internal/notebook"
 	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
-	"github.com/huggan360/plainshow-cluster/internal/training"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
@@ -52,9 +48,6 @@ type Server struct {
 	store         *store.Store
 	hub           *events.Hub
 	sup           *jobs.Supervisor
-	notebooks     *notebook.Manager
-	collab        *collab.Manager
-	datasets      *dataset.Manager
 	updater       *updater.Updater
 	device        *identity.Device
 	fingerprint   string
@@ -63,20 +56,18 @@ type Server struct {
 	tailnetRetry  time.Time
 	remoteClients map[string]peerTransport
 	remoteLogs    map[string][]jobs.LogLine
-	reservations  *training.Reservations
 	localToken    string
 	web           fs.FS
 }
 
 // New builds a server. web is the embedded interface, rooted at its index.html.
 func New(cfg *config.Config, l config.Layout, st *store.Store, hub *events.Hub,
-	sup *jobs.Supervisor, notebooks *notebook.Manager, collaboration *collab.Manager,
-	datasets *dataset.Manager, up *updater.Updater,
+	sup *jobs.Supervisor, up *updater.Updater,
 	device *identity.Device, fingerprint string, web fs.FS) *Server {
 	return &Server{cfg: cfg, layout: l, store: st, hub: hub, sup: sup,
-		notebooks: notebooks, collab: collaboration, datasets: datasets, updater: up, device: device, fingerprint: fingerprint,
+		updater: up, device: device, fingerprint: fingerprint,
 		remoteClients: make(map[string]peerTransport), remoteLogs: make(map[string][]jobs.LogLine),
-		reservations: training.NewReservations(), web: web}
+		web: web}
 }
 
 // peerTransport is how this node reaches another machine.
@@ -105,6 +96,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sysinfo", s.getSysinfo)
 	mux.HandleFunc("GET /api/machines", s.getMachines)
 	mux.HandleFunc("GET /api/tailnet", s.getTailnet)
+	mux.HandleFunc("GET /api/ray", s.getRay)
+	mux.HandleFunc("POST /api/ray/start", s.startRay)
+	mux.HandleFunc("POST /api/ray/stop", s.stopRay)
+	mux.HandleFunc("GET /api/ray/jobs", s.getRayJobs)
 	mux.HandleFunc("GET /api/networks", s.listNetworks)
 	mux.HandleFunc("POST /api/networks", s.createNetwork)
 	mux.HandleFunc("PUT /api/networks/{id}/active", s.activateNetwork)
@@ -117,13 +112,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/networks/join", s.joinNetwork)
 
 	mux.HandleFunc("GET /api/projects", s.listProjects)
-	mux.HandleFunc("GET /api/datasets", s.listDatasets)
-	mux.HandleFunc("POST /api/datasets", s.registerDataset)
-	mux.HandleFunc("POST /api/datasets/{id}/materialize", s.materializeDataset)
-	mux.HandleFunc("GET /api/training", s.listTrainingRuns)
-	mux.HandleFunc("POST /api/training/preflight", s.trainingPreflight)
-	mux.HandleFunc("POST /api/training/advisor", s.trainingAdvice)
-	mux.HandleFunc("POST /api/training/run", s.startTraining)
 	mux.HandleFunc("POST /api/projects", s.createProject)
 	mux.HandleFunc("DELETE /api/projects/{name}", s.deleteProject)
 	mux.HandleFunc("GET /api/projects/{name}/tree", s.projectTree)
@@ -131,7 +119,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/projects/{name}/file", s.writeFile)
 	mux.HandleFunc("GET /api/projects/{name}/raw", s.downloadFile)
 	mux.HandleFunc("POST /api/projects/{name}/upload", s.uploadFile)
-	mux.HandleFunc("GET /api/projects/{name}/collab", s.openCollabDocument)
 	mux.HandleFunc("POST /api/projects/{name}/dir", s.createDir)
 	mux.HandleFunc("POST /api/projects/{name}/rename", s.renameEntry)
 	mux.HandleFunc("DELETE /api/projects/{name}/entry", s.deleteEntry)
@@ -143,15 +130,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	mux.HandleFunc("GET /api/jobs/{id}/logs", s.getJobLogs)
 	mux.HandleFunc("POST /api/jobs/{id}/stop", s.stopJob)
-	mux.HandleFunc("POST /api/jobs/{id}/input", s.jobInput)
-
-	mux.HandleFunc("POST /api/projects/{name}/notebooks", s.createNotebook)
-	mux.HandleFunc("GET /api/projects/{name}/kernel", s.notebookStatus)
-	mux.HandleFunc("POST /api/projects/{name}/jupyter", s.openJupyter)
-	mux.HandleFunc("POST /api/projects/{name}/kernel/execute", s.executeNotebookCell)
-	mux.HandleFunc("POST /api/projects/{name}/kernel/interrupt", s.interruptNotebook)
-	mux.HandleFunc("POST /api/projects/{name}/kernel/restart", s.restartNotebook)
-	mux.HandleFunc("/jupyter/{id}/{path...}", s.proxyJupyter)
 
 	mux.HandleFunc("GET /api/projects/{name}/members", s.listMembers)
 	mux.HandleFunc("POST /api/projects/{name}/members", s.addMember)
@@ -466,10 +444,6 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
-	if err := s.collab.Reset(p.NetworkID, p.ID, body.Path); err != nil {
-		fail(w, 500, "The file was saved, but its live-editing state could not be refreshed. Retry the save.")
-		return
-	}
 	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("file.saved", map[string]string{"project": name, "path": body.Path})
 	s.hub.Publish("file.replaced", map[string]string{"project": name, "path": body.Path})
@@ -527,10 +501,6 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		if uploadErr != nil {
 			fsError(w, uploadErr)
-			return
-		}
-		if err := s.collab.Reset(p.NetworkID, p.ID, rel); err != nil {
-			fail(w, 500, "The upload finished, but its live-editing state could not be refreshed. Retry the upload.")
 			return
 		}
 		_ = s.store.TouchProjectID(p.ID)
@@ -619,14 +589,6 @@ func (s *Server) renameEntry(w http.ResponseWriter, r *http.Request) {
 		fsError(w, err)
 		return
 	}
-	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.From); err != nil {
-		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
-		return
-	}
-	if err := s.collab.ResetTree(p.NetworkID, p.ID, body.To); err != nil {
-		fail(w, 500, "The entry was renamed, but its live-editing state could not be refreshed. Reload the workspace.")
-		return
-	}
 	_ = s.store.TouchProjectID(p.ID)
 	s.hub.Publish("entry.renamed", map[string]string{"project": name, "from": body.From, "to": body.To})
 	s.hub.Publish("tree.changed", map[string]string{"project": name})
@@ -643,10 +605,6 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	if err := fsys.Remove(rel); err != nil {
 		fsError(w, err)
-		return
-	}
-	if err := s.collab.ResetTree(p.NetworkID, p.ID, rel); err != nil {
-		fail(w, 500, "The entry was deleted, but its live-editing state could not be refreshed. Reload the workspace.")
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
@@ -801,32 +759,6 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		environment := map[string]string{}
-		datasetPaths := []string{}
-		for _, datasetID := range body.Datasets {
-			dataset, err := s.store.Dataset(datasetID)
-			if err != nil || dataset.NetworkID != s.cfg.ActiveNetwork {
-				fail(w, 404, "A requested dataset does not exist in this network.")
-				return
-			}
-			chunks, err := s.datasets.Export(dataset)
-			if err != nil {
-				fail(w, 500, "Could not read dataset: "+err.Error())
-				return
-			}
-			var ready struct {
-				Path string `json:"path"`
-			}
-			if err := client.JSON("POST", "/mesh/v1/datasets/sync", datasetSyncRequest{Dataset: dataset, Manifest: dataset.Manifest, Chunks: chunks}, &ready, true); err != nil {
-				fail(w, 502, "Could not prepare dataset on worker: "+err.Error())
-				return
-			}
-			datasetPaths = append(datasetPaths, ready.Path)
-			_ = s.store.SetDatasetPlacement(store.DatasetPlacement{DatasetID: dataset.ID, NodeID: node.NodeID, State: "ready", BytesDone: dataset.SizeBytes})
-		}
-		if len(datasetPaths) > 0 {
-			environment["PLAINSHOW_DATASET_DIR"] = datasetPaths[0]
-			environment["PLAINSHOW_DATASET_DIRS"] = strings.Join(datasetPaths, ":")
-		}
 		var remote store.Job
 		err = client.JSON("POST", "/mesh/v1/jobs", remoteJobRequest{ProjectID: p.ID,
 			Project: p.Name, Description: p.Description, Kind: body.Kind, Title: body.Title,
@@ -850,23 +782,6 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 		go s.monitorRemoteJob(s.cfg.ActiveNetwork, node.NodeID, client, remote)
 		writeJSON(w, 201, remote)
 		return
-	}
-	if len(body.Datasets) > 0 {
-		paths := []string{}
-		for _, id := range body.Datasets {
-			dataset, err := s.store.Dataset(id)
-			if err != nil || dataset.NetworkID != s.cfg.ActiveNetwork {
-				fail(w, 404, "A requested dataset does not exist in this network.")
-				return
-			}
-			target := filepath.Join(s.layout.Datasets(), "materialized", id)
-			if err := s.datasets.Materialize(dataset, target); err != nil {
-				fail(w, 500, err.Error())
-				return
-			}
-			paths = append(paths, target)
-		}
-		req.Env = map[string]string{"PLAINSHOW_DATASET_DIR": paths[0], "PLAINSHOW_DATASET_DIRS": strings.Join(paths, ":")}
 	}
 
 	job, err := s.sup.Start(req)
@@ -1052,7 +967,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 				sub.Close()
 				return
 			}
-			s.handleClientEvent(raw)
+			_ = raw
 		}
 	}()
 
