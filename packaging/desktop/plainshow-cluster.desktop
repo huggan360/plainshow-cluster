@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Plainshow Cluster
+GenericName=Cluster workspace
+Comment=Connect your machines into networks and run work across them
+Exec=pscluster app
+Icon=plainshow-cluster
+Terminal=false
+Categories=Development;Utility;
+Keywords=cluster;ray;tailscale;git;machine learning;
+StartupNotify=true

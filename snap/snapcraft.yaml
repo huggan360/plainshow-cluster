@@ -1,0 +1,60 @@
+# Snap packaging for Plainshow Cluster.
+#
+# The node is confined, but the two programs it drives — tailscale and ray —
+# are not things a snap can carry: tailscale needs its own daemon and kernel
+# access, and Ray runs the user's Python with their own packages and GPU
+# drivers. Both are therefore host requirements, and the interface says so when
+# they are missing rather than pretending to bundle them.
+name: plainshow-cluster
+base: core22
+adopt-info: pscluster
+summary: Connect your machines into networks and run work across them
+description: |
+  Plainshow Cluster joins the computers you already own into private networks,
+  keeps projects in step through git, and runs work across the machines with
+  Ray. It is an interface over Tailscale, Ray and Git rather than an
+  implementation of any of them.
+
+  Tailscale and Ray must be installed on the host: a confined snap cannot
+  provide a VPN daemon or run your Python with your GPU drivers.
+
+grade: devel
+confinement: classic
+
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
+parts:
+  pscluster:
+    plugin: go
+    source: .
+    build-snaps:
+      - go/1.25/stable
+    build-packages:
+      - git
+    override-pull: |
+      craftctl default
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
+      craftctl set version="${version#v}"
+    override-build: |
+      # The same flags the Makefile uses, so a snap reports the version it was
+      # built from and the updater can compare it.
+      commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
+      go build -trimpath \
+        -ldflags "-s -w \
+          -X github.com/huggan360/plainshow-cluster/internal/version.Version=${version#v} \
+          -X github.com/huggan360/plainshow-cluster/internal/version.Commit=$commit" \
+        -o "$CRAFT_PART_INSTALL/bin/pscluster" ./cmd/pscluster
+      install -Dm0644 packaging/desktop/plainshow-cluster.desktop \
+        "$CRAFT_PART_INSTALL/share/applications/plainshow-cluster.desktop"
+      install -Dm0644 packaging/desktop/plainshow-cluster.svg \
+        "$CRAFT_PART_INSTALL/share/icons/hicolor/scalable/apps/plainshow-cluster.svg"
+
+apps:
+  plainshow-cluster:
+    command: bin/pscluster
+    desktop: share/applications/plainshow-cluster.desktop
+  pscluster:
+    command: bin/pscluster

@@ -346,9 +346,12 @@ can use it".
   Pi. The `/nodes?view=summary` fields and the `ray start` flags are the two
   things most likely to differ by Ray version. **Do this first on real
   hardware.**
-- **Ray is not installed by the installer.** If Ray is the engine, the package
-  should pull it in, or `init` should offer to. Right now How to tells people to
-  `pip install 'ray[default]'` themselves.
+- ~~**Ray is not installed by the installer.**~~ Done. `install_ray` creates a
+  virtual environment at `<root>/runtime` and installs `ray[default]` into it,
+  on Arch, Debian/Ubuntu, Fedora/RHEL and openSUSE. It goes in the node's own
+  root because the distributions do not package Ray and modern ones refuse a
+  system-wide pip install. `internal/ray` prefers that binary over one on PATH,
+  so the version that runs is the one the node installed.
 - **Nothing keeps data out of git.** The model is "data is a file in the project
   folder", which collides with projects travelling by git the moment somebody
   puts 18 GB in `data/`. Decide: write a `data/` entry into `.gitignore` on
@@ -358,6 +361,19 @@ can use it".
   controller socket for live editing, now inert, and the Controller Server's
   collaboration half has no purpose. Its remaining reason to exist is the hosted
   web overview.
+
+### The desktop program
+
+`pscluster app` starts the node if it is not running and opens a window with no
+browser furniture, through whichever Chromium-family browser is installed, or
+`xdg-open` otherwise. A `.desktop` entry and an icon make it appear in the
+application list.
+
+It is deliberately **not** an embedded browser engine. Bundling one means cgo
+and GTK development headers, which costs the single static binary that
+cross-compiles for every machine in a cluster — a heavy price for a window. If
+that trade ever looks worth making, the thing to reach for is a webview
+wrapper, and `make dist` stops working the day it lands.
 
 ### F. External release gates
 

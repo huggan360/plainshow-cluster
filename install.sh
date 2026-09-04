@@ -21,7 +21,6 @@ missing_node_commands() {
     command -v git >/dev/null 2>&1 || missing="$missing git"
     command -v tailscale >/dev/null 2>&1 || missing="$missing tailscale"
     command -v script >/dev/null 2>&1 || missing="$missing script"
-    command -v jupyter-server >/dev/null 2>&1 || missing="$missing jupyter-server"
     printf '%s' "$missing"
 }
 
@@ -89,19 +88,40 @@ configure_tailscale_apt_repository() {
     rm -f "$temporary_key" "$temporary_list"
 }
 
+# install_ray puts Ray in a virtual environment inside the node's own root.
+#
+# Ray is not packaged by the distributions, and modern ones refuse a system-wide
+# pip install. A venv beside everything else the node owns keeps the one-root
+# rule and leaves the machine's Python untouched.
+install_ray() {
+    root="$1"
+    if [ -x "$root/runtime/bin/ray" ]; then
+        note "Ray is already installed for this node"
+        return 0
+    fi
+    note "installing Ray into $root/runtime"
+    if ! python3 -m venv "$root/runtime" 2>/dev/null; then
+        echo "install: could not create the Python environment for Ray" >&2
+        echo "install: install python3-venv and re-run, or install Ray yourself" >&2
+        return 0
+    fi
+    if ! "$root/runtime/bin/pip" install --quiet --upgrade pip 2>/dev/null ||
+       ! "$root/runtime/bin/pip" install --quiet "ray[default]"; then
+        echo "install: Ray could not be installed automatically" >&2
+        echo "install: run  $root/runtime/bin/pip install 'ray[default]'" >&2
+        return 0
+    fi
+    note "Ray installed"
+}
+
 install_apt_dependencies() {
     note "installing Debian/Ubuntu runtime dependencies"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y ca-certificates curl git util-linux
+    apt-get install -y ca-certificates curl git util-linux python3 python3-venv python3-pip
     configure_tailscale_apt_repository
     apt-get update
     apt-get install -y tailscale
-    if apt-cache show jupyter-server >/dev/null 2>&1; then
-        apt-get install -y jupyter-server
-    else
-        note "jupyter-server is unavailable in the enabled apt repositories; notebooks remain disabled"
-    fi
 }
 
 configure_tailscale_dnf_repository() {
@@ -136,15 +156,9 @@ configure_tailscale_dnf_repository() {
 
 install_dnf_dependencies() {
     note "installing Fedora/RHEL runtime dependencies"
-    dnf install -y ca-certificates curl git util-linux
+    dnf install -y ca-certificates curl git util-linux python3 python3-pip
     configure_tailscale_dnf_repository
     dnf install -y tailscale
-    if dnf --quiet list --available python3-jupyter-server >/dev/null 2>&1 ||
-       dnf --quiet list --installed python3-jupyter-server >/dev/null 2>&1; then
-        dnf install -y python3-jupyter-server
-    else
-        note "python3-jupyter-server is unavailable; notebooks remain disabled"
-    fi
 }
 
 configure_tailscale_zypper_repository() {
@@ -172,13 +186,27 @@ configure_tailscale_zypper_repository() {
 
 install_zypper_dependencies() {
     note "installing openSUSE runtime dependencies"
-    zypper --non-interactive install ca-certificates curl git util-linux
+    zypper --non-interactive install ca-certificates curl git util-linux python3 python3-pip
     configure_tailscale_zypper_repository
     zypper --non-interactive refresh
     zypper --non-interactive install tailscale
-    if ! zypper --non-interactive install python-jupyter-server; then
-        note "python-jupyter-server is unavailable; notebooks remain disabled"
-    fi
+}
+
+# install_desktop_entry makes Plainshow Cluster appear in the desktop's
+# application list. It is skipped for an unprivileged or headless install.
+install_desktop_entry() {
+    [ "$(id -u)" -eq 0 ] || return 0
+    [ -d /usr/share/applications ] || return 0
+    source_dir="$(dirname "$0")/packaging/desktop"
+    [ -f "$source_dir/plainshow-cluster.desktop" ] || return 0
+    note "adding the desktop entry"
+    install -m 0644 "$source_dir/plainshow-cluster.desktop" \
+        /usr/share/applications/plainshow-cluster.desktop
+    install -d -m 0755 /usr/share/icons/hicolor/scalable/apps
+    install -m 0644 "$source_dir/plainshow-cluster.svg" \
+        /usr/share/icons/hicolor/scalable/apps/plainshow-cluster.svg
+    command -v update-desktop-database >/dev/null 2>&1 &&
+        update-desktop-database /usr/share/applications 2>/dev/null || true
 }
 
 install_node_dependencies() {
@@ -201,7 +229,7 @@ install_node_dependencies() {
         # Do not use -Sy here: updating only package databases can create an
         # unsupported partial Arch upgrade. --needed keeps repeat runs cheap.
         pacman -S --needed --noconfirm \
-            ca-certificates git tailscale util-linux jupyter-server
+            ca-certificates git tailscale util-linux python python-pip
     elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1; then
         install_apt_dependencies
     elif command -v dnf >/dev/null 2>&1; then
@@ -211,7 +239,7 @@ install_node_dependencies() {
     else
         echo "install: automatic dependencies support Arch, Debian/Ubuntu, Fedora/RHEL and openSUSE" >&2
         echo "install: missing:$missing" >&2
-        echo "install: install Git, Tailscale, util-linux/script and jupyter-server, or set" >&2
+        echo "install: install Git, Tailscale, util-linux/script and Python, or set" >&2
         echo "install: PSCLUSTER_SKIP_DEPENDENCIES=1 to install only the binary" >&2
         exit 1
     fi
@@ -219,9 +247,6 @@ install_node_dependencies() {
     if [ -n "$missing" ]; then
         echo "install: package installation completed but commands are still missing:$missing" >&2
         exit 1
-    fi
-    if ! command -v jupyter-server >/dev/null 2>&1; then
-        note "jupyter-server is optional and was not found; the rest of the node is ready"
     fi
 }
 
@@ -268,6 +293,10 @@ if [ "$(id -u)" -ne 0 ] && [ "${ROOT#/opt/}" != "$ROOT" ]; then
 fi
 
 mkdir -p "$ROOT/bin"
+if [ "$COMPONENT" = node ]; then
+    install_ray "$ROOT"
+    install_desktop_entry
+fi
 temporary="$ROOT/bin/.${BINARY_NAME}.new"
 cp "$BINARY_SRC" "$temporary"
 chmod 755 "$temporary"

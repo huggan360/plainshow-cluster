@@ -96,6 +96,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sysinfo", s.getSysinfo)
 	mux.HandleFunc("GET /api/machines", s.getMachines)
 	mux.HandleFunc("GET /api/tailnet", s.getTailnet)
+	mux.HandleFunc("GET /api/open", s.openTargets)
+	mux.HandleFunc("POST /api/projects/{name}/open", s.openProject)
 	mux.HandleFunc("GET /api/ray", s.getRay)
 	mux.HandleFunc("POST /api/ray/start", s.startRay)
 	mux.HandleFunc("POST /api/ray/stop", s.stopRay)

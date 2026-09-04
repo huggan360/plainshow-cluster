@@ -28,6 +28,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/jobs"
+	"github.com/huggan360/plainshow-cluster/internal/ray"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/updater"
@@ -58,6 +59,8 @@ func main() {
 		err = cmdRun(rest)
 	case "config":
 		err = cmdConfig(rest)
+	case "app", "open":
+		err = cmdApp(rest)
 	case "network", "networks":
 		err = cmdNetwork(rest)
 	case "invite":
@@ -104,6 +107,10 @@ func usage() {
 
   pscluster config [--root DIR] [get KEY | set KEY VALUE | path]
       Read or change settings.
+
+  pscluster app
+      Open Plainshow Cluster as a desktop program, starting the node if it is
+      not already running.
 
   pscluster network [list | use ID]
       Show the networks this machine belongs to, or switch the active one.
@@ -458,6 +465,7 @@ func cmdServe(args []string) error {
 		os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	ray.UseManaged(l.RayBinary())
 	srv.StartTelemetry(ctx, 3*time.Second)
 	srv.StartPeerDiscovery(ctx, 30*time.Second)
 	srv.StartAccountCheckIn(ctx, time.Minute)

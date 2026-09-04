@@ -384,6 +384,11 @@ func (l Layout) Run() string        { return filepath.Join(l.Root, "run") }
 func (l Layout) Bin() string        { return filepath.Join(l.Root, "bin") }
 func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "pscluster") }
 
+// RayBinary is the Ray this node manages, installed into a virtual environment
+// under its own root. Preferring it means the version the node runs is the one
+// it installed, not whatever a system Python happens to provide.
+func (l Layout) RayBinary() string { return filepath.Join(l.Root, "runtime", "bin", "ray") }
+
 // GitHubToken is where this node keeps its GitHub credential. It is inside the
 // install root like everything else, and readable only by the owner.
 func (l Layout) GitHubToken() string   { return filepath.Join(l.Root, "keys", "github.token") }

@@ -80,6 +80,36 @@ async function renderProject(host, name) {
     const repository = repositoryPanel(name, async () => {});
     const team = teamPanel(name);
     const files = el('div', {});
+    const openRow = el('div', { style: 'display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap' });
+
+    // Only offer what this machine can actually do: a button that fails is
+    // worse than no button.
+    api('/api/open').then((targets) => {
+        const open = async (where, label) => {
+            try {
+                await api(`/api/projects/${encodeURIComponent(name)}/open`,
+                    { method: 'POST', body: { in: where } });
+                toast(label);
+            } catch (err) { toast(err.message, 'err'); }
+        };
+        mount(openRow,
+            targets.editor
+                ? el('button', {
+                    class: 'btn btn--sm btn--primary',
+                    onclick: () => open('editor', `Opening in ${targets.editor_name}…`),
+                }, `Open in ${targets.editor_name}`)
+                : null,
+            targets.file_manager
+                ? el('button', {
+                    class: 'btn btn--sm',
+                    onclick: () => open('files', 'Opening the folder…'),
+                }, 'Open folder')
+                : null,
+            !targets.editor && !targets.file_manager
+                ? el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
+                    'No editor or file manager found on this machine.')
+                : null);
+    }).catch(() => {});
 
     // A read-only listing, so you can confirm the folder holds what you expect
     // without this becoming an editor.
@@ -118,7 +148,7 @@ async function renderProject(host, name) {
                 el('div', { class: 'panel__head' }, 'Repository'), repository.node),
             el('div', {},
                 el('div', { class: 'panel', style: 'margin-bottom:14px' },
-                    el('div', { class: 'panel__head' }, 'Folder'), files),
+                    el('div', { class: 'panel__head' }, 'Folder'), openRow, files),
                 el('div', { class: 'panel' },
                     el('div', { class: 'panel__head' }, 'Team'), team.node))));
 

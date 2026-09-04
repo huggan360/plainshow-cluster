@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -37,9 +38,9 @@ const (
 
 // runner executes the ray command. A variable so tests need no Ray installed.
 var runner = func(ctx context.Context, args ...string) ([]byte, error) {
-	path, err := exec.LookPath("ray")
+	path, err := resolve()
 	if err != nil {
-		return nil, ErrNotInstalled
+		return nil, err
 	}
 	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
 	if err != nil {
@@ -67,6 +68,28 @@ var fetch = func(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("ray dashboard returned %d", res.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(res.Body, 8<<20))
+}
+
+// managed is the Ray this node installed, set at startup. Preferring it means
+// the version that runs is the one the installer put there rather than whatever
+// a system Python offers.
+var managed string
+
+// UseManaged points the driver at a node-managed Ray installation.
+func UseManaged(path string) { managed = path }
+
+// resolve finds the ray command, preferring the managed one.
+func resolve() (string, error) {
+	if managed != "" {
+		if info, err := os.Stat(managed); err == nil && !info.IsDir() {
+			return managed, nil
+		}
+	}
+	path, err := exec.LookPath("ray")
+	if err != nil {
+		return "", ErrNotInstalled
+	}
+	return path, nil
 }
 
 // Node is one machine in the Ray cluster.
