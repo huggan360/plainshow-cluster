@@ -1,6 +1,6 @@
 # Codex handover to Claude
 
-Last updated 2026-09-03. `CLAUDE.md` is the architecture record; this is the
+Last updated 2026-09-04. `CLAUDE.md` is the architecture record; this is the
 operational handover for the completed implementation pass.
 
 ## Current outcome
@@ -111,10 +111,10 @@ Deployment is complete. Both `plainshow-cluster-admin` and Apache are active,
 HTTP redirects to HTTPS, and the public health endpoint and embedded page
 return success through Cloudflare. The dedicated ECDSA Let's
 Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
-The deployed Linux arm64 program is revision `002a4c4`. It includes the final
-PlainShow-branded admin interface, and the public HTML, CSS, JavaScript and
-production-icon checksum were verified against that revision after restart. No
-account has been created yet, so the human handoff is:
+The deployed Linux arm64 admin program is revision `5d812d5`. It includes the
+strict account/key/controller-registry split: `/ws` returns 404 both locally
+and publicly. The public health endpoint and branded interface were verified
+after restart. No account has been created yet, so the human handoff is:
 
 ```sh
 sudo cat /opt/plainshow-cluster-admin/bootstrap.txt
@@ -143,6 +143,29 @@ this root is enterprise administrator/key-recovery access.
   daemons registered two global accounts, minted/consumed an invitation,
   completed the pinned-TLS peer join, transferred the management key and
   reported two members/two devices in the enterprise registry.
+- A second real-process integration claimed an independent controller,
+  selected the owner's network, discovered it through the account server and
+  confirmed that the admin process has no `/ws` route.
+- The separate controller repository passed format, vet and all tests,
+  including a real two-client WebSocket relay. Its amd64 and arm64 release
+  checksums passed.
+
+## Independent controller deployment
+
+The separate project is `/var/www/html/projects/hugohansson/cluster-controller`
+at deployed revision `23baa31`. PlainShow runs it as the isolated,
+boot-restored `cluster-controller` process on `127.0.0.1:10003`. Its state file
+is owned by the runtime account with mode `0600`.
+
+The `cluster.plainshow.se` publication is enabled with an Apache WebSocket proxy
+and currently has status `waiting-dns`; the Host-header HTTP path already
+reaches the controller. Add the DNS record pointing at this Pi. PlainShow will
+retry certificate issuance automatically and then report `published`.
+
+The controller is unclaimed until the first global account and at least one
+owner/admin network are created. Sign in at the controller after those exist,
+claim it, and select the networks it should supply. See the separate project's
+`CODEX.md` for its exact security boundary and operations.
 
 No dependency was installed during this pass. This Pi does not have
 `jupyter_server`, so smoke covered the actionable unavailable-tool path.
@@ -176,6 +199,10 @@ PATH=/usr/local/go/bin:$PATH make dist
 sudo systemctl status plainshow-cluster-admin
 curl -fsS http://127.0.0.1:10002/healthz
 curl -fsS https://clusteradmin.plainshow.se/healthz
+
+plainshow pm2
+plainshow project cluster-controller publish-status
+curl -fsS http://127.0.0.1:10003/healthz
 ```
 
 Never touch `/var/www/html/cloud`; it is the production Nextcloud instance and
