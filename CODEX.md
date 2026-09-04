@@ -201,8 +201,10 @@ validation complete until these are exercised by the user and friend:
    widgets and WebSocket proxying.
 4. Open the same file in browsers on two nodes and verify live edits reach both
    working trees through `cluster.plainshow.se`, then exercise Git merge.
-5. Install `v0.1.0-alpha.1`, publish the next alpha build and exercise
-   `pscluster update apply`; only then tag v1.0.0.
+5. Install `v0.1.0-alpha.1`, let the node discover `v0.1.0-alpha.2`, and
+   exercise `pscluster update apply`; only then tag v1.0.0. Alpha.2 supersedes
+   alpha.1 because a Node 26 syntax check found a missing parenthesis in the
+   Jobs view while building alpha.1's Arch package.
 
 These are external validation/release operations, not unimplemented programs.
 Add regression tests for concrete failures discovered there.

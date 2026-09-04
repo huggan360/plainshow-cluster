@@ -59,7 +59,7 @@ function table(jobs) {
                     el('td', {}, stateChip(j.state)),
                     el('td', { class: 'num muted' },
                         j.started_at ? duration(j.started_at, j.ended_at) : '—'),
-                    el('td', { class: 'muted' }, ago(j.created_at))))));
+                    el('td', { class: 'muted' }, ago(j.created_at)))))));
 }
 
 async function renderJobDetail(host, id) {

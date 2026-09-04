@@ -227,7 +227,7 @@ Assessed by running it, not by reading commit messages.
 | Datasets | implemented — content-addressed and direct peer syncing; no sharding |
 | Collaborative editing | implemented — controller relay plus local durable writes and offline outbox |
 | Notebooks | implemented through an installed `jupyter_server` |
-| Updates and releases | implemented; first alpha release cut, alpha-to-alpha upgrade remains a hardware exercise |
+| Updates and releases | implemented; alpha.1 and corrected alpha.2 published, real alpha-to-alpha upgrade remains a hardware exercise |
 | Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
 | Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
 | Terminal | implemented as a policy-controlled interactive PTY job |
@@ -339,10 +339,12 @@ editing is the only data-plane feature it adds; Git works without it.
     Needs hardware nobody has run this on. Expect the driver and CUDA mismatch
     handling to be wrong. **This is where the estimate is most likely to
     break.** *3d*
-17. **Test a real published upgrade.** `v0.1.0-alpha.1` is the first release;
-    install it, publish alpha.2, and watch an actual node take the update. The
-    updater supports semantic prerelease ordering and authenticates every asset
-    of a private release, including `checksums.txt`. *2d*
+17. **Test a real published upgrade.** `v0.1.0-alpha.1` is the first release and
+    `v0.1.0-alpha.2` corrects the Jobs-view syntax caught by Node 26 while
+    building alpha.1's Arch package. Install alpha.1 and watch an actual node
+    take alpha.2. The updater supports semantic prerelease ordering and
+    authenticates every asset of a private release, including `checksums.txt`.
+    *2d*
 18. ~~**Install hardening and docs.**~~ `install.sh` installs the node or account
     service atomically, creates the matching one-root configuration, and writes
     systemd integration. Node installation provisions the full non-GPU runtime
