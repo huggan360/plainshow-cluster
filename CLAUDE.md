@@ -336,6 +336,29 @@ authentication on. Anyone re-testing this should know `curl -sf` treats 401 as
 failure, which will make a readiness loop spin its whole retry budget and look
 like a thirty-second startup hang.
 
+### Known gaps in the Ray change
+
+Recorded because they are the difference between "the code exists" and "somebody
+can use it".
+
+- **Never run against a real Ray.** `internal/ray` is verified against recorded
+  response shapes, not a live cluster — Ray is not installed on the development
+  Pi. The `/nodes?view=summary` fields and the `ray start` flags are the two
+  things most likely to differ by Ray version. **Do this first on real
+  hardware.**
+- **Ray is not installed by the installer.** If Ray is the engine, the package
+  should pull it in, or `init` should offer to. Right now How to tells people to
+  `pip install 'ray[default]'` themselves.
+- **Nothing keeps data out of git.** The model is "data is a file in the project
+  folder", which collides with projects travelling by git the moment somebody
+  puts 18 GB in `data/`. Decide: write a `data/` entry into `.gitignore` on
+  project creation and sync it separately over the tailnet, or say plainly that
+  data is per-machine. Until then a large dataset will be committed.
+- **Dead collaboration plumbing.** `web/lib/client.js` still carries the
+  controller socket for live editing, now inert, and the Controller Server's
+  collaboration half has no purpose. Its remaining reason to exist is the hosted
+  web overview.
+
 ### F. External release gates
 
 15. ~~**`internal/api` coverage.**~~ Core network, account authority, registry,

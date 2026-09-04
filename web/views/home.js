@@ -1,7 +1,68 @@
 // Home — the cluster at a glance: this machine, what is running, what exists.
 
 import { el, mount, megabytes, meter, ago, stateDot, uptime } from '../lib/ui.js';
-import { state, refresh, on, navigate } from '../lib/client.js';
+import { state, refresh, on, navigate, api, toast } from '../lib/client.js';
+
+/** rayCard is where a machine joins its network's Ray cluster. */
+function rayCard() {
+    const box = el('div', { class: 'panel' });
+
+    const load = async () => {
+        let status = {};
+        try {
+            status = await api('/api/ray');
+        } catch (err) {
+            mount(box, el('div', { class: 'panel__head' }, 'Ray'),
+                el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message));
+            return;
+        }
+        const running = Boolean(status.running);
+
+        const act = async (path, label) => {
+            try {
+                toast(label);
+                await api(path, { method: 'POST', body: {} });
+                await load();
+            } catch (err) {
+                toast(err.message, 'err');
+                await load();
+            }
+        };
+
+        mount(box,
+            el('div', { class: 'panel__head' },
+                el('span', { class: 'grow' }, 'Ray'),
+                el('span', { class: `chip ${running ? 'chip--good' : 'chip--warn'}` },
+                    running ? 'running' : 'not running')),
+            running
+                ? el('div', {},
+                    el('div', { style: 'font-size:18px;font-weight:700' },
+                        `${status.total_gpu || 0} GPU · ${status.total_cpu || 0} CPU`),
+                    el('p', { class: 'mono', style: 'margin:4px 0 0;font-size:11px;color:#64748b' },
+                        `head ${status.head || 'unknown'}`))
+                : el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12.5px;line-height:1.6' },
+                    status.advice || status.detail ||
+                    'This machine is not part of a Ray cluster yet.'),
+            el('div', { style: 'display:flex;gap:8px;margin-top:14px' },
+                status.installed && !running
+                    ? el('button', {
+                        class: 'btn btn--primary btn--sm',
+                        onclick: () => act('/api/ray/start', 'Starting Ray…'),
+                    }, status.head ? 'Join the cluster' : 'Start Ray')
+                    : null,
+                running
+                    ? el('button', {
+                        class: 'btn btn--sm',
+                        onclick: () => act('/api/ray/stop', 'Stopping Ray…'),
+                    }, 'Leave the cluster')
+                    : null,
+                el('button', { class: 'btn btn--sm', onclick: () => navigate('howto') },
+                    'How to run something')));
+    };
+
+    load();
+    return box;
+}
 
 export async function renderHome(host) {
     await refresh();
@@ -38,6 +99,7 @@ function content() {
                 `${o.active_jobs.length} running`)),
 
         el('div', { class: 'grid grid--2', style: 'margin-bottom:14px' },
+            rayCard(),
             machineCard(o, sys),
             runningCard(o)),
 
