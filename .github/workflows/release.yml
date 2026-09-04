@@ -159,12 +159,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" \
-                --jq .id 2>/dev/null || true)"
-          if [ -n "${id:-}" ]; then
-            echo "removing stale release $id for $GITHUB_REF_NAME"
+          # Drafts are the ones that actually bite: the upload action creates a
+          # draft, attaches the assets, then finalizes it. A draft left by a
+          # failed run still holds the tag name but is invisible to a lookup by
+          # tag, so the next run uploads happily and then fails on the very last
+          # step with already_exists. List every release and match tag_name.
+          for id in $(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+                        --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id"); do
+            echo "removing release $id left for $GITHUB_REF_NAME"
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
-          fi
+          done
 
       - name: Publish
         uses: softprops/action-gh-release@v2
