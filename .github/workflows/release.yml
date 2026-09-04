@@ -87,7 +87,21 @@ jobs:
         run: |
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          runuser -u builder -- env HOME=/home/builder make arch-package
+          commit="$(printf '%.7s' "$GITHUB_SHA")"
+          runuser -u builder -- env HOME=/home/builder \
+            make VERSION="$GITHUB_REF_NAME" COMMIT="$commit" arch-package
+
+      - name: Verify pacman package metadata
+        run: |
+          set -eu
+          version="$(printf '%s' "${GITHUB_REF_NAME#v}" | sed 's/[^[:alnum:].+_]/./g')"
+          package="dist/plainshow-cluster-$version-1-x86_64.pkg.tar.zst"
+          test -s "$package"
+          test "$(find dist -maxdepth 1 -name '*.pkg.tar.zst' | wc -l)" -eq 1
+          bsdtar -xOf "$package" .PKGINFO | grep -Fx "pkgver = $version-1"
+          unpack="$(mktemp -d)"
+          bsdtar -xf "$package" -C "$unpack"
+          "$unpack/usr/lib/plainshow-cluster/pscluster" version | grep -F "${GITHUB_REF_NAME#v}"
 
       - name: Attach pacman package
         uses: softprops/action-gh-release@v2

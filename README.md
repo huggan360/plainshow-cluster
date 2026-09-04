@@ -9,7 +9,7 @@ network, and choose which machines may run work.
 
 ## Install
 
-Open the [latest v0.1.0 alpha release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.0-alpha.2)
+Open the [latest v0.1.0 alpha release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.0-alpha.3)
 and download these three files:
 
 - `install.sh`

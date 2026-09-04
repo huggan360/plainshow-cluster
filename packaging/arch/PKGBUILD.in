@@ -9,6 +9,7 @@ license=('custom')
 depends=('ca-certificates' 'git' 'tailscale' 'util-linux' 'jupyter-server')
 provides=('plainshow-cluster')
 conflicts=('plainshow-cluster-git')
+options=('!debug')
 install=plainshow-cluster.install
 source=('pscluster.seed' 'pscluster-wrapper' 'plainshow-cluster.service')
 sha256sums=('@BINARY_SHA256@' '@WRAPPER_SHA256@' '@SERVICE_SHA256@')

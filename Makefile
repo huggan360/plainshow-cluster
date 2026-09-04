@@ -126,7 +126,7 @@ arch-package: dist
 		-e "s/@SERVICE_SHA256@/$$service_sha/g" \
 		packaging/arch/PKGBUILD.in > "$$work/PKGBUILD"; \
 	(cd "$$work" && makepkg --force --noconfirm --nodeps); \
-	cp "$$work"/*.pkg.tar.zst dist/; \
+	cp "$$work"/plainshow-cluster-[0-9]*.pkg.tar.zst dist/; \
 	(cd dist && sha256sum plainshow-cluster-*.pkg.tar.zst > arch-checksums.txt); \
 	ls -lh dist/*.pkg.tar.zst
 
