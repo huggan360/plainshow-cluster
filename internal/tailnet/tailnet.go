@@ -1,8 +1,9 @@
 // Package tailnet drives the tailscale daemon.
 //
-// Plainshow does not implement a VPN, and does not embed one. It requires the
-// tailscale daemon, brings it up with the join code's auth key, and asks it
-// where the other machines are. That is the whole integration.
+// Plainshow does not implement a VPN, and does not embed one. It uses the
+// Tailscale client daemon against PlainShow's self-hosted Headscale control
+// plane and asks it where the other machines are. Users authenticate only with
+// their PlainShow account.
 //
 // The reason it has to be the real daemon rather than a library inside this
 // binary: distributed training is torch and NCCL opening their own sockets, in
@@ -38,9 +39,19 @@ var runner = func(ctx context.Context, args ...string) ([]byte, error) {
 		if message == "" {
 			message = err.Error()
 		}
-		return out, fmt.Errorf("tailscale %s: %s", strings.Join(args, " "), message)
+		return out, fmt.Errorf("tailscale %s: %s", strings.Join(redactedArgs(args), " "), message)
 	}
 	return out, nil
+}
+
+func redactedArgs(args []string) []string {
+	out := append([]string(nil), args...)
+	for index, arg := range out {
+		if strings.HasPrefix(arg, "--auth-key=") {
+			out[index] = "--auth-key=[redacted]"
+		}
+	}
+	return out
 }
 
 // Peer is one machine on the tailnet.
@@ -157,7 +168,7 @@ func Probe(ctx context.Context) Status {
 func explainState(state string) string {
 	switch state {
 	case "NeedsLogin":
-		return "tailscale is installed but not signed in"
+		return "the private network is waiting for PlainShow account enrollment"
 	case "Stopped":
 		return "tailscale is installed but stopped"
 	case "NoState", "":
@@ -167,10 +178,8 @@ func explainState(state string) string {
 	}
 }
 
-// Up signs this machine into a tailnet with a pre-authorised key.
-//
-// The key comes from the join code, so joining a Plainshow network and joining
-// its tailnet are one step to the person doing it.
+// Up signs this machine into PlainShow's Headscale control plane with a
+// short-lived, one-time key issued for the current PlainShow account.
 func Up(ctx context.Context, authKey, hostname, loginServer string) error {
 	if strings.TrimSpace(authKey) == "" {
 		return errors.New("no tailscale auth key was supplied")
@@ -178,7 +187,7 @@ func Up(ctx context.Context, authKey, hostname, loginServer string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	args := []string{"up", "--auth-key=" + authKey, "--accept-dns=false"}
+	args := []string{"up", "--reset", "--auth-key=" + authKey, "--accept-dns=false"}
 	if hostname != "" {
 		args = append(args, "--hostname="+hostname)
 	}

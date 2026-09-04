@@ -20,6 +20,7 @@ func TestConfigRoundTripUsesOnlyAdminDirectories(t *testing.T) {
 	want.Listen.Port = 10002
 	want.PublicURL = "https://clusteradmin.example"
 	want.RegistrationOpen = false
+	want.Tailnet.LoginServer = "https://tailnet.example"
 	if err := Save(layout, want); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,8 @@ func TestConfigRoundTripUsesOnlyAdminDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Listen.Port != want.Listen.Port || got.PublicURL != want.PublicURL || got.RegistrationOpen {
+	if got.Listen.Port != want.Listen.Port || got.PublicURL != want.PublicURL || got.RegistrationOpen ||
+		got.Tailnet.LoginServer != want.Tailnet.LoginServer || got.Tailnet.EnrollmentTTL != "10m" {
 		t.Fatalf("round trip = %#v", got)
 	}
 	for _, nodeOnly := range []string{layout.Keys(), layout.Projects(), layout.Datasets(), layout.Artifacts(), layout.Database()} {

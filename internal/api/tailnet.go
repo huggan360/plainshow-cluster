@@ -6,7 +6,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 )
 
-// getTailnet reports what the tailscale daemon knows.
+// getTailnet reports what the private-network client daemon knows.
 //
 // This is the page somebody lands on when two machines cannot see each other,
 // so it answers the three questions in order: is it installed, is it signed in,
@@ -24,12 +24,10 @@ func (s *Server) getTailnet(w http.ResponseWriter, r *http.Request) {
 	// Say what to do, not just what is wrong.
 	switch {
 	case !status.Installed:
-		response["advice"] = "Install tailscale on this machine to reach machines on " +
-			"other networks. Without it, a cluster only works where the machines " +
-			"can already reach each other."
+		response["advice"] = "Re-run the PlainShow installer to add private networking."
 	case !status.Running:
-		response["advice"] = "Tailscale is installed but not connected. Joining a " +
-			"network with a join code will sign it in."
+		response["advice"] = "Sign in with your PlainShow account. Private networking " +
+			"is enrolled automatically and will retry in the background."
 	}
 	writeJSON(w, http.StatusOK, response)
 }

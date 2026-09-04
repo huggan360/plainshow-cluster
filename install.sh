@@ -4,11 +4,13 @@
 #
 # Environment:
 #   PSCLUSTER_SKIP_DEPENDENCIES=1  keep package management untouched
-#   PSCLUSTER_TAILSCALE_AUTH_KEY=… connect Tailscale without browser login
-#   PSCLUSTER_TAILSCALE_LOGIN_SERVER=https://… use a Headscale server
+#   PSCLUSTER_TAILSCALE_AUTH_KEY=… advanced: pre-enrol without PlainShow login
+#   PSCLUSTER_TAILSCALE_LOGIN_SERVER=https://… advanced control-server override
 #   PSCLUSTER_NO_START=1           install but do not enable/start services
 
 set -eu
+
+PSCLUSTER_TAILSCALE_LOGIN_SERVER="${PSCLUSTER_TAILSCALE_LOGIN_SERVER:-https://tailnet.plainshow.se}"
 
 note() {
     printf '%s\n' "install: $*"
@@ -234,22 +236,13 @@ start_tailnet() {
         return
     fi
     if [ -n "${PSCLUSTER_TAILSCALE_AUTH_KEY:-}" ]; then
-        note "connecting Tailscale with the supplied authentication key"
-        if [ -n "${PSCLUSTER_TAILSCALE_LOGIN_SERVER:-}" ]; then
-            tailscale up --auth-key="$PSCLUSTER_TAILSCALE_AUTH_KEY" \
-                --login-server="$PSCLUSTER_TAILSCALE_LOGIN_SERVER"
-        else
-            tailscale up --auth-key="$PSCLUSTER_TAILSCALE_AUTH_KEY"
-        fi
-        unset PSCLUSTER_TAILSCALE_AUTH_KEY
-    else
-        note "Tailscale is installed and running, but still needs account login"
-        if [ -n "${PSCLUSTER_TAILSCALE_LOGIN_SERVER:-}" ]; then
-            note "run: sudo tailscale up --login-server=$PSCLUSTER_TAILSCALE_LOGIN_SERVER"
-        else
-            note "run: sudo tailscale up"
-        fi
-    fi
+		note "connecting the private network with the supplied advanced authentication key"
+		tailscale up --reset --auth-key="$PSCLUSTER_TAILSCALE_AUTH_KEY" \
+			--login-server="$PSCLUSTER_TAILSCALE_LOGIN_SERVER" --accept-dns=false
+		unset PSCLUSTER_TAILSCALE_AUTH_KEY
+	else
+		note "private networking is ready and will connect automatically after PlainShow login"
+	fi
 }
 
 COMPONENT="${1:-node}"

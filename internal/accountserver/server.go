@@ -27,14 +27,19 @@ const (
 
 // Server serves global identity APIs and the deliberately small admin page.
 type Server struct {
-	config *Config
-	store  *Store
-	web    fs.FS
+	config  *Config
+	store   *Store
+	web     fs.FS
+	tailnet tailnetProvisioner
 }
 
 // NewServer builds the account authority.
 func NewServer(config *Config, store *Store, web fs.FS) *Server {
-	return &Server{config: config, store: store, web: web}
+	server := &Server{config: config, store: store, web: web}
+	if config != nil && config.Tailnet.LoginServer != "" {
+		server.tailnet = &headscaleProvisioner{config: config.Tailnet}
+	}
+	return server
 }
 
 // Handler returns the public registration/login surface and authenticated
@@ -56,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
 	mux.Handle("POST /api/networks/{id}/rotate-key", s.requireAdmin(http.HandlerFunc(s.rotateNetworkKey)))
 	mux.Handle("POST /api/nodes/check-in", s.requireAccount(http.HandlerFunc(s.nodeCheckIn)))
+	mux.Handle("POST /api/tailnet/enrollment", s.requireAccount(http.HandlerFunc(s.tailnetEnrollment)))
 	mux.Handle("GET /api/controller/context/{id}", s.requireAccount(http.HandlerFunc(s.controllerContext)))
 	mux.Handle("PUT /api/controllers/{id}", s.requireAccount(http.HandlerFunc(s.configureController)))
 	mux.HandleFunc("POST /api/controllers/{id}/check-in", s.controllerCheckIn)
@@ -65,6 +71,22 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.Handle("/", s.staticHandler())
 	return securityHeaders(mux)
+}
+
+func (s *Server) tailnetEnrollment(w http.ResponseWriter, r *http.Request) {
+	if s.tailnet == nil || strings.TrimSpace(s.config.Tailnet.LoginServer) == "" {
+		fail(w, http.StatusServiceUnavailable, "Automatic private-network enrollment is not configured.")
+		return
+	}
+	account, _ := s.currentAccount(r)
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	enrollment, err := s.tailnet.Enrollment(ctx, account)
+	if err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, enrollment)
 }
 
 func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +227,17 @@ func (s *Server) updateAccount(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "No such account.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"disabled": *body.Disabled})
+	response := map[string]any{"disabled": *body.Disabled}
+	if *body.Disabled && s.tailnet != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		err := s.tailnet.Disable(ctx, r.PathValue("id"))
+		cancel()
+		response["private_network_revoked"] = err == nil
+		if err != nil {
+			response["warning"] = "The account is disabled, but its private-network devices could not be expired: " + err.Error()
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) nodes(w http.ResponseWriter, _ *http.Request) {

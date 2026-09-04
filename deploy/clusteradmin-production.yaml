@@ -1,0 +1,12 @@
+# Global PlainShow identity, key-management and aggregate-statistics service.
+# This service does not host a collaboration relay.
+listen:
+  bind: 127.0.0.1
+  port: 10002
+public_url: https://clusteradmin.plainshow.se
+registration_open: true
+tailnet:
+  login_server: https://tailnet.plainshow.se
+  headscale_binary: /usr/bin/headscale
+  headscale_config: /etc/headscale/config.yaml
+  enrollment_ttl: 10m

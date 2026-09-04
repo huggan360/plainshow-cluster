@@ -382,11 +382,12 @@ func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "psclu
 
 // GitHubToken is where this node keeps its GitHub credential. It is inside the
 // install root like everything else, and readable only by the owner.
-func (l Layout) GitHubToken() string  { return filepath.Join(l.Root, "keys", "github.token") }
-func (l Layout) AccountToken() string { return filepath.Join(l.Root, "keys", "account.token") }
-func (l Layout) DeviceKey() string    { return filepath.Join(l.Root, "keys", "device.key") }
-func (l Layout) DeviceCert() string   { return filepath.Join(l.Root, "keys", "device.crt") }
-func (l Layout) PIDFile() string      { return filepath.Join(l.Root, "run", "pscluster.pid") }
+func (l Layout) GitHubToken() string   { return filepath.Join(l.Root, "keys", "github.token") }
+func (l Layout) AccountToken() string  { return filepath.Join(l.Root, "keys", "account.token") }
+func (l Layout) TailnetServer() string { return filepath.Join(l.Root, "keys", "tailnet.server") }
+func (l Layout) DeviceKey() string     { return filepath.Join(l.Root, "keys", "device.key") }
+func (l Layout) DeviceCert() string    { return filepath.Join(l.Root, "keys", "device.crt") }
+func (l Layout) PIDFile() string       { return filepath.Join(l.Root, "run", "pscluster.pid") }
 
 func (l Layout) AdminConfigFile() string { return filepath.Join(l.Root, "admin.yaml") }
 func (l Layout) AdminDatabase() string   { return filepath.Join(l.Root, "accounts.db") }

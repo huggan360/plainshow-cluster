@@ -46,6 +46,7 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	_, _ = s.ensureManagedTailnet(ctx, client, token, false)
 	projects, err := s.store.Projects()
 	if err != nil {
 		return

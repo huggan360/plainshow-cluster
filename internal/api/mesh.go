@@ -553,10 +553,10 @@ func (s *Server) remoteJobInput(w http.ResponseWriter, r *http.Request) {
 // advertisedEndpoint is the address other machines should use to reach this
 // one.
 //
-// A tailnet address wins whenever there is one: it is stable, it works from
+// A private-network address wins whenever there is one: it is stable, it works from
 // any network without a forwarded port, and it is the same address torch and
 // NCCL will use, so what the mesh proves reachable is what training will
-// actually use. Without tailscale this falls back to whatever the host
+// actually use. Without the client this falls back to whatever the host
 // configured, which only works where the machines can already reach each other.
 func advertisedEndpointFor(cfg *config.Config, status tailnet.Status) string {
 	if status.Running && status.Self.Address != "" {
@@ -592,13 +592,12 @@ func (s *Server) clientForNode(networkID, nodeID string) (peerTransport, error) 
 		return nil, err
 	}
 	if node.Address == "" || node.Fingerprint == "" {
-		// Machines on different networks reach each other through tailscale.
-		// Plainshow does not carry traffic for them: saying so is more use than
-		// a timeout, because the fix is one command on the other machine.
+		// Machines on different physical networks reach each other through the
+		// managed private network. PlainShow does not relay their task traffic.
 		return nil, fmt.Errorf(
 			"%s has no address this machine can reach. If it is on another "+
-				"network, install tailscale on both and sign them in — Plainshow "+
-				"uses the address tailscale gives it", node.Name)
+				"network, sign in to PlainShow on both machines; private networking "+
+				"will connect automatically", node.Name)
 	}
 	return mesh.NewClient(node.Address, node.Fingerprint, networkID, s.device), nil
 }

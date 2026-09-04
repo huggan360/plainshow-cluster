@@ -98,6 +98,15 @@ func (c *Client) CheckIn(ctx context.Context, token string, input accountserver.
 	return c.call(ctx, http.MethodPost, "/api/nodes/check-in", token, input, nil)
 }
 
+// TailnetEnrollment asks the global account service for a one-time Headscale
+// key. Users authenticate only to PlainShow; the private transport enrollment
+// happens behind that account session.
+func (c *Client) TailnetEnrollment(ctx context.Context, token string) (accountserver.TailnetEnrollment, error) {
+	var out accountserver.TailnetEnrollment
+	err := c.call(ctx, http.MethodPost, "/api/tailnet/enrollment", token, map[string]string{}, &out)
+	return out, err
+}
+
 // SyncNetwork proves possession of a network key and obtains the enterprise
 // collaboration-controller credential.
 func (c *Client) SyncNetwork(ctx context.Context, token string,

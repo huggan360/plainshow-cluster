@@ -351,12 +351,30 @@ func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, respo
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	client, clientErr := accountclient.New(s.cfg.Account.Server)
+	tailnetConnected := false
+	tailnetError := ""
+	if clientErr != nil {
+		tailnetError = clientErr.Error()
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+		tailnetConnected, clientErr = s.ensureManagedTailnet(ctx, client, response.Token, true)
+		cancel()
+		if clientErr != nil {
+			tailnetError = clientErr.Error()
+		}
+	}
 	if err := s.issueSession(w, r, local); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	go s.checkInAccountServer(context.Background())
-	writeJSON(w, http.StatusOK, map[string]any{"account": local, "authenticated": true})
+	result := map[string]any{"account": local, "authenticated": true,
+		"private_network_connected": tailnetConnected}
+	if tailnetError != "" {
+		result["private_network_error"] = tailnetError
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func centralAccount(local accountserver.Account) store.Account {

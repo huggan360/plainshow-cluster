@@ -122,7 +122,7 @@ func (s *Server) trainingLinkWarnings(nodes []store.NetworkNode) []string {
 		for _, peer := range status.Peers {
 			if peer.Address == nodeAddress && peer.Relayed {
 				warnings = append(warnings, fmt.Sprintf(
-					"%s is reached through a Tailscale relay; training can run, but bandwidth and latency may be unsuitable.", node.Name))
+					"%s is reached through a private-network relay; training can run, but bandwidth and latency may be unsuitable.", node.Name))
 			}
 		}
 	}

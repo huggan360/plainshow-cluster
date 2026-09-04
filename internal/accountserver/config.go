@@ -1,7 +1,7 @@
 // Package accountserver implements the one intentional central service in the
-// Plainshow environment: global accounts, network-key recovery, collaboration
-// relay and aggregate cluster statistics. Compute, project files, datasets and
-// task traffic never pass through it.
+// Plainshow environment: global accounts, network-key recovery, private-network
+// enrollment and aggregate cluster statistics. Collaboration, compute, project
+// files, datasets and task traffic never pass through it.
 package accountserver
 
 import (
@@ -22,9 +22,10 @@ const EnvRoot = "PSCLUSTER_ADMIN_ROOT"
 
 // Config is the complete deploy-time configuration.
 type Config struct {
-	Listen           ListenConfig `yaml:"listen" json:"listen"`
-	PublicURL        string       `yaml:"public_url" json:"public_url"`
-	RegistrationOpen bool         `yaml:"registration_open" json:"registration_open"`
+	Listen           ListenConfig  `yaml:"listen" json:"listen"`
+	PublicURL        string        `yaml:"public_url" json:"public_url"`
+	RegistrationOpen bool          `yaml:"registration_open" json:"registration_open"`
+	Tailnet          TailnetConfig `yaml:"tailnet" json:"tailnet"`
 }
 
 // ListenConfig is normally loopback because Apache terminates public TLS.
@@ -33,10 +34,22 @@ type ListenConfig struct {
 	Port int    `yaml:"port" json:"port"`
 }
 
+// TailnetConfig connects PlainShow accounts to the self-hosted Headscale
+// control plane. LoginServer being empty disables automatic enrollment, which
+// keeps development and independently hosted account servers self-contained.
+type TailnetConfig struct {
+	LoginServer     string `yaml:"login_server" json:"login_server"`
+	HeadscaleBin    string `yaml:"headscale_binary" json:"headscale_binary"`
+	HeadscaleConfig string `yaml:"headscale_config" json:"headscale_config"`
+	EnrollmentTTL   string `yaml:"enrollment_ttl" json:"enrollment_ttl"`
+}
+
 // Defaults keeps the service private until an explicit reverse proxy exposes
 // it. The public hostname is always deployment config.
 func Defaults() *Config {
-	return &Config{Listen: ListenConfig{Bind: "127.0.0.1"}, RegistrationOpen: true}
+	return &Config{Listen: ListenConfig{Bind: "127.0.0.1"}, RegistrationOpen: true,
+		Tailnet: TailnetConfig{HeadscaleBin: "/usr/bin/headscale",
+			HeadscaleConfig: "/etc/headscale/config.yaml", EnrollmentTTL: "10m"}}
 }
 
 // DefaultRoot resolves the service root without sharing state with a node or
@@ -86,6 +99,16 @@ func Load(layout config.Layout) (*Config, error) {
 		out.Listen.Bind = "127.0.0.1"
 	}
 	out.PublicURL = strings.TrimRight(strings.TrimSpace(out.PublicURL), "/")
+	out.Tailnet.LoginServer = strings.TrimRight(strings.TrimSpace(out.Tailnet.LoginServer), "/")
+	if out.Tailnet.HeadscaleBin == "" {
+		out.Tailnet.HeadscaleBin = Defaults().Tailnet.HeadscaleBin
+	}
+	if out.Tailnet.HeadscaleConfig == "" {
+		out.Tailnet.HeadscaleConfig = Defaults().Tailnet.HeadscaleConfig
+	}
+	if out.Tailnet.EnrollmentTTL == "" {
+		out.Tailnet.EnrollmentTTL = Defaults().Tailnet.EnrollmentTTL
+	}
 	return out, nil
 }
 
@@ -96,7 +119,7 @@ func Save(layout config.Layout, value *Config) error {
 		return err
 	}
 	header := fmt.Sprintf(
-		"# Plainshow enterprise account, network-key and collaboration service\n"+
+		"# Plainshow enterprise account, network-key and private-network service\n"+
 			"# Everything it stores lives under: %s\n\n", layout.Root)
 	temporary := layout.AdminConfigFile() + ".tmp"
 	if err := os.WriteFile(temporary, append([]byte(header), raw...), 0o640); err != nil {

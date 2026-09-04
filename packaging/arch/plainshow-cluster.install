@@ -13,8 +13,8 @@ post_install() {
         systemctl enable --now plainshow-cluster.service
     fi
 
-    if ! tailscale status >/dev/null 2>&1; then
-        echo 'PlainShow Cluster installed. Complete Tailscale login with: sudo tailscale up'
+	if ! tailscale status >/dev/null 2>&1; then
+		echo 'PlainShow Cluster installed. Open http://127.0.0.1:9999 and sign in; private networking connects automatically.'
     else
         echo 'PlainShow Cluster installed and started.'
     fi

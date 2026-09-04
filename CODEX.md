@@ -19,10 +19,11 @@ listens on `127.0.0.1:10003`; the assigned production hostname is
 `https://cluster.plainshow.se`.
 
 The Raspberry Pi is intentionally special only at the enterprise layer. It is
-the canonical holder of accounts, network membership/recovery keys and global
-statistics. It never runs cluster jobs and never stores or proxies project
-files, commands, logs, datasets, artifacts, checkpoints, gradients or peer
-addresses. Devices remain equal and exchange task/data traffic directly.
+the canonical holder of accounts, network membership/recovery keys, global
+statistics and the Headscale coordination database. It never runs cluster jobs
+and never stores or proxies project files, commands, logs, datasets, artifacts,
+checkpoints or gradients. Devices remain equal and exchange task/data traffic
+directly whenever NAT traversal succeeds; public DERP is only a fallback.
 
 ## Enterprise implementation
 
@@ -40,6 +41,8 @@ root is `/opt/plainshow-cluster-admin`. The database is
 - owner-authorized external controller registration, scoped relay credentials,
   heartbeats and node discovery;
 - aggregate device check-ins and the lightweight admin dashboard.
+- authenticated one-time Headscale enrollment, mapped one-to-one from the
+  global PlainShow account.
 
 `clusteradmin.plainshow.se` has no `/ws` handler and never sees collaboration
 messages. The independent controller validates a scoped secret carried as the
@@ -65,8 +68,9 @@ continue.
 - Separate controller application with global login, owner-only network
   selection, member-scoped visibility, registry heartbeat and live socket
   counts. It never stores project content or runs jobs.
-- Tailscale/Headscale auth material in join codes and DERP warnings in training
-  preflight; the removed custom tunnel has not returned.
+- Self-hosted Headscale enrollment from the existing PlainShow login and relay
+  warnings in training preflight; users never handle a Tailscale account or
+  reusable transport key, and the removed custom tunnel has not returned.
 - Interactive local/remote terminal implemented as a policy-controlled PTY job.
 - Real installed `jupyter_server` lifecycle and complete same-origin reverse
   proxy under `/jupyter/`; installation uses the distribution package and
@@ -75,8 +79,9 @@ continue.
   `make install*` targets, atomic binary replacement, one-root state, PATH link
   and systemd unit. Node installation provisions Git, Tailscale, PTY and
   Jupyter dependencies through pacman on Arch, apt on Debian/Ubuntu, dnf on
-  Fedora/RHEL derivatives, or zypper on openSUSE. It starts services and accepts
-  a Tailscale/Headscale authentication key for unattended enrolment. Other Linux
+  Fedora/RHEL derivatives, or zypper on openSUSE. It starts the Tailscale client
+  and the PlainShow node; normal enrollment happens after PlainShow login. An
+  explicit authentication key remains an advanced unattended override. Other Linux
   systems can use the static amd64/arm64 binaries after manually providing the
   same runtime tools.
 - Native Arch packaging is under `packaging/arch`; `make arch-package` creates
@@ -117,6 +122,12 @@ Repository templates are:
   issuance.
 - `deploy/clusteradmin.plainshow.se.conf`: final HTTPS reverse proxy for the
   account/key application, with `X-Forwarded-Proto` and no WebSocket route.
+- `deploy/headscale.yaml`: production Headscale config on loopback `10004`,
+  SQLite/WAL storage and public DERP fallback with embedded DERP disabled.
+- `deploy/tailnet-bootstrap.conf` and `deploy/tailnet.plainshow.se.conf`: ACME
+  bootstrap and final HTTPS control-protocol reverse proxy.
+- `deploy/clusteradmin-production.yaml`: account service config enabling the
+  Headscale enrollment provider.
 
 The service binds to `127.0.0.1:10002`. Its bootstrap token is shown only by
 `pscluster-admin init`; on this Pi the deployment process stores that output in
@@ -124,14 +135,15 @@ a root-readable file until the first global administrator is registered. Remove
 that file after registration. The systemd service is
 `plainshow-cluster-admin.service`.
 
-Deployment is complete. Both `plainshow-cluster-admin` and Apache are active,
+Deployment is complete. `plainshow-cluster-admin`, Headscale and Apache are active,
 HTTP redirects to HTTPS, and the public health endpoint and embedded page
 return success through Cloudflare. The dedicated ECDSA Let's
 Encrypt certificate expires 2026-12-02 and Certbot installed automatic renewal.
-The deployed Linux arm64 admin program is revision `5d812d5`. It includes the
-strict account/key/controller-registry split: `/ws` returns 404 both locally
-and publicly. The public health endpoint and branded interface were verified
-after restart. No account has been created yet, so the human handoff is:
+The deployed Linux arm64 admin program includes the strict
+account/key/controller-registry split and Headscale enrollment provider; `/ws`
+returns 404 both locally and publicly. The public health endpoint and branded
+interface were verified after restart. No account has been created yet, so the
+human handoff is:
 
 ```sh
 sudo cat /opt/plainshow-cluster-admin/bootstrap.txt
@@ -143,11 +155,27 @@ Back up `admin.yaml`, `accounts.db`, `accounts.db-wal` and `accounts.db-shm`
 together while stopped, or use SQLite's online backup facility. Possession of
 this root is enterprise administrator/key-recovery access.
 
+Headscale v0.29.3 is installed from the checksum-verified official arm64
+package. It listens only on `127.0.0.1:10004`, with metrics on `10005`, and
+stores its small SQLite state under `/var/lib/headscale`. Apache owns the
+certificate for `tailnet.plainshow.se`; it expires 2026-12-03 and automatic
+renewal is installed. `https://tailnet.plainshow.se/health` returns success.
+
+**External DNS gate:** Cloudflare currently proxies `tailnet.plainshow.se`
+(orange cloud). Change this record to **DNS only** (grey cloud) before enrolling
+real nodes. Cloudflare's HTTP proxy/tunnel does not carry Headscale's long
+`tailscale-control-protocol` upgrade. After the change, confirm public DNS no
+longer resolves to `104.21.9.217` / `172.67.161.88`, then retry node login.
+
 ## Verification completed on this Pi
 
 - `make check`: formatting, vet, 18-module web graph and all Go tests passed.
 - Enterprise HTTP registration/membership, controller authorization and
   external-controller discovery are covered by `internal/accountserver` tests.
+- Authenticated Headscale enrollment is covered with a fake provisioner;
+  configuration and node control-plane marker round trips are covered. A
+  temporary real Headscale user/key was created and deleted through the CLI,
+  without exposing or retaining the key.
 - Duplicate collaboration delivery and controller authentication are tested.
 - `make smoke`: 76 passed, 0 failed, including the production brand asset,
   streamed project upload, download and collaboration-state refresh after
@@ -185,16 +213,18 @@ owner/admin network are created. Sign in at the controller after those exist,
 claim it, and select the networks it should supply. See the separate project's
 `CODEX.md` for its exact security boundary and operations.
 
-No dependency was installed during this pass. This Pi does not have
-`jupyter_server`, so smoke covered the actionable unavailable-tool path.
+Headscale v0.29.3 was the only new runtime dependency installed during this
+follow-up. This Pi does not have `jupyter_server`, so smoke covered the
+actionable unavailable-tool path.
 
 ## External release gates
 
 The software implementation is complete, but do not truthfully call hardware
 validation complete until these are exercised by the user and friend:
 
-1. Install on both Arch machines and join them through their actual Tailscale
-   or Headscale environment.
+1. Set `tailnet.plainshow.se` to Cloudflare DNS-only, then install on both Arch
+   machines. PlainShow login must enroll both automatically without a Tailscale
+   account; create/join a network and confirm direct peer discovery.
 2. Run one real two-rank CUDA/PyTorch `torchrun` job and record any NVIDIA
    driver, CUDA or NCCL mismatch behavior.
 3. With `jupyter_server` installed, verify kernels, completion, rich MIME,
@@ -218,8 +248,11 @@ PATH=/usr/local/go/bin:$PATH make smoke
 PATH=/usr/local/go/bin:$PATH make dist
 
 sudo systemctl status plainshow-cluster-admin
+sudo systemctl status headscale
 curl -fsS http://127.0.0.1:10002/healthz
 curl -fsS https://clusteradmin.plainshow.se/healthz
+curl -fsS http://127.0.0.1:10004/health
+curl -fsS https://tailnet.plainshow.se/health
 
 plainshow pm2
 plainshow project cluster-controller publish-status

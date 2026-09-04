@@ -4,13 +4,24 @@ PlainShow Cluster links Linux computers into one collaborative workspace for AI
 and development tasks. Install it on each computer, sign in, create or join a
 network, and choose which machines may run work.
 
-> **Alpha software:** use it for testing first. Keep copies of important
-> projects and datasets.
+> **Alpha software:** use it for testing first and keep copies of important
+> projects and datasets. The Headscale account integration described here is
+> currently on `main`; it will be included in the next alpha release.
 
 ## Install
 
-Open the [latest v0.1.0 alpha release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.0-alpha.3)
-and download these three files:
+For the current development build, clone the repository and build both
+binaries:
+
+```sh
+git clone https://github.com/huggan360/plainshow-cluster.git
+cd plainshow-cluster
+make build
+sudo env PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
+  ./install.sh node ./pscluster
+```
+
+When the next alpha is published, download these three release files:
 
 - `install.sh`
 - `checksums.txt`
@@ -28,8 +39,8 @@ sudo env PSCLUSTER_ACCOUNT_SERVER=https://clusteradmin.plainshow.se \
   ./install.sh node ./pscluster-linux-amd64
 ```
 
-The installer automatically installs Git, Tailscale, terminal support and
-Jupyter Server on these Linux families:
+The installer automatically installs Git, the Tailscale client, terminal
+support and Jupyter Server on these Linux families:
 
 | Distribution | Package manager |
 |---|---|
@@ -38,9 +49,12 @@ Jupyter Server on these Linux families:
 | Fedora, RHEL, CentOS, Rocky, AlmaLinux, Oracle Linux | `dnf` |
 | openSUSE Leap and Tumbleweed | `zypper` |
 
-It uses the official Tailscale repository when the distribution does not carry
-Tailscale. GPU drivers, CUDA, PyTorch and other model runtimes are deliberately
-left to you because the correct versions depend on the computer and workload.
+It uses the official Tailscale package repository when the distribution does
+not carry the client. You do not need a Tailscale account: signing in to
+PlainShow automatically enrols the client with PlainShow's self-hosted
+Headscale service at `tailnet.plainshow.se`. GPU drivers, CUDA, PyTorch and
+other model runtimes are left to you because their correct versions depend on
+the computer and workload.
 
 For another Linux distribution, install `ca-certificates`, Git, Tailscale,
 util-linux (`script`) and optionally Jupyter Server yourself, then run:
@@ -70,22 +84,20 @@ updater still provide normal upgrades.
 
 ## First start
 
-If Tailscale did not open a login during installation, connect it once:
-
-```sh
-sudo tailscale up
-```
-
 Open <http://127.0.0.1:9999>. Sign in with your PlainShow account, create a
 network, or use a single-use invitation from another member. A node may belong
 to several networks, and its owner controls whether it accepts jobs, terminal
-sessions or GPU work.
+sessions or GPU work. The private network connects during that same PlainShow
+login and retries automatically if the control server is temporarily offline.
 
 The global service at `clusteradmin.plainshow.se` stores accounts, memberships,
-network recovery keys and controller registrations. It does not store projects
-or run tasks. The separate service at `cluster.plainshow.se` supplies optional
-live Cowork collaboration for networks selected by its owner. Projects and jobs
-remain on the cluster machines.
+network recovery keys, controller registrations and short-lived private-network
+enrolment. It does not relay collaboration, store projects or run tasks. The
+Headscale control plane at `tailnet.plainshow.se` coordinates encrypted device
+connections; normal task data travels directly between devices whenever the
+network allows it. The separate service at `cluster.plainshow.se` supplies
+optional live Cowork collaboration for networks selected by its owner. Projects
+and jobs remain on the cluster machines.
 
 ## Update
 

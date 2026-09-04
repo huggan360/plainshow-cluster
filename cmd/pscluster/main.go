@@ -115,7 +115,6 @@ func usage() {
       Read and install a rotated enterprise recovery key on this device.
 
   pscluster invite [--role member] [--network ID]
-                   [--tailnet-auth-key KEY] [--tailnet-login-server URL]
       Create a single-use join code for another machine.
 
   pscluster join CODE [--endpoint URL]

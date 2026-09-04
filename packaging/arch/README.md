@@ -9,10 +9,12 @@ make arch-package
 sudo pacman -U dist/plainshow-cluster-*.pkg.tar.zst
 ```
 
-The package depends on Git, Tailscale, util-linux, CA certificates and
-Jupyter Server, so pacman resolves the complete node runtime. Its install hook
-initializes `/opt/plainshow-cluster`, enables both `tailscaled` and the node,
-and preserves all node data when the package is removed.
+The package depends on Git, the Tailscale client, util-linux, CA certificates
+and Jupyter Server, so pacman resolves the complete node runtime. Its install
+hook initializes `/opt/plainshow-cluster`, enables the transport and node
+services, and preserves all node data when the package is removed. Signing in
+to PlainShow automatically enrols the client with PlainShow's self-hosted
+Headscale control plane; no Tailscale account is needed.
 
 Tagged releases build and attach the x86_64 pacman package automatically.
 Installing it with the exact command `pacman -S plainshow-cluster` additionally

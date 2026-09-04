@@ -157,7 +157,7 @@ func TestUpPassesTheKeyAndHostname(t *testing.T) {
 	}
 	joined := strings.Join(got, " ")
 	for _, want := range []string{"up", "--auth-key=tskey-auth-abc",
-		"--hostname=albin-pc", "--login-server=https://headscale.example"} {
+		"--reset", "--hostname=albin-pc", "--login-server=https://headscale.example"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("Up ran %q, missing %q", joined, want)
 		}
@@ -171,5 +171,12 @@ func TestErrNotInstalledIsRecognisable(t *testing.T) {
 	}
 	if Probe(context.Background()).Installed {
 		t.Error("a missing binary reported as installed")
+	}
+}
+
+func TestAuthKeyIsRedactedFromCommandErrors(t *testing.T) {
+	got := strings.Join(redactedArgs([]string{"up", "--auth-key=secret-value"}), " ")
+	if strings.Contains(got, "secret-value") || !strings.Contains(got, "[redacted]") {
+		t.Fatalf("redacted arguments = %q", got)
 	}
 }

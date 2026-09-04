@@ -93,7 +93,7 @@ function joinNetwork() {
 			el('div', { class: 'field' }, el('label', { class: 'field__label' },
 				'This machine’s reachable address'), endpoint),
 			el('p', { class: 'muted', style: 'font-size:12px;margin:0' },
-				'Leave the address empty for hostname-based LAN discovery. For the internet, use a VPN or public HTTPS address.')),
+				'Leave this empty normally—PlainShow private networking supplies the address automatically. Fill it only for a manual LAN or public endpoint.')),
 		onConfirm: async (close) => {
 			const body = { code: code.value.trim() };
 			if (endpoint.value.trim()) body.endpoint = endpoint.value.trim();
@@ -106,25 +106,15 @@ function joinNetwork() {
 function createInvite(network) {
 	const endpoint = el('input', { class: 'input input--mono',
 		placeholder: 'https://host-or-vpn-address:10000' });
-	const authKey = el('input', { class: 'input input--mono', type: 'password',
-		placeholder: 'tskey-auth-… (optional)' });
-	const loginServer = el('input', { class: 'input input--mono',
-		placeholder: 'Headscale URL (optional)' });
 	modal({ title: `Invite to ${network.name}`, confirmLabel: 'Create code',
 		body: () => el('div', {},
 			el('div', { class: 'field' }, el('label', { class: 'field__label' },
 				'Reachable address (optional)'), endpoint),
-			el('div', { class: 'field' }, el('label', { class: 'field__label' },
-				'Tailscale reusable auth key (optional)'), authKey),
-			el('div', { class: 'field' }, el('label', { class: 'field__label' },
-				'Headscale login server (optional)'), loginServer),
 			el('p', { class: 'muted', style: 'font-size:12px;margin:0' },
-				'The code is single-use and expires after 15 minutes. It pins this machine’s TLS identity.')),
+				'Private networking is linked to each person’s PlainShow account automatically. The code is single-use and expires after 15 minutes.')),
 		onConfirm: async (close) => {
 			const body = { minutes: 15, max_uses: 1 };
 			if (endpoint.value.trim()) body.endpoint = endpoint.value.trim();
-			if (authKey.value.trim()) body.tailnet_auth_key = authKey.value.trim();
-			if (loginServer.value.trim()) body.tailnet_login_server = loginServer.value.trim();
 			const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/invites`,
 				{ method: 'POST', body });
 			close(); showInvite(invite);

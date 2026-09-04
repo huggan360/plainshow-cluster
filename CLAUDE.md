@@ -228,7 +228,7 @@ Assessed by running it, not by reading commit messages.
 | Collaborative editing | implemented — controller relay plus local durable writes and offline outbox |
 | Notebooks | implemented through an installed `jupyter_server` |
 | Updates and releases | implemented; corrected alpha.3 published, real alpha-to-alpha upgrade remains a hardware exercise |
-| Multi-machine networking | implemented through the Tailscale daemon and signed peer mesh |
+| Multi-machine networking | implemented through the Tailscale client, self-hosted Headscale and signed peer mesh |
 | Distributed training | launcher complete and guarded, **never run on two real CUDA machines** |
 | Terminal | implemented as a policy-controlled interactive PTY job |
 | Enterprise master | accounts, network/key/controller registry and admin statistics implemented; no relay |
@@ -239,6 +239,10 @@ The main enterprise service is deployed on this Pi at
 `https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
 `127.0.0.1:10002`. Its systemd unit is enabled. The first administrator still
 needs to register using the protected bootstrap output described in `CODEX.md`.
+That same service issues one-time Headscale enrollment to authenticated
+PlainShow accounts. Headscale is deployed separately at
+`https://tailnet.plainshow.se` on loopback port `10004`; it is coordination
+only and does not turn the account service into a collaboration relay.
 The independent `cluster-controller` runtime is online on `127.0.0.1:10003`.
 Its PlainShow publication for `https://cluster.plainshow.se` is live with TLS
 and WebSocket forwarding through Cloudflare. It still needs to be claimed by
@@ -311,8 +315,11 @@ editing is the only data-plane feature it adds; Git works without it.
 
 ### D. Completed networking
 
-10. ~~**Auth key in the join code.**~~ `mesh.Invite` carries an optional tailscale
-    auth key; `join` calls `tailnet.Up` first. One step instead of two. *1d*
+10. ~~**Account-managed Headscale enrollment.**~~ A successful global PlainShow
+    login requests and consumes a short-lived, one-use Headscale key. Existing
+    signed-in nodes retry in their normal check-in loop. Users never manage a
+    Tailscale account, login URL or reusable invitation key. Legacy invitation
+    fields remain decode-only so old alpha codes do not crash migration. *1d*
 11. ~~**Warn on relayed links**~~ in the training preflight. `internal/tailnet`
     already reports which peers are relayed; a relayed link is somebody else's
     bandwidth. *0.5d*
@@ -400,12 +407,14 @@ rendezvous port has nothing listening until the run starts, so a refusal proves
 the route exists. Treating it as failure would refuse every correctly configured
 cluster.
 
-## The completed Tailscale migration
+## The completed Headscale migration
 
-We drive the daemon; we do not embed it. `internal/tailnet` shells out to
-`tailscale status --json` and `tailscale up`, and that is the entire integration
-surface. Nothing of Tailscale's is vendored, and Plainshow keeps its own
-identity, enrolment and permissions — we take the one thing it is better at.
+We drive the Tailscale client daemon against our own Headscale control plane;
+we do not embed or recreate either. `internal/tailnet` shells out to `tailscale
+status --json` and `tailscale up`. PlainShow owns the only user-facing identity:
+an authenticated account calls `POST /api/tailnet/enrollment`, the account
+service maps it to a stable Headscale user, and returns a short-lived one-use
+key that the node consumes immediately. The key is never stored or displayed.
 
 It has to be the real daemon rather than a library in this binary: torch and
 NCCL open their own sockets in their own processes and need an interface the
@@ -414,15 +423,15 @@ and nothing else, which was never the traffic that was stuck.
 
 **Done**
 
-1. `internal/tailnet` — probe, status, peers, relayed-or-direct, `up` with an
-   auth key. Parsing is tested against real `tailscale status --json` shape.
+1. `internal/tailnet` — probe, status, peers, relayed-or-direct, and reset/up
+   against a configured Headscale URL. Parsing is tested against real
+   `tailscale status --json` shape and errors redact authentication keys.
 2. `GET /api/tailnet`, and joining advertises the tailnet address when there is
    one, so the address the mesh proves reachable is the address training uses.
-
-3. ~~**Carry an auth key in the join code.**~~ `mesh.Invite` has an optional
-   tailscale auth key; `pscluster join` calls `tailnet.Up` before enrolling, so
-   joining a Plainshow network and joining its tailnet are one step. This is
-   convenience, not correctness — `tailscale up` by hand also works.
+3. `internal/accountserver` provisions one Headscale user per global account
+   and mints one-use keys with a ten-minute lifetime. Node login consumes the
+   key automatically and writes only `keys/tailnet.server`. Background check-in
+   migrates already signed-in nodes and rate-limits failed retries.
 4. ~~**Delete `internal/tunnel`.**~~ Done. The registry, dialer, trusted-marker
    path and `StartTunnels` are gone, and `clientForNode` simply dials the peer.
    Cross-network now requires tailscale, which is the honest requirement rather
@@ -434,17 +443,18 @@ and nothing else, which was never the traffic that was stuck.
 
 ## How a machine on another network is reached
 
-Through **tailscale**, which Plainshow drives rather than implements. Install it
-on both machines, sign them in, and the address tailscale hands out is the
-address Plainshow records and dials — and the same address torch and NCCL use,
-so a link the cluster proves reachable is the link training runs over.
+Through the **Tailscale client connected to PlainShow's Headscale server**.
+The installer adds and starts the client on both machines. Signing in to
+PlainShow enrolls it automatically, and the address it receives is what
+PlainShow records and dials — and the same address torch and NCCL use, so a link
+the cluster proves reachable is the link training runs over.
 
 There is no fallback and that is deliberate. A reverse tunnel used to carry
 control traffic to unreachable machines; it worked, and it could never carry
 training, because NCCL is a separate process needing a real interface. Keeping
 it would have meant maintaining a second networking stack that solved half the
-problem. `clientForNode` now says plainly that a machine has no reachable
-address and that tailscale is how to fix it, which is more use than a timeout.
+problem. `clientForNode` now says plainly that both machines should be signed
+in to PlainShow, which is more useful than a timeout.
 
 ## Traps found the hard way
 

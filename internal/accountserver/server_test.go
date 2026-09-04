@@ -1,6 +1,7 @@
 package accountserver
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,22 @@ import (
 	"testing/fstest"
 	"time"
 )
+
+type fakeTailnetProvisioner struct {
+	account         Account
+	result          TailnetEnrollment
+	disabledAccount string
+}
+
+func (f *fakeTailnetProvisioner) Enrollment(_ context.Context, account Account) (TailnetEnrollment, error) {
+	f.account = account
+	return f.result, nil
+}
+
+func (f *fakeTailnetProvisioner) Disable(_ context.Context, accountID string) error {
+	f.disabledAccount = accountID
+	return nil
+}
 
 func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 	store := openTestStore(t)
@@ -168,5 +185,55 @@ func TestControllerRegistryIsSeparateFromAccountServer(t *testing.T) {
 	handler.ServeHTTP(websocketResponse, websocketRequest)
 	if websocketResponse.Code != http.StatusNotFound {
 		t.Fatalf("account server still serves collaboration websocket: %d", websocketResponse.Code)
+	}
+}
+
+func TestPlainShowSessionMintsOneTimeTailnetEnrollment(t *testing.T) {
+	store := openTestStore(t)
+	_ = store.InitialiseBootstrap(TokenHash("bootstrap"))
+	account := Account{ID: "account-1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}
+	if err := store.CreateAccount(account, TokenHash("bootstrap"), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSession("plainshow-session", account.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	provisioner := &fakeTailnetProvisioner{result: TailnetEnrollment{
+		LoginServer: "https://tailnet.example", AuthKey: "one-time-key", ExpiresIn: "10m",
+	}}
+	server := NewServer(&Config{Tailnet: TailnetConfig{LoginServer: "https://tailnet.example"}}, store,
+		fstest.MapFS{"index.html": {Data: []byte("admin")}})
+	server.tailnet = provisioner
+	handler := server.Handler()
+
+	unauthorised := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorised, httptest.NewRequest(http.MethodPost, "/api/tailnet/enrollment", nil))
+	if unauthorised.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous enrollment = %d", unauthorised.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/tailnet/enrollment", nil)
+	request.Header.Set("Authorization", "Bearer plainshow-session")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"auth_key":"one-time-key"`) {
+		t.Fatalf("enrollment = %d %s", response.Code, response.Body.String())
+	}
+	if provisioner.account.ID != account.ID {
+		t.Fatalf("provisioned account = %+v", provisioner.account)
+	}
+	member := Account{ID: "account-2", Username: "friend", DisplayName: "Friend", PasswordHash: "hash"}
+	if err := store.CreateAccount(member, "", true); err != nil {
+		t.Fatal(err)
+	}
+	disable := httptest.NewRequest(http.MethodPatch, "/api/accounts/account-2",
+		strings.NewReader(`{"disabled":true}`))
+	disable.Header.Set("Authorization", "Bearer plainshow-session")
+	disable.Header.Set("Content-Type", "application/json")
+	disabled := httptest.NewRecorder()
+	handler.ServeHTTP(disabled, disable)
+	if disabled.Code != http.StatusOK || provisioner.disabledAccount != member.ID ||
+		!strings.Contains(disabled.Body.String(), `"private_network_revoked":true`) {
+		t.Fatalf("disable/revoke = %d %s, account %q", disabled.Code, disabled.Body.String(), provisioner.disabledAccount)
 	}
 }

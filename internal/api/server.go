@@ -59,6 +59,8 @@ type Server struct {
 	device        *identity.Device
 	fingerprint   string
 	remoteMu      sync.RWMutex
+	tailnetMu     sync.Mutex
+	tailnetRetry  time.Time
 	remoteClients map[string]peerTransport
 	remoteLogs    map[string][]jobs.LogLine
 	reservations  *training.Reservations

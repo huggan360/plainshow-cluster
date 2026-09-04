@@ -100,12 +100,6 @@ func cmdInvite(args []string) error {
 		Expires string `json:"expires_at"`
 	}
 	body := map[string]any{"role": role}
-	if key := f.get("tailnet-auth-key", ""); key != "" {
-		body["tailnet_auth_key"] = key
-	}
-	if server := f.get("tailnet-login-server", ""); server != "" {
-		body["tailnet_login_server"] = server
-	}
 	if err := d.call("POST", "/api/networks/"+network+"/invites", body, &out); err != nil {
 		return err
 	}
