@@ -27,3 +27,17 @@ func LoadAccountToken(layout Layout) (string, error) {
 	}
 	return strings.TrimSpace(string(raw)), nil
 }
+
+// ForgetAccountToken removes the cached bearer token.
+//
+// Signing out has to reach this, not only the browser session: a node that
+// keeps a valid account credential is a node that can hand itself a new session
+// (see AuthConfig.RememberThisMachine), so deleting the cookie alone would make
+// "Sign out" do nothing at all.
+func ForgetAccountToken(layout Layout) error {
+	err := os.Remove(layout.AccountToken())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}

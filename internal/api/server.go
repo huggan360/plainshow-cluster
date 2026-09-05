@@ -55,6 +55,7 @@ type Server struct {
 	fingerprint   string
 	remoteMu      sync.RWMutex
 	tailnetMu     sync.Mutex
+	membershipMu  sync.Mutex
 	rayMu         sync.RWMutex
 	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
@@ -954,6 +955,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"network":        s.cfg.Network,
 		"worker":         s.cfg.Worker,
 		"update":         s.cfg.Update,
+		"auth":           s.cfg.Auth,
 		"root":           s.layout.Root,
 		"version":        version.Version,
 		"paths": map[string]string{
@@ -978,10 +980,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	current := s.cfg.Worker
 	currentUpdate := s.cfg.Update
+	currentAuth := s.cfg.Auth
 	body := struct {
 		Worker *config.WorkerConfig `json:"worker"`
 		Update *config.UpdateConfig `json:"update"`
-	}{Worker: &current, Update: &currentUpdate}
+		Auth   *config.AuthConfig   `json:"auth"`
+	}{Worker: &current, Update: &currentUpdate, Auth: &currentAuth}
 
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
@@ -1006,13 +1010,18 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cfg.Worker = *body.Worker
 	s.cfg.Update = *body.Update
+	if body.Auth != nil {
+		s.cfg.Auth = *body.Auth
+	}
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not save settings: %v", err))
 		return
 	}
 	s.updater.Configure(s.cfg.Update)
 	s.hub.Publish("settings.changed", s.cfg.Worker)
-	writeJSON(w, 200, map[string]any{"worker": s.cfg.Worker, "update": s.cfg.Update})
+	writeJSON(w, 200, map[string]any{
+		"worker": s.cfg.Worker, "update": s.cfg.Update, "auth": s.cfg.Auth,
+	})
 }
 
 // -------------------------------------------------------------- realtime ----

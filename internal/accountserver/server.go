@@ -57,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/nodes", s.requireAdmin(http.HandlerFunc(s.nodes)))
 	mux.Handle("GET /api/networks", s.requireAdmin(http.HandlerFunc(s.networks)))
 	mux.Handle("GET /api/controllers", s.requireAdmin(http.HandlerFunc(s.controllers)))
+	mux.Handle("GET /api/networks/mine", s.requireAccount(http.HandlerFunc(s.myNetworks)))
 	mux.Handle("POST /api/networks/sync", s.requireAccount(http.HandlerFunc(s.syncNetwork)))
 	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
 	mux.Handle("PUT /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.updateNetworkMember)))
@@ -267,6 +268,18 @@ func (s *Server) controllers(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, controllers)
+}
+
+// myNetworks answers "what am I a member of", which is the question a device
+// that has just been signed into has to ask before it can show anything.
+func (s *Server) myNetworks(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	networks, err := s.store.NetworksForAccount(account.ID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
 }
 
 func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {

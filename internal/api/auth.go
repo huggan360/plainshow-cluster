@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -76,6 +77,17 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 
 		cookie, err := r.Cookie(sessionCookie)
 		if err != nil {
+			// The desktop window cannot keep a cookie, so a browser session is
+			// not the durable credential here — the node's own account token
+			// is. Re-establish from that rather than asking the machine's owner
+			// for a password every time they close their own application.
+			if account, ok := s.rememberedAccount(r); ok {
+				if issueErr := s.issueSession(w, r, account); issueErr == nil {
+					ctx := context.WithValue(r.Context(), authContextKey{}, account)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
 			fail(w, http.StatusUnauthorized, "Sign in to continue.")
 			return
 		}
@@ -97,6 +109,58 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), authContextKey{}, account)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// rememberedAccount decides whether this request may be given a session
+// without a password.
+//
+// Three things must all hold, and each one is load-bearing:
+//
+//   - the machine's owner asked for it (auth.remember_this_machine);
+//   - the node is bound to loopback, because once the interface answers on the
+//     network "local" no longer means "the person at the keyboard";
+//   - the request really came from this machine.
+//
+// It proves nothing about *which* local user is asking, which is why it is a
+// setting rather than a default nobody chose. On a shared machine, turn it off.
+func (s *Server) rememberedAccount(r *http.Request) (store.Account, bool) {
+	if !s.cfg.Auth.RememberThisMachine || !loopbackBind(s.cfg.Network.Bind) {
+		return store.Account{}, false
+	}
+	if !requestFromLoopback(r) {
+		return store.Account{}, false
+	}
+	if s.cfg.Account.ID == "" {
+		return store.Account{}, false
+	}
+	// The node must still hold a credential for that account. Signing out
+	// removes it, and this must not resurrect the session afterwards.
+	if token, err := config.LoadAccountToken(s.layout); err != nil || token == "" {
+		return store.Account{}, false
+	}
+	account, err := s.store.Account(s.cfg.Account.ID)
+	if err != nil {
+		return store.Account{}, false
+	}
+	return account, true
+}
+
+func loopbackBind(bind string) bool {
+	switch strings.TrimSpace(bind) {
+	case "", "localhost":
+		return true
+	}
+	address := net.ParseIP(strings.TrimSpace(bind))
+	return address != nil && address.IsLoopback()
+}
+
+func requestFromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	address := net.ParseIP(strings.TrimSpace(host))
+	return address != nil && address.IsLoopback()
 }
 
 // bearerToken reads an Authorization: Bearer header.
@@ -354,6 +418,7 @@ func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, respo
 	client, clientErr := accountclient.New(s.cfg.Account.Server)
 	tailnetConnected := false
 	tailnetError := ""
+	adopted := 0
 	if clientErr != nil {
 		tailnetError = clientErr.Error()
 	} else {
@@ -363,6 +428,12 @@ func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, respo
 		if clientErr != nil {
 			tailnetError = clientErr.Error()
 		}
+		// Adopt before answering, not in the background: the interface renders
+		// straight after this, and a workspace that is empty for the first
+		// minute of a new machine's life reads as a broken sign-in.
+		adoptCtx, adoptCancel := context.WithTimeout(r.Context(), 20*time.Second)
+		adopted, _ = s.AdoptAccountNetworks(adoptCtx, client, response.Token)
+		adoptCancel()
 	}
 	if err := s.issueSession(w, r, local); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -370,6 +441,7 @@ func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, respo
 	}
 	go s.checkInAccountServer(context.Background())
 	result := map[string]any{"account": local, "authenticated": true,
+		"networks_adopted":          adopted,
 		"private_network_connected": tailnetConnected}
 	if tailnetError != "" {
 		result["private_network_error"] = tailnetError
@@ -384,6 +456,12 @@ func centralAccount(local accountserver.Account) store.Account {
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
 		_ = s.store.DeleteSession(cookie.Value)
+	}
+	// Signing out has to sign the machine out, not just this browser. While the
+	// node holds an account credential it can issue itself a fresh session, so
+	// clearing only the cookie would leave the button doing nothing.
+	if s.cfg.Auth.RememberThisMachine {
+		_ = config.ForgetAccountToken(s.layout)
 	}
 	clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "signed out"})

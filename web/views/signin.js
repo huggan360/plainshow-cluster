@@ -6,7 +6,7 @@
 // how it stops being that.
 
 import { el, mount, plainshowLogo } from '../lib/ui.js';
-import { api } from '../lib/client.js';
+import { api, toast } from '../lib/client.js';
 
 /**
  * renderGate paints the sign-in screen into host and resolves once the browser
@@ -58,8 +58,15 @@ function card(firstRun, status, done, switchMode) {
 					bootstrap_token: bootstrap.value.trim(),
                 }
                 : { username: username.value.trim(), password: password.value };
-            await api(firstRun ? '/api/auth/setup' : '/api/auth/login',
+            const result = await api(firstRun ? '/api/auth/setup' : '/api/auth/login',
                 { method: 'POST', body });
+            // Signing in on a machine that has never seen this account pulls
+            // the networks the account already belongs to. Say so, or a
+            // workspace that filled itself in looks like a glitch.
+            if (result && result.networks_adopted > 0) {
+                toast(`Found ${result.networks_adopted} network${
+                    result.networks_adopted === 1 ? '' : 's'} on your account.`);
+            }
             done();
         } catch (err) {
             error.textContent = err.message;

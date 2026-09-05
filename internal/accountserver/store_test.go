@@ -155,3 +155,66 @@ func TestNetworkAdministratorsCanChangeAndRemoveMembers(t *testing.T) {
 		t.Fatalf("members after removal = %+v, %v", members, err)
 	}
 }
+
+// TestNetworksForAccountIsScopedToMembership is the read that makes an account
+// portable between machines, so it has to be exactly as wide as membership and
+// not one row wider.
+func TestNetworksForAccountIsScopedToMembership(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.InitialiseBootstrap(TokenHash("secret")); err != nil {
+		t.Fatal(err)
+	}
+	hugo := Account{ID: "a1", Username: "huggan360", DisplayName: "Hugo", PasswordHash: "h"}
+	if err := store.CreateAccount(hugo, TokenHash("secret"), false); err != nil {
+		t.Fatal(err)
+	}
+	albin := Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "h"}
+	if err := store.CreateAccount(albin, "", true); err != nil {
+		t.Fatal(err)
+	}
+
+	const key = "0123456789abcdef0123456789abcdef0123456789"
+	if _, err := store.RegisterNetwork(hugo.ID, NetworkRegistration{
+		ID: "net-lab", Name: "Research lab", ManagementKey: key, Role: "owner",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RegisterNetwork(albin.ID, NetworkRegistration{
+		ID: "net-albin", Name: "Albin's", ManagementKey: key, Role: "owner",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mine, err := store.NetworksForAccount(hugo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mine) != 1 || mine[0].ID != "net-lab" {
+		t.Fatalf("networks for hugo = %+v, want only net-lab", mine)
+	}
+	if !mine[0].Owner || mine[0].Role != "owner" {
+		t.Errorf("the network's own owner came back as %+v", mine[0])
+	}
+	// The key travels deliberately: it is what lets another machine of the same
+	// account take part. Without it the row is decoration.
+	if mine[0].ManagementKey != key {
+		t.Error("the management key was not returned, so a second machine could not participate")
+	}
+
+	// Being added to somebody else's network makes it appear, as a member.
+	if err := store.GrantNetworkMember(albin.ID, "net-albin", key, hugo.ID, "member"); err != nil {
+		t.Fatal(err)
+	}
+	mine, err = store.NetworksForAccount(hugo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mine) != 2 {
+		t.Fatalf("after being added, networks = %+v, want 2", mine)
+	}
+	for _, network := range mine {
+		if network.ID == "net-albin" && (network.Owner || network.Role != "member") {
+			t.Errorf("a member's row claims ownership: %+v", network)
+		}
+	}
+}

@@ -47,6 +47,9 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		return
 	}
 	_, _ = s.ensureManagedTailnet(ctx, client, token, false)
+	// Pull before pushing. A machine somebody has just signed into has nothing
+	// to report yet, and everything to learn.
+	_, _ = s.AdoptAccountNetworks(ctx, client, token)
 	projects, err := s.store.Projects()
 	if err != nil {
 		return
@@ -95,6 +98,88 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	_ = client.CheckIn(requestCtx, token, checkIn)
+}
+
+// AdoptAccountNetworks materialises every network this account belongs to but
+// this device has never heard of, and returns how many were new.
+//
+// This is the half of the account relationship that was missing. Membership
+// belongs to the account, not to whichever machine happened to create the
+// network, so signing in on a new laptop has to bring the networks with it —
+// otherwise the sign-in succeeds and the workspace is empty, which reads as a
+// broken query rather than an absent feature.
+//
+// Adopting a network makes it visible and available; it does not select it and
+// it does not widen what this machine will do. The device-wide policy in
+// Settings still decides whether any network gets to run anything here.
+func (s *Server) AdoptAccountNetworks(ctx context.Context, client *accountclient.Client, token string) (int, error) {
+	remote, err := client.MyNetworks(ctx, token)
+	if err != nil {
+		return 0, err
+	}
+
+	s.membershipMu.Lock()
+	defer s.membershipMu.Unlock()
+
+	known := make(map[string]bool, len(s.cfg.Memberships))
+	for _, membership := range s.cfg.Memberships {
+		known[membership.ID] = true
+	}
+
+	adopted := 0
+	for _, network := range remote {
+		if network.ID == "" || network.Name == "" || known[network.ID] {
+			continue
+		}
+		// Without the key this device cannot prove membership on its next
+		// sync, so a network it could not participate in is not worth
+		// pretending to have.
+		if len(network.ManagementKey) < 32 {
+			continue
+		}
+		role := network.Role
+		if !store.ValidNetworkRole(role) {
+			role = store.NetworkMember
+		}
+		membership := config.MembershipConfig{
+			ID: network.ID, Name: network.Name,
+			Roles: []config.Role{config.RoleWorker}, AccountRole: role,
+			ManagementKey: network.ManagementKey, Enabled: true, Policy: s.cfg.Worker,
+		}
+		s.cfg.Memberships = append(s.cfg.Memberships, membership)
+		if err := s.recordLocalMembership(membership, store.Network{
+			ID: network.ID, Name: network.Name, OwnerAccountID: ownerOf(network, s.cfg.AccountID()),
+		}); err != nil {
+			// Leave the membership out of the config rather than saving one
+			// the database does not back.
+			s.cfg.Memberships = s.cfg.Memberships[:len(s.cfg.Memberships)-1]
+			continue
+		}
+		known[network.ID] = true
+		adopted++
+	}
+	if adopted == 0 {
+		return 0, nil
+	}
+	// A machine with no network selected should land in one rather than in an
+	// empty workspace it has to fix by hand.
+	if s.cfg.ActiveNetwork == "" && len(s.cfg.Memberships) > 0 {
+		s.cfg.SetActiveNetwork(s.cfg.Memberships[0].ID)
+	}
+	if err := config.Save(s.layout, s.cfg); err != nil {
+		return adopted, err
+	}
+	s.hub.Publish("networks.changed", map[string]any{"adopted": adopted})
+	return adopted, nil
+}
+
+// ownerOf keeps the local owner column meaningful without the account service
+// having to disclose another account's id.
+func ownerOf(network accountserver.AccountNetwork, self string) string {
+	if network.Owner {
+		return self
+	}
+	return ""
 }
 
 func (s *Server) syncEnterpriseMembers(networkID string, members []accountserver.EnterpriseMember) {

@@ -17,6 +17,7 @@ export async function renderSettings(host) {
     ]);
     const worker = { ...settings.worker };
     const update = { ...settings.update };
+    const auth = { ...(settings.auth || {}) };
 
     /** toggle renders one policy switch that is saved with the Save button. */
     function toggle(target, key, title, description) {
@@ -41,7 +42,7 @@ export async function renderSettings(host) {
         onclick: async () => {
             saveBtn.disabled = true;
             try {
-                await api('/api/settings', { method: 'PUT', body: { worker, update } });
+                await api('/api/settings', { method: 'PUT', body: { worker, update, auth } });
                 toast('Settings saved.');
             } catch (err) {
                 toast(err.message, 'err');
@@ -100,7 +101,11 @@ export async function renderSettings(host) {
                             el('dd', {}, v.replace(settings.root, '')),
                         ]))))),
 
-        startupPanel(service),
+        startupPanel(service, settings, toggle(auth, 'remember_this_machine',
+            'Stay signed in on this machine',
+            'The desktop window cannot keep a cookie, so without this you are ' +
+            'signed out every time you close it. Turn it off on a computer other ' +
+            'people can log in to.')),
         updatePanel(update, updateStatus, toggle));
 
     return null;
@@ -108,7 +113,7 @@ export async function renderSettings(host) {
 
 /** startupPanel controls whether this machine works for the cluster
  *  unattended, and lets you stop it entirely from here. */
-function startupPanel(service) {
+function startupPanel(service, settings, rememberSwitch) {
     const detail = el('p', { class: 'muted', style: 'margin:10px 0 0;font-size:12px' },
         service.detail || '');
     const boot = el('button', {
@@ -148,6 +153,16 @@ function startupPanel(service) {
                     'reboot, without anyone signing in.')),
             boot),
         detail,
+        rememberSwitch,
+        // Once the interface answers on the network, "local" stops meaning "the
+        // person at the keyboard", so the node refuses to honour it and the
+        // switch has to say so rather than looking simply ignored.
+        settings.network && settings.network.bind &&
+        !['', 'localhost', '127.0.0.1', '::1'].includes(settings.network.bind)
+            ? el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:12px;color:var(--warn)' },
+                `This node listens on ${settings.network.bind}, so staying signed in ` +
+                'is refused: anyone who can reach it is no longer necessarily you.')
+            : null,
         el('div', {
             style: 'display:flex;align-items:center;gap:12px;margin-top:18px;' +
                    'padding-top:16px;border-top:1px solid var(--line)',

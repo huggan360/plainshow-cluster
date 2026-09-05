@@ -108,6 +108,25 @@ type Config struct {
 	Account       AccountConfig      `yaml:"account" json:"account"`
 	Worker        WorkerConfig       `yaml:"worker" json:"worker"` // device-wide safety ceiling
 	Update        UpdateConfig       `yaml:"update" json:"update"`
+	Auth          AuthConfig         `yaml:"auth" json:"auth"`
+}
+
+// AuthConfig is how this machine treats the person sitting at it.
+type AuthConfig struct {
+	// RememberThisMachine re-establishes a browser session, without a password,
+	// for a request from this machine to a node that already holds a valid
+	// account credential.
+	//
+	// It exists because the desktop window cannot keep a cookie: Wails uses
+	// WebKitGTK's default web context, whose cookie store is memory-only, so
+	// every close signed the owner out of their own computer. The durable
+	// credential is the node's account token, and this is what lets the window
+	// use it.
+	//
+	// It is only ever honoured for a loopback request on a loopback-bound node.
+	// Once the interface is reachable from the network, "local" stops meaning
+	// "the person at the keyboard" and this must not apply.
+	RememberThisMachine bool `yaml:"remember_this_machine" json:"remember_this_machine"`
 }
 
 // AccountConfig caches the global identity selected on this device. The bearer
@@ -338,6 +357,10 @@ func Defaults() *Config {
 			CheckEvery: "6h",
 			Automatic:  false,
 		},
+		// On by default, and Load unmarshals onto these defaults, so a config
+		// written before this field existed gets the new behaviour rather than
+		// the zero value. Somebody who turns it off keeps it off.
+		Auth: AuthConfig{RememberThisMachine: true},
 	}
 }
 

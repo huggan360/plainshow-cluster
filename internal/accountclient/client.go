@@ -131,6 +131,17 @@ func (c *Client) SyncNetwork(ctx context.Context, token string,
 	return out, err
 }
 
+// MyNetworks lists every network this account belongs to, whether or not this
+// device has ever heard of them. It is the read that lets a machine somebody
+// has just signed in on show the networks they already have elsewhere.
+func (c *Client) MyNetworks(ctx context.Context, token string) ([]accountserver.AccountNetwork, error) {
+	var out struct {
+		Networks []accountserver.AccountNetwork `json:"networks"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/networks/mine", token, nil, &out)
+	return out.Networks, err
+}
+
 // GrantNetworkMember records the account authenticated by a consumed peer
 // invitation in the enterprise registry.
 func (c *Client) GrantNetworkMember(ctx context.Context, token, networkID,

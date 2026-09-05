@@ -678,3 +678,50 @@ func (s *Store) Stats() (Stats, error) {
 	}
 	return out, nil
 }
+
+// AccountNetwork is one network an account belongs to, as the account service
+// knows it. The management key is included deliberately: it is what lets a
+// device the account owns take part in the network, and an account that is
+// already a member has it anyway on every other machine it has signed in on.
+type AccountNetwork struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	ManagementKey string `json:"management_key"`
+	Owner         bool   `json:"owner"`
+	Members       int    `json:"members"`
+	Nodes         int    `json:"nodes"`
+	LastSeen      string `json:"last_seen"`
+	Joined        string `json:"joined_at"`
+}
+
+// NetworksForAccount lists every network this account is a member of.
+//
+// This is the read that makes an account mean something across machines. Until
+// it existed the flow was push-only — a device reported the networks it already
+// had — so signing in on a second machine produced an empty workspace, with no
+// code path that could have said otherwise.
+func (s *Store) NetworksForAccount(accountID string) ([]AccountNetwork, error) {
+	rows, err := s.db.Query(`SELECT n.id, n.name, m.role, n.management_key,
+            n.owner_account_id, n.last_seen, m.joined_at,
+            (SELECT count(*) FROM network_member x WHERE x.network_id=n.id),
+            (SELECT count(*) FROM node_network y WHERE y.network_id=n.id)
+        FROM network n JOIN network_member m ON m.network_id=n.id
+        WHERE m.account_id=? ORDER BY lower(n.name)`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AccountNetwork{}
+	for rows.Next() {
+		var item AccountNetwork
+		var owner string
+		if err := rows.Scan(&item.ID, &item.Name, &item.Role, &item.ManagementKey,
+			&owner, &item.LastSeen, &item.Joined, &item.Members, &item.Nodes); err != nil {
+			return nil, err
+		}
+		item.Owner = owner == accountID
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
