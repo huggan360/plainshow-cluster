@@ -202,12 +202,12 @@ that opened and later closed from a handshake failure, and
 `watch_test.go` proves that wake-ups arrive again after reconnecting. The
 heartbeat remains unchanged.
 
-Production is **not** complete: a read-only WebSocket probe of
-`https://clusteradmin.plainshow.se/api/events` returned 404 on 2026-09-05. No
-live Apache file, process or system service was changed in this session. Deploy
-the updated `pscluster-admin` and `deploy/clusteradmin.plainshow.se.conf`, run
-`apache2ctl configtest`, reload Apache, then perform PLAN.md's two-real-node
-disconnect/reconnect test.
+Production was deployed on 2026-09-05: the arm64 alpha.6 admin binary replaced
+the old alpha.3 binary, the WebSocket Apache config was installed, Apache's
+config test passed, the admin service restarted and Apache reloaded. Backups are
+`pscluster-admin.before-alpha6` and
+`clusteradmin.plainshow.se.conf.before-stage6`. PLAN.md's two-real-node
+disconnect/reconnect exercise remains intentionally unverified.
 
 The UI no longer treats the device's Ray assignment as an account workspace:
 
@@ -232,9 +232,8 @@ PATH=/usr/local/go/bin:$PATH make smoke       # 73 passed, 0 failed
 PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.5 dist  # amd64 + arm64 pass
 ```
 
-`v0.1.1-alpha.5` is published at `7585cd4`. Release workflow `33975646309`
-completed successfully: amd64 and arm64 native desktops, release bundles and
-the x86_64 Arch package all passed and are attached to the prerelease. Never
-move alpha.1 through alpha.5. The native GTK desktop and Arch package continue
+`v0.1.1-alpha.6` is tagged at `d07832f`; its GitHub workflow builds the native
+desktop bundles and Arch package. Never move alpha.1 through alpha.6. Alpha.5's
+release workflow `33975646309` completed successfully. Native GTK and Arch builds continue
 to belong to release CI; do not install their build dependencies on this
 production Pi.

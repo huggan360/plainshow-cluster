@@ -133,7 +133,7 @@ do" should be readable without opening anything.
 Cloning a repository is not push access. Push and pull require being a
 collaborator on GitHub, which already syncs both ways.
 
-### Stage 6 — Live instead of polled  ◐ repository complete, deployment unverified
+### Stage 6 — Live instead of polled  ◐ deployed, two-node test unverified
 
 **Read this before touching it. It is written and it builds, but it has never
 had two machines on it.**
@@ -166,20 +166,12 @@ Repository work completed on 2026-09-05:
   healthy connection resets node reconnect backoff even when it carried no
   event before closing.
 
-**Operational work left to do, in order:**
+The alpha.6 admin binary and Apache reference config were deployed on
+2026-09-05; Apache configtest passed and both services reloaded successfully.
 
-1. **Deploy the Apache reference change.** The repository config contains the
-   required rule, but this development session did not modify or reload the
-   production server configuration:
+**Operational work left to do:**
 
-   ```apache
-   RewriteCond %{HTTP:Upgrade} =websocket [NC]
-   RewriteRule ^/(.*) ws://127.0.0.1:10002/$1 [P,L]
-   ```
-
-   Put it above the existing `ProxyPass /`. `proxy_wstunnel_module` is already
-   loaded. `apache2ctl configtest` then `systemctl reload apache2`.
-2. **Verify with two nodes and an account server**, the way stages 1–3 were.
+1. **Verify with two nodes and an account server**, the way stages 1–3 were.
    Sign a device out from another machine and time it: it should be immediate
    rather than up to a minute. Then kill the account service mid-connection and
    confirm the node backs off, reconnects, and never loses the heartbeat.
