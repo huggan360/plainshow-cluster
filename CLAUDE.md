@@ -19,7 +19,7 @@ exists inside the binary; the user does not meet it.
 ## Unfinished work
 
 `PLAN.md` holds the staged rebuild in progress: the account, not the device,
-owns networks, memberships, invitations and project placement. Stages 0 and 1
+owns networks, memberships, invitations and project placement. Stages 0 to 3
 are done. Read it before starting anything in that area.
 
 ## Non-negotiables

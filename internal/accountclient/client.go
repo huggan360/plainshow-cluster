@@ -108,9 +108,102 @@ func (c *Client) Session(ctx context.Context, token string) (accountserver.Accou
 	return out.Account, nil
 }
 
-// CheckIn sends aggregate device counts, never project or job contents.
-func (c *Client) CheckIn(ctx context.Context, token string, input accountserver.NodeCheckIn) error {
-	return c.call(ctx, http.MethodPost, "/api/nodes/check-in", token, input, nil)
+// CheckIn sends aggregate device counts, never project or job contents, and
+// returns whatever the account service is asking this device to do next.
+//
+// The heartbeat is the only channel back to a device, so it carries both
+// directions. A device that is offline is not a delivery failure: it collects
+// its instruction when it returns, which is the first moment it could have
+// acted on it anyway.
+func (c *Client) CheckIn(ctx context.Context, token string,
+	input accountserver.NodeCheckIn) (accountserver.NodeInstructions, error) {
+	var out struct {
+		Instructions accountserver.NodeInstructions `json:"instructions"`
+	}
+	err := c.call(ctx, http.MethodPost, "/api/nodes/check-in", token, input, &out)
+	return out.Instructions, err
+}
+
+// Devices lists every machine signed in to this account.
+func (c *Client) Devices(ctx context.Context, token string) ([]accountserver.AccountDevice, error) {
+	var out struct {
+		Devices []accountserver.AccountDevice `json:"devices"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/devices", token, nil, &out)
+	return out.Devices, err
+}
+
+// SetDeviceNetwork asks one of this account's machines to work in a network.
+func (c *Client) SetDeviceNetwork(ctx context.Context, token, nodeID, networkID string) error {
+	return c.call(ctx, http.MethodPut, "/api/devices/"+url.PathEscape(nodeID)+"/network",
+		token, map[string]string{"network_id": networkID}, nil)
+}
+
+// SignOutDevice asks a machine to forget its account credential.
+func (c *Client) SignOutDevice(ctx context.Context, token, nodeID string) error {
+	return c.call(ctx, http.MethodPost, "/api/devices/"+url.PathEscape(nodeID)+"/sign-out",
+		token, map[string]string{}, nil)
+}
+
+// RemoveDevice forgets a machine.
+func (c *Client) RemoveDevice(ctx context.Context, token, nodeID string) error {
+	return c.call(ctx, http.MethodDelete, "/api/devices/"+url.PathEscape(nodeID), token, nil, nil)
+}
+
+// SearchAccounts finds people to invite by name.
+func (c *Client) SearchAccounts(ctx context.Context, token, query string) ([]accountserver.Account, error) {
+	var out struct {
+		Accounts []accountserver.Account `json:"accounts"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/accounts/search?q="+url.QueryEscape(query),
+		token, nil, &out)
+	return out.Accounts, err
+}
+
+// Invitations lists what is waiting for this account to answer.
+func (c *Client) Invitations(ctx context.Context, token string) ([]accountserver.Invitation, error) {
+	var out struct {
+		Invitations []accountserver.Invitation `json:"invitations"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/invitations", token, nil, &out)
+	return out.Invitations, err
+}
+
+// NetworkInvitations lists what one network has outstanding.
+func (c *Client) NetworkInvitations(ctx context.Context, token, networkID string) ([]accountserver.Invitation, error) {
+	var out struct {
+		Invitations []accountserver.Invitation `json:"invitations"`
+	}
+	err := c.call(ctx, http.MethodGet,
+		"/api/networks/"+url.PathEscape(networkID)+"/invitations", token, nil, &out)
+	return out.Invitations, err
+}
+
+// CreateInvitation offers network membership to one person.
+func (c *Client) CreateInvitation(ctx context.Context, token, networkID, username,
+	role string) (accountserver.Invitation, error) {
+	var out accountserver.Invitation
+	err := c.call(ctx, http.MethodPost, "/api/networks/"+url.PathEscape(networkID)+"/invitations",
+		token, map[string]string{"username": username, "role": role}, &out)
+	return out, err
+}
+
+// RespondToInvitation accepts or declines an offer addressed to this account.
+func (c *Client) RespondToInvitation(ctx context.Context, token, id string,
+	accept bool) (accountserver.Invitation, error) {
+	action := "/decline"
+	if accept {
+		action = "/accept"
+	}
+	var out accountserver.Invitation
+	err := c.call(ctx, http.MethodPost, "/api/invitations/"+url.PathEscape(id)+action,
+		token, map[string]string{}, &out)
+	return out, err
+}
+
+// RevokeInvitation withdraws an offer that has not been answered.
+func (c *Client) RevokeInvitation(ctx context.Context, token, id string) error {
+	return c.call(ctx, http.MethodDelete, "/api/invitations/"+url.PathEscape(id), token, nil, nil)
 }
 
 // TailnetEnrollment asks the global account service for a one-time Headscale

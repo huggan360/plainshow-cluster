@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
@@ -94,10 +95,63 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		ID: s.cfg.Node.ID, Name: s.cfg.Node.Name, Version: version.Version,
 		OS: info.OS, Arch: info.Arch, GPUCount: len(info.GPUs),
 		ProjectCount: len(projects), RunningJobs: len(jobs), Networks: refs,
+		ActiveNetwork: s.cfg.ActiveNetwork,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	_ = client.CheckIn(requestCtx, token, checkIn)
+	instructions, err := client.CheckIn(requestCtx, token, checkIn)
+	cancel()
+	if err != nil {
+		return
+	}
+	s.applyInstructions(ctx, instructions)
+}
+
+// applyInstructions carries out what the account service asked for on the last
+// heartbeat.
+//
+// Nothing here is the account service reaching into the machine. Each of these
+// is the machine reading a request and deciding to honour it, which is what
+// keeps the local policy in Settings the last word about what happens here.
+func (s *Server) applyInstructions(ctx context.Context, instructions accountserver.NodeInstructions) {
+	if instructions.SignOut {
+		s.signOutThisMachine()
+		return
+	}
+	if instructions.DesiredNetwork == "" || instructions.DesiredNetwork == s.cfg.ActiveNetwork {
+		return
+	}
+	// Adoption runs before this on every check-in, so a network somebody has
+	// just moved this machine into is normally already present. If it is not,
+	// the machine cannot participate and the request waits rather than failing.
+	if !hasMembership(s.cfg, instructions.DesiredNetwork) {
+		return
+	}
+	if !s.cfg.SetActiveNetwork(instructions.DesiredNetwork) {
+		return
+	}
+	if err := config.Save(s.layout, s.cfg); err != nil {
+		log.Printf("check-in: could not record the network move: %v", err)
+		return
+	}
+	s.hub.Publish("network.active", s.cfg.ActiveMembership())
+	// The machine runs one Ray process for one network, so moving it means
+	// moving that too, now rather than on the reconciler's next tick.
+	go s.reconcileRay(context.Background())
+}
+
+// signOutThisMachine drops the account credential and every browser session.
+//
+// This is the same thing the Sign out button does, arriving from another
+// machine. It deliberately leaves networks, projects and settings alone: it
+// signs somebody out of a computer, it does not wipe it.
+func (s *Server) signOutThisMachine() {
+	if err := config.ForgetAccountToken(s.layout); err != nil {
+		log.Printf("sign-out: could not remove the account credential: %v", err)
+	}
+	if err := s.store.DeleteSessionsForAccount(s.cfg.Account.ID); err != nil {
+		log.Printf("sign-out: could not clear browser sessions: %v", err)
+	}
+	s.hub.Publish("auth.signed_out", map[string]string{"reason": "requested from another device"})
 }
 
 // AdoptAccountNetworks materialises every network this account belongs to but

@@ -101,6 +101,20 @@ type NodeCheckIn struct {
 	ProjectCount int          `json:"project_count"`
 	RunningJobs  int          `json:"running_jobs"`
 	Networks     []NetworkRef `json:"networks"`
+	// ActiveNetwork is the network this device is working in right now. It is
+	// also the acknowledgement of a move somebody asked for from elsewhere.
+	ActiveNetwork string `json:"active_network"`
+}
+
+// NodeInstructions is what the account service asks a device to do next.
+//
+// It rides back on the heartbeat rather than travelling over a connection of
+// its own. A device that is asleep or offline is not a delivery failure — it
+// gets its instruction when it comes back, which is the only time it could
+// have acted on it anyway.
+type NodeInstructions struct {
+	DesiredNetwork string `json:"desired_network"`
+	SignOut        bool   `json:"sign_out"`
 }
 
 // Node is one globally registered device.
@@ -156,34 +170,54 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	columns := []struct{ name, definition string }{
-		{"owner_account_id", "TEXT NOT NULL DEFAULT ''"},
-		{"management_key", "TEXT NOT NULL DEFAULT ''"},
+	columns := []struct{ table, name, definition string }{
+		{"network", "owner_account_id", "TEXT NOT NULL DEFAULT ''"},
+		{"network", "management_key", "TEXT NOT NULL DEFAULT ''"},
+		// A device reports which network it is working in, and is told which
+		// one it should be working in. Two columns rather than one: the
+		// difference between them is what "moving" looks like while it happens.
+		{"node", "active_network", "TEXT NOT NULL DEFAULT ''"},
+		{"node", "desired_network", "TEXT NOT NULL DEFAULT ''"},
+		// Set when somebody signs a device out from another machine. The device
+		// clears it on its next check-in, which is also the acknowledgement.
+		{"node", "sign_out_at", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range columns {
-		rows, err := s.db.Query(`PRAGMA table_info(network)`)
+		has, err := s.hasColumn(column.table, column.name)
 		if err != nil {
 			return err
 		}
-		found := false
-		for rows.Next() {
-			var cid, notNull, primary int
-			var name, kind string
-			var defaultValue sql.NullString
-			if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primary); err != nil {
-				rows.Close()
-				return err
-			}
-			found = found || name == column.name
+		if has {
+			continue
 		}
-		rows.Close()
-		if !found {
-			if _, err := s.db.Exec("ALTER TABLE network ADD COLUMN " + column.name + " " + column.definition); err != nil {
-				return err
-			}
+		statement := "ALTER TABLE " + column.table + " ADD COLUMN " + column.name + " " + column.definition
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("%s: %w", statement, err)
 		}
 	}
 	return nil
+}
+
+// hasColumn checks the database rather than a version counter, so migrations
+// are safe to re-run on a fresh database and on an old one.
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primary int
+		var name, kind string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primary); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close releases the database.
@@ -333,34 +367,63 @@ func (s *Store) DeleteSession(token string) error {
 
 // CheckIn records aggregate node counts while preventing one account from
 // taking over a node id already registered by another.
-func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
+func (s *Store) CheckIn(accountID string, input NodeCheckIn) (NodeInstructions, error) {
+	var instructions NodeInstructions
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return instructions, err
 	}
 	defer tx.Rollback()
 	var owner string
 	err = tx.QueryRow(`SELECT owner_account_id FROM node WHERE id=?`, input.ID).Scan(&owner)
 	if err == nil && owner != accountID {
-		return ErrNodeOwner
+		return instructions, ErrNodeOwner
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return instructions, err
 	}
 	seen := now()
 	_, err = tx.Exec(`INSERT INTO node
-        (id,owner_account_id,name,version,os,arch,gpu_count,project_count,running_jobs,last_seen,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        (id,owner_account_id,name,version,os,arch,gpu_count,project_count,running_jobs,
+         active_network,last_seen,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,
           os=excluded.os,arch=excluded.arch,gpu_count=excluded.gpu_count,
           project_count=excluded.project_count,running_jobs=excluded.running_jobs,
+          active_network=excluded.active_network,
           last_seen=excluded.last_seen`, input.ID, accountID, input.Name, input.Version,
-		input.OS, input.Arch, input.GPUCount, input.ProjectCount, input.RunningJobs, seen, seen)
+		input.OS, input.Arch, input.GPUCount, input.ProjectCount, input.RunningJobs,
+		input.ActiveNetwork, seen, seen)
 	if err != nil {
-		return err
+		return instructions, err
+	}
+
+	var desired, signOutAt string
+	if err := tx.QueryRow(`SELECT desired_network,sign_out_at FROM node WHERE id=?`,
+		input.ID).Scan(&desired, &signOutAt); err != nil {
+		return instructions, err
+	}
+	// A device that reports the network it was asked to move to has finished
+	// moving, so the request is spent. Leaving it set would make the interface
+	// show a pending move that already happened.
+	if desired != "" && desired == input.ActiveNetwork {
+		if _, err := tx.Exec(`UPDATE node SET desired_network='' WHERE id=?`, input.ID); err != nil {
+			return instructions, err
+		}
+		desired = ""
+	}
+	instructions.DesiredNetwork = desired
+	if signOutAt != "" {
+		// Handed over once. A device that signs out stops checking in, so
+		// waiting for an acknowledgement that can never arrive would re-sign it
+		// out every time it was signed back in.
+		instructions.SignOut = true
+		if _, err := tx.Exec(`UPDATE node SET sign_out_at='' WHERE id=?`, input.ID); err != nil {
+			return instructions, err
+		}
 	}
 	if _, err := tx.Exec(`DELETE FROM node_network WHERE node_id=?`, input.ID); err != nil {
-		return err
+		return instructions, err
 	}
 	for _, network := range input.Networks {
 		if network.ID == "" || network.Name == "" {
@@ -370,7 +433,7 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
             SELECT 1 FROM network_member WHERE network_id=? AND account_id=?)`,
 			network.Name, seen, network.ID, network.ID, accountID)
 		if err != nil {
-			return err
+			return instructions, err
 		}
 		changed, _ := result.RowsAffected()
 		if changed != 1 {
@@ -378,10 +441,10 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) error {
 		}
 		if _, err := tx.Exec(`INSERT INTO node_network(node_id,network_id) VALUES(?,?)`,
 			input.ID, network.ID); err != nil {
-			return err
+			return instructions, err
 		}
 	}
-	return tx.Commit()
+	return instructions, tx.Commit()
 }
 
 func validNetworkRole(role string) bool {

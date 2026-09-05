@@ -64,6 +64,19 @@ func (s *Store) DeleteSession(token string) error {
 	return err
 }
 
+// DeleteSessionsForAccount ends every signed-in browser on this machine.
+//
+// Signing a device out from somewhere else has to reach the browsers that are
+// already open on it, not only the credential. An empty account id would match
+// every row, so it is refused rather than quietly logging everyone out.
+func (s *Store) DeleteSessionsForAccount(accountID string) error {
+	if accountID == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM login_session WHERE account_id=?`, accountID)
+	return err
+}
+
 // AdoptGlobalAccount replaces the old device-shaped owner with the identity
 // returned by the central Account Server. Network permissions move with it;
 // device rows and cryptographic identities remain untouched.

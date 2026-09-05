@@ -79,6 +79,24 @@ CREATE TABLE IF NOT EXISTS controller_network (
     PRIMARY KEY (controller_id, network_id)
 );
 
+-- An invitation names a person, not a machine. A join code proves you were
+-- handed a secret; an invitation proves somebody chose you, which is the thing
+-- a network owner actually means.
+CREATE TABLE IF NOT EXISTS network_invitation (
+    id           TEXT PRIMARY KEY,
+    network_id   TEXT NOT NULL REFERENCES network(id) ON DELETE CASCADE,
+    account_id   TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    invited_by   TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    role         TEXT NOT NULL DEFAULT 'member',
+    status       TEXT NOT NULL DEFAULT 'pending',
+    created_at   TEXT NOT NULL,
+    responded_at TEXT NOT NULL DEFAULT '',
+    UNIQUE (network_id, account_id)
+);
+
+CREATE INDEX IF NOT EXISTS invitation_account_idx
+    ON network_invitation(account_id, status);
+
 CREATE INDEX IF NOT EXISTS session_expiry_idx ON login_session(expires_at);
 CREATE INDEX IF NOT EXISTS node_seen_idx ON node(last_seen DESC);
 CREATE INDEX IF NOT EXISTS controller_seen_idx ON controller_server(last_seen DESC);

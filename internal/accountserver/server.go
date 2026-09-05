@@ -58,6 +58,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/networks", s.requireAdmin(http.HandlerFunc(s.networks)))
 	mux.Handle("GET /api/controllers", s.requireAdmin(http.HandlerFunc(s.controllers)))
 	mux.Handle("GET /api/networks/mine", s.requireAccount(http.HandlerFunc(s.myNetworks)))
+	mux.Handle("GET /api/devices", s.requireAccount(http.HandlerFunc(s.myDevices)))
+	mux.Handle("PUT /api/devices/{id}/network", s.requireAccount(http.HandlerFunc(s.setDeviceNetwork)))
+	mux.Handle("POST /api/devices/{id}/sign-out", s.requireAccount(http.HandlerFunc(s.signOutDevice)))
+	mux.Handle("DELETE /api/devices/{id}", s.requireAccount(http.HandlerFunc(s.removeDevice)))
+	mux.Handle("GET /api/accounts/search", s.requireAccount(http.HandlerFunc(s.searchAccounts)))
+	mux.Handle("GET /api/invitations", s.requireAccount(http.HandlerFunc(s.myInvitations)))
+	mux.Handle("POST /api/invitations/{id}/accept", s.requireAccount(http.HandlerFunc(s.respondToInvitation)))
+	mux.Handle("POST /api/invitations/{id}/decline", s.requireAccount(http.HandlerFunc(s.respondToInvitation)))
+	mux.Handle("DELETE /api/invitations/{id}", s.requireAccount(http.HandlerFunc(s.revokeInvitation)))
+	mux.Handle("GET /api/networks/{id}/invitations", s.requireAccount(http.HandlerFunc(s.networkInvitations)))
+	mux.Handle("POST /api/networks/{id}/invitations", s.requireAccount(http.HandlerFunc(s.createInvitation)))
 	mux.Handle("POST /api/networks/sync", s.requireAccount(http.HandlerFunc(s.syncNetwork)))
 	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
 	mux.Handle("PUT /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.updateNetworkMember)))
@@ -450,7 +461,8 @@ func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "The node check-in is incomplete or invalid.")
 		return
 	}
-	if err := s.store.CheckIn(account.ID, input); err != nil {
+	instructions, err := s.store.CheckIn(account.ID, input)
+	if err != nil {
 		if errors.Is(err, ErrNodeOwner) {
 			fail(w, http.StatusConflict, "That node is registered to another account.")
 		} else {
@@ -458,7 +470,12 @@ func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+	// The heartbeat is the only channel back to a device, so the answer to a
+	// check-in is also where "move to this network" and "sign out" are
+	// delivered.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "recorded", "instructions": instructions,
+	})
 }
 
 func (s *Server) requireAccount(next http.Handler) http.Handler {

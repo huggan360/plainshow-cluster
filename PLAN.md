@@ -52,26 +52,44 @@ to loopback, because then "local" no longer means "the person at the keyboard".
   does not have.
 - Result: sign in as yourself on any machine and your networks are there.
 
-### Stage 2 — Devices
+### Stage 2 — Devices ✅
 
-- Account server: record each node's active network; `GET /api/devices`,
-  `PUT /api/devices/{id}/network`, `POST /api/devices/{id}/sign-out`,
-  `DELETE /api/devices/{id}`.
-- Node: honours the desired network from its check-in, and signs itself out when
-  told to.
-- Settings becomes four tabs: **General · Devices · Updates · About**. Devices
-  lists every machine on the account, online or not, which network it is in, and
-  can move or remove it.
-- Home shows every device on the account and its GPUs, not only this one.
-- Networks page: choose which of your devices join that network.
+The heartbeat became two-way: a check-in reports the network a device is working
+in and comes back with what it should do next. Nothing reaches into a machine —
+each action records a row the machine reads and acts on itself, which is what
+keeps its own policy the last word.
 
-### Stage 3 — Invite a person, not a code
+- `GET /api/devices`, `PUT /api/devices/{id}/network`,
+  `POST /api/devices/{id}/sign-out`, `DELETE /api/devices/{id}`, all proxied
+  through the node so the browser holds no account credential and stays on one
+  origin.
+- Settings is four tabs: **General · Devices · Updates · About**.
+- Home lists every device on the account and its GPUs.
 
-- Account server: `network_invitation`; account search; create, list, accept and
-  decline.
-- Networks page shows invitations you have received.
-- Join codes stay for headless machines that have no account session; the
-  interface stops leading with them.
+Two things worth remembering. A completed move is acknowledged by the device
+reporting the network it now works in, or the interface shows a pending move
+that already happened. And a sign-out is delivered exactly once: a device that
+signs out stops checking in, so waiting for an acknowledgement that can never
+arrive would sign it out again every time somebody signed back in.
+
+Removal is bookkeeping, not revocation — a machine with a valid credential
+re-registers on its next check-in — and the interface says so rather than
+letting somebody think a lost laptop has been cut off.
+
+### Stage 3 — Invite a person, not a code ✅
+
+An invitation is addressed to an account and waits until that person looks, from
+whichever machine they are on. Accepting is what creates the membership row —
+the same row a join code would have written — so adoption, roles and sync are
+unchanged downstream, and the node adopts immediately rather than on the next
+heartbeat.
+
+Ownership cannot be offered, only owners and admins can invite, an invitation id
+is not a capability (only the addressee can answer it), and re-inviting somebody
+who declined is ordinary rather than a conflict.
+
+Join codes remain for headless machines with no browser to sign in on, under
+"Create a machine code" in a network's settings.
 
 ### Stage 4 — A project lives in one network, its files live per device
 

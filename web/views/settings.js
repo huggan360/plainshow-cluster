@@ -1,13 +1,24 @@
 // Settings — what this machine will allow, how it starts, and where it keeps
 // things.
 
-import { el, mount } from '../lib/ui.js';
-import { api, toast } from '../lib/client.js';
+import { el, mount, ago } from '../lib/ui.js';
+import { api, toast, modal, state } from '../lib/client.js';
 import { confirmShutdown } from '../lib/statusbar.js';
 
-export async function renderSettings(host) {
+const TABS = [
+    ['general', 'General', 'bx-slider-alt'],
+    ['devices', 'Devices', 'bx-devices'],
+    ['updates', 'Updates', 'bx-refresh'],
+    ['about', 'About', 'bx-info-circle'],
+];
+
+export async function renderSettings(host, args = []) {
     const page = el('div', { class: 'page' });
     mount(host, page);
+
+    const requested = args[0];
+    const tab = TABS.some(([id]) => id === requested) ? requested : 'general';
+    if (tab === 'devices') return renderDevices(page, tab);
 
     // The service state is a nice-to-have: a node started from a terminal has
     // no unit, which is a normal answer rather than a reason to fail the page.
@@ -54,15 +65,9 @@ export async function renderSettings(host) {
     const paths = Object.entries(settings.paths);
 
     mount(page,
-        el('div', { class: 'page__head' },
-            el('p', { class: 'page__eyebrow' }, 'Settings'),
-            el('h1', { class: 'page__title' }, 'This machine'),
-            el('p', { class: 'page__sub' },
-                'These limits are enforced here, by this machine. Nothing in the ' +
-                'cluster can widen them — which is what makes it reasonable to lend ' +
-                'someone else your computer.')),
+        settingsHead(tab),
 
-        el('div', { class: 'grid grid--2' },
+        tab !== 'general' ? null : el('div', { class: 'grid grid--2' },
             el('div', { class: 'panel' },
                 el('div', { class: 'panel__head' }, 'What this machine allows'),
                 toggle(worker, 'enabled', 'Accept work',
@@ -101,14 +106,54 @@ export async function renderSettings(host) {
                             el('dd', {}, v.replace(settings.root, '')),
                         ]))))),
 
-        startupPanel(service, settings, toggle(auth, 'remember_this_machine',
-            'Stay signed in on this machine',
-            'The desktop window cannot keep a cookie, so without this you are ' +
-            'signed out every time you close it. Turn it off on a computer other ' +
-            'people can log in to.')),
-        updatePanel(update, updateStatus, toggle));
+        tab !== 'general' ? null : startupPanel(service, settings,
+            toggle(auth, 'remember_this_machine',
+                'Stay signed in on this machine',
+                'The desktop window cannot keep a cookie, so without this you are ' +
+                'signed out every time you close it. Turn it off on a computer other ' +
+                'people can log in to.')),
+        tab !== 'updates' ? null : updatePanel(update, updateStatus, toggle),
+        tab !== 'updates' ? null : el('div', {
+            style: 'display:flex;justify-content:flex-end;margin-top:14px',
+        }, saveBtn),
+        tab !== 'about' ? null : aboutPanel(settings, service));
 
     return null;
+}
+
+function settingsHead(active) {
+    return el('div', {},
+        el('div', { class: 'page__head' },
+            el('p', { class: 'page__eyebrow' }, 'Settings'),
+            el('h1', { class: 'page__title' }, 'This machine'),
+            el('p', { class: 'page__sub' },
+                'These limits are enforced here, by this machine. Nothing in the ' +
+                'cluster can widen them — which is what makes it reasonable to lend ' +
+                'someone else your computer.')),
+        el('nav', { class: 'tabs', 'aria-label': 'Settings sections' },
+            ...TABS.map(([id, label, icon]) => el('a', {
+                class: `tab ${active === id ? 'tab--on' : ''}`, href: `#/settings/${id}`,
+            }, el('i', { class: `bx ${icon}` }), label))));
+}
+
+function aboutPanel(settings, service) {
+    return el('div', { class: 'grid grid--2' },
+        el('div', { class: 'panel' },
+            el('div', { class: 'panel__head' }, 'Plainshow Cluster'),
+            el('p', { class: 'muted', style: 'margin:0 0 14px;font-size:12.5px;line-height:1.7' },
+                'An interface over programs that already work: Tailscale makes the ' +
+                'machines reachable, git moves the code, Ray runs the work. ' +
+                'Plainshow sets those up and shows what is happening.'),
+            el('dl', { class: 'kv' },
+                el('dt', {}, 'Version'), el('dd', {}, settings.version),
+                el('dt', {}, 'Node'), el('dd', {}, settings.node.name),
+                el('dt', {}, 'Node id'), el('dd', {}, settings.node.id),
+                el('dt', {}, 'Service'), el('dd', {}, service.unit || 'started by hand'))),
+        el('div', { class: 'panel' },
+            el('div', { class: 'panel__head' }, 'Where things are kept'),
+            el('dl', { class: 'kv' },
+                el('dt', {}, 'root'), el('dd', {}, settings.root),
+                el('dt', {}, 'config'), el('dd', {}, settings.paths.config))));
 }
 
 /** startupPanel controls whether this machine works for the cluster
@@ -249,4 +294,148 @@ function updatePanel(update, initial, toggle) {
                 'Apply a verified update and restart this node when one is found.'),
             el('p', { class: 'muted', style: 'margin:10px 0 0;font-size:11.5px' },
                 'Saved with Save changes above.')));
+}
+
+// ---------------------------------------------------------------- devices --
+
+/** renderDevices lists every machine on the account, not only this one.
+ *
+ * A device row is the only place where "which network is this machine working
+ * in" is a thing you can change from somewhere else. Nothing here reaches into
+ * a machine: each action records a request that the machine reads on its next
+ * check-in and carries out itself. */
+async function renderDevices(page, tab) {
+    const draw = async () => {
+        let data;
+        try {
+            data = await api('/api/devices');
+        } catch (err) {
+            mount(page, settingsHead(tab), el('div', { class: 'panel empty' },
+                el('i', { class: 'bx bx-devices empty__ico' }),
+                el('strong', {}, 'Devices are listed by your Plainshow account.'),
+                el('span', { class: 'empty__text' }, err.message)));
+            return;
+        }
+        const networks = (state.overview && state.overview.networks) || [];
+        const devices = data.devices || [];
+        const online = devices.filter((device) => device.online).length;
+
+        mount(page, settingsHead(tab),
+            el('div', { class: 'panel ps-toolbar' },
+                el('span', { class: 'grow' },
+                    el('strong', { style: 'font-size:13px' }, 'Your machines'),
+                    el('span', {
+                        class: 'muted', style: 'display:block;margin-top:3px;font-size:12px',
+                    }, 'Every computer signed in to your account. Changes are picked ' +
+                       'up by a machine on its next check-in, within about a minute.')),
+                el('span', { class: 'chip chip--good' }, `${online} online`),
+                el('span', { class: 'chip' }, `${devices.length} total`),
+                el('button', { class: 'btn btn--sm', onclick: draw },
+                    el('i', { class: 'bx bx-refresh' }), 'Refresh')),
+            devices.length
+                ? el('div', { class: 'rows' },
+                    ...devices.map((device) => deviceRow(device, networks, data.this_device, draw)))
+                : el('div', { class: 'panel empty' },
+                    el('i', { class: 'bx bx-devices empty__ico' }),
+                    el('strong', {}, 'No devices have checked in yet.')));
+    };
+    await draw();
+    return null;
+}
+
+function deviceRow(device, networks, thisDevice, reload) {
+    const isThis = device.id === thisDevice;
+    const current = device.desired_network || device.active_network || '';
+    const picker = el('select', {
+        class: 'select', 'aria-label': `Network for ${device.name}`,
+        onchange: async () => {
+            picker.disabled = true;
+            try {
+                await api(`/api/devices/${encodeURIComponent(device.id)}/network`,
+                    { method: 'PUT', body: { network_id: picker.value } });
+                toast(device.online
+                    ? `${device.name} is moving to that network.`
+                    : `${device.name} will move when it comes back online.`);
+                await reload();
+            } catch (err) {
+                toast(err.message, 'err');
+                picker.disabled = false;
+            }
+        },
+    },
+        el('option', { value: '', selected: current === '' }, 'No network'),
+        ...networks.map((network) => el('option', {
+            value: network.id, selected: network.id === current,
+        }, network.name)));
+
+    return el('div', { class: 'row', style: 'cursor:default;align-items:center' },
+        el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
+        el('span', { class: 'row__main' },
+            el('span', { class: 'row__title' }, device.name,
+                isThis ? el('span', { class: 'chip chip--cyan', style: 'margin-left:8px' },
+                    'this machine') : null,
+                device.desired_network && device.desired_network !== device.active_network
+                    ? el('span', { class: 'chip chip--warn', style: 'margin-left:8px' }, 'moving')
+                    : null),
+            el('span', { class: 'row__meta' },
+                [
+                    `${device.os || 'linux'} · ${device.arch || '?'}`,
+                    `${device.gpu_count} GPU${device.gpu_count === 1 ? '' : 's'}`,
+                    device.version ? `v${device.version}` : null,
+                    device.online ? 'online' : `last seen ${ago(device.last_seen)}`,
+                ].filter(Boolean).join(' · '))),
+        picker,
+        el('button', {
+            class: 'btn btn--sm', title: 'Sign this device out of your account',
+            onclick: () => signOutDevice(device, isThis, reload),
+        }, el('i', { class: 'bx bx-log-out' })),
+        el('button', {
+            class: 'btn btn--sm btn--icon', title: 'Remove this device',
+            onclick: () => removeDevice(device, reload),
+        }, el('i', { class: 'bx bx-trash' })));
+}
+
+function signOutDevice(device, isThis, reload) {
+    modal({
+        title: `Sign out ${device.name}?`,
+        confirmLabel: 'Sign out',
+        danger: true,
+        body: () => el('p', { style: 'margin:0;font-size:13px;color:#cbd5e1;line-height:1.6' },
+            isThis
+                ? 'This is the machine you are using. You will be asked to sign in again.'
+                : 'That machine forgets its account credential and closes any browser ' +
+                  'signed in on it. Its projects, networks and settings are untouched, ' +
+                  'and it stays offline to the cluster until somebody signs in there.'),
+        onConfirm: async (close) => {
+            await api(`/api/devices/${encodeURIComponent(device.id)}/sign-out`,
+                { method: 'POST', body: {} });
+            close();
+            if (isThis) { location.reload(); return; }
+            toast(`${device.name} will sign out on its next check-in.`);
+            await reload();
+        },
+    });
+}
+
+function removeDevice(device, reload) {
+    modal({
+        title: `Remove ${device.name}?`,
+        confirmLabel: 'Remove',
+        danger: true,
+        body: () => el('div', {},
+            el('p', { style: 'margin:0 0 12px;font-size:13px;color:#cbd5e1;line-height:1.6' },
+                'It disappears from this list and from your account’s totals.'),
+            // Saying this plainly matters: somebody removing a lost laptop is
+            // trying to revoke it, and removal alone does not do that.
+            el('p', { class: 'muted', style: 'margin:0;font-size:12px;line-height:1.6' },
+                'This is bookkeeping, not revocation. A machine that still holds a ' +
+                'valid credential registers itself again the next time it checks in. ' +
+                'Sign it out first if that is what you mean.')),
+        onConfirm: async (close) => {
+            await api(`/api/devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' });
+            close();
+            toast(`${device.name} was removed.`);
+            await reload();
+        },
+    });
 }

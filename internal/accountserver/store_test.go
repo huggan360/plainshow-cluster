@@ -75,10 +75,10 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	}
 	checkIn := NodeCheckIn{ID: "node", Name: "Pi", GPUCount: 1, ProjectCount: 3,
 		RunningJobs: 2, Networks: []NetworkRef{{ID: "network", Name: "Lab"}}}
-	if err := store.CheckIn("a1", checkIn); err != nil {
+	if _, err := store.CheckIn("a1", checkIn); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CheckIn("a2", checkIn); !errors.Is(err, ErrNodeOwner) {
+	if _, err := store.CheckIn("a2", checkIn); !errors.Is(err, ErrNodeOwner) {
 		t.Fatalf("node takeover error = %v", err)
 	}
 	stats, err := store.Stats()

@@ -11,7 +11,12 @@ export async function renderNetworks(host, args = []) {
 async function renderNetworkList(host) {
     const page = el('div', { class: 'page' });
     mount(host, page);
-    const data = await api('/api/networks');
+    const [data, invites] = await Promise.all([
+        api('/api/networks'),
+        // A node with no account authority has nowhere to ask, which is a
+        // normal answer for a standalone machine rather than a page failure.
+        api('/api/invitations').then((result) => result.invitations || []).catch(() => []),
+    ]);
     // The selected network first: it is the one every other page is about, so
     // it should not be somewhere in an alphabetical list.
     const networks = [...(data.networks || [])].sort((a, b) =>
@@ -40,11 +45,49 @@ async function renderNetworkList(host) {
                 el('i', { class: 'bx bx-link' }), 'Join by code'),
             el('button', { class: 'btn btn--primary', onclick: createNetwork },
                 el('i', { class: 'bx bx-plus' }), 'New network')),
+        invitationsPanel(invites),
         el('div', { class: 'panel ps-toolbar' },
             el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search), count),
         results);
     drawResults();
     return null;
+}
+
+// invitationsPanel is the first thing on the page when somebody has been
+// invited, because an invitation is the one item here that is waiting on you.
+function invitationsPanel(invites) {
+    if (!invites.length) return null;
+    return el('section', { class: 'panel', style: 'margin-bottom:20px' },
+        el('div', { class: 'panel__head' },
+            el('span', { class: 'grow' }, 'Invitations'),
+            el('span', { class: 'chip chip--warn' }, String(invites.length))),
+        el('div', { class: 'rows' }, ...invites.map(invitationRow)));
+}
+
+function invitationRow(invite) {
+    const respond = async (accept) => {
+        try {
+            const result = await api(
+                `/api/invitations/${encodeURIComponent(invite.id)}/${accept ? 'accept' : 'decline'}`,
+                { method: 'POST', body: {} });
+            toast(accept
+                ? `You joined ${invite.network_name}.${
+                    result && result.adopted ? '' : ' It will appear shortly.'}`
+                : `Declined ${invite.network_name}.`);
+            location.reload();
+        } catch (error) { toast(error.message, 'err'); }
+    };
+    const from = invite.invited_by_name || 'someone';
+    return el('div', { class: 'row', style: 'cursor:default;align-items:center' },
+        el('span', { class: 'ps-project-mark ps-network-mark', style: 'width:32px;height:32px;font-size:14px' },
+            el('i', { class: 'bx bx-envelope' })),
+        el('span', { class: 'row__main' },
+            el('span', { class: 'row__title' }, invite.network_name),
+            el('span', { class: 'row__meta' },
+                `${from} invited you as ${invite.role} · ${ago(invite.created_at)}`)),
+        el('button', { class: 'btn btn--sm', onclick: () => respond(false) }, 'Decline'),
+        el('button', { class: 'btn btn--sm btn--primary', onclick: () => respond(true) },
+            el('i', { class: 'bx bx-check' }), 'Accept'));
 }
 
 // networkCard is a div rather than a link because it carries its own Select
@@ -253,13 +296,23 @@ function projectCard(project, data) {
 
 function settingsTab(data) {
     const canManage = ['owner', 'admin'].includes(data.network.role || data.membership.account_role);
+    const pending = el('div', {});
+    // Outstanding invitations are loaded after the page rather than blocking
+    // it: a node with no account authority has nowhere to ask, and that is not
+    // a reason to fail the settings tab.
+    api(`/api/networks/${encodeURIComponent(data.network.id)}/invitations`)
+        .then((result) => mount(pending, pendingPanel(result.invitations || [], canManage)))
+        .catch(() => {});
+
     return el('div', { class: 'detail-grid' },
-        el('section', { class: 'panel' },
-            el('div', { class: 'panel__head' },
-                el('span', { class: 'grow' }, 'Accounts and access'),
-                canManage ? el('button', { class: 'btn btn--sm btn--primary', onclick: () => createInvite(data.network) },
-                    el('i', { class: 'bx bx-user-plus' }), 'Invite') : null),
-            el('div', { class: 'rows' }, ...data.members.map((member) => memberRow(data.network, member, canManage)))),
+        el('section', {},
+            el('section', { class: 'panel' },
+                el('div', { class: 'panel__head' },
+                    el('span', { class: 'grow' }, 'Accounts and access'),
+                    canManage ? el('button', { class: 'btn btn--sm btn--primary', onclick: () => createInvite(data.network) },
+                        el('i', { class: 'bx bx-user-plus' }), 'Invite') : null),
+                el('div', { class: 'rows' }, ...data.members.map((member) => memberRow(data.network, member, canManage)))),
+            pending),
         el('aside', { style: 'display:flex;flex-direction:column;gap:14px' },
             el('section', { class: 'panel' },
                 el('div', { class: 'panel__head' }, 'Network'),
@@ -274,7 +327,59 @@ function settingsTab(data) {
                         el('span', { class: 'dot dot--on' }), el('span', { class: 'row__main' },
                             el('span', { class: 'row__title' }, controller.name),
                             el('span', { class: 'row__meta' }, controller.address)))))
-                    : emptyBlock('bx-broadcast', 'No controller currently supplies Cowork relay to this network.'))));
+                    : emptyBlock('bx-broadcast', 'No controller currently supplies Cowork relay to this network.')),
+            canManage ? el('section', { class: 'panel' },
+                el('div', { class: 'panel__head' }, 'Headless machines'),
+                el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12px;line-height:1.6' },
+                    'A machine with no browser to sign in on cannot answer an ' +
+                    'invitation. Give it a single-use code instead and run ' +
+                    'pscluster join there.'),
+                el('button', { class: 'btn btn--sm', onclick: () => createJoinCode(data.network) },
+                    el('i', { class: 'bx bx-key' }), 'Create a machine code')) : null));
+}
+
+function pendingPanel(invitations, canManage) {
+    if (!invitations.length) return null;
+    return el('section', { class: 'panel', style: 'margin-top:14px' },
+        el('div', { class: 'panel__head' },
+            el('span', { class: 'grow' }, 'Waiting to be answered'),
+            el('span', { class: 'chip chip--warn' }, String(invitations.length))),
+        el('div', { class: 'rows' }, ...invitations.map((invite) =>
+            el('div', { class: 'row', style: 'cursor:default' },
+                el('span', { class: 'avatar' }, initials(invite.display_name || invite.username)),
+                el('span', { class: 'row__main' },
+                    el('span', { class: 'row__title' }, invite.display_name || invite.username),
+                    el('span', { class: 'row__meta' },
+                        `@${invite.username} · invited as ${invite.role} ${ago(invite.created_at)}`)),
+                canManage ? el('button', {
+                    class: 'btn btn--sm btn--icon', title: 'Withdraw this invitation',
+                    onclick: async () => {
+                        try {
+                            await api(`/api/invitations/${encodeURIComponent(invite.id)}`,
+                                { method: 'DELETE' });
+                            toast(`Invitation to ${invite.username} withdrawn.`);
+                            location.reload();
+                        } catch (error) { toast(error.message, 'err'); }
+                    },
+                }, el('i', { class: 'bx bx-x' })) : null))));
+}
+
+// createJoinCode is the escape hatch for a machine that has no browser: it
+// proves possession of a secret instead of naming a person.
+function createJoinCode(network) {
+    const endpoint = el('input', { class: 'input input--mono',
+        placeholder: 'https://host-or-private-address:10000' });
+    modal({ title: `Machine code for ${network.name}`, confirmLabel: 'Create code',
+    body: () => el('div', {},
+        field('Reachable address', endpoint,
+            'Leave empty to use this machine’s private Plainshow address.')),
+    onConfirm: async (close) => {
+        const body = { minutes: 15, max_uses: 1 };
+        if (endpoint.value.trim()) body.endpoint = endpoint.value.trim();
+        const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/invites`,
+            { method: 'POST', body });
+        close(); showInvite(invite);
+    } });
 }
 
 function memberRow(network, member, canManage) {
@@ -449,16 +554,76 @@ function joinNetwork() {
     } });
 }
 
+// createInvite invites a person, not a machine.
+//
+// A join code proves somebody was handed a secret; it says nothing about who
+// they are, and it has to be carried out of band to whoever is standing at the
+// right computer. An invitation is addressed to an account and waits until that
+// person looks, from whichever machine they happen to be on. Codes remain for
+// headless machines with no account session, under "Join by code".
 function createInvite(network) {
-    const endpoint = el('input', { class: 'input input--mono',
-        placeholder: 'https://host-or-private-address:10000' });
-    modal({ title: `Invite to ${network.name}`, confirmLabel: 'Create code', body: () => el('div', {},
-        field('Reachable address', endpoint, 'Leave empty to use this machine’s private Plainshow address.')),
+    let chosen = null;
+    const results = el('div', { class: 'rows', style: 'max-height:190px;overflow-y:auto;margin-top:8px' });
+    const search = el('input', { class: 'input', placeholder: 'Username or name…', autocomplete: 'off' });
+    const role = el('select', { class: 'input' }, ...['member', 'operator', 'admin', 'viewer']
+        .map((name) => el('option', { value: name, selected: name === 'member' }, name)));
+
+    const pick = (account) => {
+        chosen = account;
+        search.value = account.username;
+        mount(results, el('div', { class: 'row', style: 'cursor:default' },
+            el('span', { class: 'avatar' }, initials(account.display_name || account.username)),
+            el('span', { class: 'row__main' },
+                el('span', { class: 'row__title' }, account.display_name || account.username),
+                el('span', { class: 'row__meta' }, `@${account.username}`)),
+            el('i', { class: 'bx bx-check', style: 'color:var(--good)' })));
+    };
+
+    // Debounced: one request per pause in typing rather than one per keystroke.
+    let timer = null;
+    search.addEventListener('input', () => {
+        chosen = null;
+        clearTimeout(timer);
+        const query = search.value.trim();
+        if (query.length < 2) { mount(results); return; }
+        timer = setTimeout(async () => {
+            try {
+                const found = await api(`/api/accounts/search?q=${encodeURIComponent(query)}`);
+                const accounts = found.accounts || [];
+                mount(results, ...(accounts.length
+                    ? accounts.map((account) => el('button', {
+                        class: 'row', style: 'text-align:left',
+                        onclick: () => pick(account),
+                    },
+                        el('span', { class: 'avatar' },
+                            initials(account.display_name || account.username)),
+                        el('span', { class: 'row__main' },
+                            el('span', { class: 'row__title' },
+                                account.display_name || account.username),
+                            el('span', { class: 'row__meta' }, `@${account.username}`))))
+                    : [el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
+                        'No Plainshow account matches that.')]));
+            } catch (error) {
+                mount(results, el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
+                    error.message));
+            }
+        }, 220);
+    });
+
+    modal({ title: `Invite to ${network.name}`, confirmLabel: 'Send invitation',
+    body: () => el('div', {},
+        field('Person', search, 'They are notified in their own Plainshow Cluster.'),
+        results,
+        el('div', { style: 'margin-top:14px' },
+            field('Role', role, 'What they may do in this network. Ownership cannot be given away here.'))),
     onConfirm: async (close) => {
-        const body = { minutes: 15, max_uses: 1 };
-        if (endpoint.value.trim()) body.endpoint = endpoint.value.trim();
-        const invite = await api(`/api/networks/${encodeURIComponent(network.id)}/invites`, { method: 'POST', body });
-        close(); showInvite(invite);
+        const username = (chosen && chosen.username) || search.value.trim();
+        if (!username) throw new Error('Choose who to invite.');
+        await api(`/api/networks/${encodeURIComponent(network.id)}/invitations`,
+            { method: 'POST', body: { username, role: role.value } });
+        close();
+        toast(`Invited ${username} to ${network.name}.`);
+        location.reload();
     } });
 }
 
