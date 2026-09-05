@@ -4,7 +4,8 @@
 // runs one way: app -> views -> client.
 
 import { el, mount, initials, plainshowLogo } from './lib/ui.js';
-import { api, state, refresh, connect, onConnection, onUnauthorized, toast } from './lib/client.js';
+import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
+import { networkStatus, powerButton } from './lib/statusbar.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
 import { newProject, renderProjects } from './views/projects.js';
@@ -114,24 +115,6 @@ function shell(overview) {
 		class: 'rail-scrim', 'aria-label': 'Close navigation', onclick: closeRail,
 	});
 
-    const networkPicker = el('select', {
-        class: 'input input--mono',
-        style: 'width:auto;min-width:150px;padding:7px 30px 7px 10px;font-size:10px',
-        'aria-label': 'Active network',
-        onchange: async (event) => {
-            event.target.disabled = true;
-			try {
-				await api(`/api/networks/${encodeURIComponent(event.target.value)}/active`, { method: 'PUT' });
-				location.reload();
-			} catch (err) {
-				event.target.disabled = false;
-				toast(err.message, 'err');
-			}
-        },
-    }, ...(overview.networks || []).map((network) => el('option', {
-        value: network.id, selected: network.id === overview.active_network,
-    }, network.name)));
-
     const main = el('div', { class: 'main' },
         el('header', { class: 'top' },
             el('button', {
@@ -141,7 +124,8 @@ function shell(overview) {
             }, el('i', { class: 'bx bx-menu' })),
 			el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
-            networkPicker,
+            networkStatus(),
+            powerButton(),
 			el('button', { class: 'btn btn--sm', onclick: () => newProject(), title: 'New project' },
 				el('i', { class: 'bx bx-plus' }), el('span', {}, 'New project'))),
         el('div', { id: 'view' }));

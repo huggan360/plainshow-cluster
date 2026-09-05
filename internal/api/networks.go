@@ -423,8 +423,17 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, membership)
 }
 
+// activateNetwork selects the network this machine works in.
+//
+// A machine runs one Ray process, and it belongs to one network at a time, so
+// selecting another network necessarily takes this machine out of the old
+// network's Ray cluster and puts it into the new one's. The reconciler already
+// does exactly that; leaving it to the next tick meant up to fifteen seconds of
+// a machine that had visibly switched while its compute had not, so the switch
+// starts the move itself.
 func (s *Server) activateNetwork(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	previous := s.cfg.ActiveNetwork
 	if !s.cfg.SetActiveNetwork(id) {
 		fail(w, 404, "This device does not belong to that network.")
 		return
@@ -434,7 +443,18 @@ func (s *Server) activateNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.Publish("network.active", s.cfg.ActiveMembership())
-	writeJSON(w, 200, s.cfg.ActiveMembership())
+
+	moved := previous != "" && previous != id
+	if moved {
+		// Detached from the request: the browser should not wait on a Ray
+		// restart, and cancelling the request must not abandon it half done.
+		go s.reconcileRay(context.Background())
+	}
+	writeJSON(w, 200, map[string]any{
+		"membership": s.cfg.ActiveMembership(),
+		"previous":   previous,
+		"ray_moving": moved,
+	})
 }
 
 func (s *Server) networkNodes(w http.ResponseWriter, r *http.Request) {

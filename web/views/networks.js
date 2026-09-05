@@ -12,16 +12,21 @@ async function renderNetworkList(host) {
     const page = el('div', { class: 'page' });
     mount(host, page);
     const data = await api('/api/networks');
+    // The selected network first: it is the one every other page is about, so
+    // it should not be somewhere in an alphabetical list.
+    const networks = [...(data.networks || [])].sort((a, b) =>
+        (b.id === data.active) - (a.id === data.active));
     let query = '';
     const count = el('span', { class: 'chip' });
     const results = el('div');
     const search = el('input', { class: 'input', placeholder: 'Search networks…' });
     const drawResults = () => {
-        const visible = data.networks.filter((network) => network.name.toLowerCase().includes(query));
+        const visible = networks.filter((network) =>
+            (network.name || '').toLowerCase().includes(query));
         count.textContent = `${visible.length} visible`;
         mount(results, visible.length
                 ? el('div', { class: 'ps-card-grid' }, ...visible.map((network) => networkCard(network, data.active)))
-                : emptyNetworkList());
+                : emptyNetworkList(networks.length > 0));
     };
     search.addEventListener('input', () => { query = search.value.toLowerCase(); drawResults(); });
     mount(page,
@@ -29,7 +34,8 @@ async function renderNetworkList(host) {
             el('div', { class: 'detail-head__copy' },
                 el('h1', { class: 'page__title' }, 'Networks'),
                 el('p', { class: 'page__sub' },
-                    'Every project, machine and collaborator belongs to a network.')),
+                    'Every project, machine and collaborator belongs to a network. ' +
+                    'This machine works in one at a time — the selected one.')),
             el('button', { class: 'btn', onclick: joinNetwork },
                 el('i', { class: 'bx bx-link' }), 'Join by code'),
             el('button', { class: 'btn btn--primary', onclick: createNetwork },
@@ -41,9 +47,18 @@ async function renderNetworkList(host) {
     return null;
 }
 
+// networkCard is a div rather than a link because it carries its own Select
+// button, and a button inside an anchor is neither valid nor predictable.
 function networkCard(network, activeID) {
     const active = network.id === activeID;
-    return el('a', { class: 'panel ps-project-card', href: `#/networks/${encodeURIComponent(network.id)}` },
+    const open = () => navigate(`networks/${encodeURIComponent(network.id)}`);
+    return el('div', {
+        class: `panel ps-project-card ${active ? 'ps-project-card--on' : ''}`,
+        role: 'link', tabindex: '0', onclick: open,
+        onkeydown: (event) => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+        },
+    },
         el('div', { class: 'ps-project-card__top' },
             el('span', { class: 'ps-project-mark ps-network-mark' }, el('i', { class: 'bx bx-network-chart' })),
             el('span', { class: 'ps-project-card__copy' },
@@ -55,8 +70,23 @@ function networkCard(network, activeID) {
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count} devices`),
             el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count} GPUs`),
-            el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`),
-            el('i', { class: 'bx bx-right-arrow-alt' })));
+            el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`)),
+        el('div', { class: 'ps-card-actions' },
+            active
+                ? el('span', { class: 'chip chip--cyan' },
+                    el('i', { class: 'bx bx-check' }), ' Working here')
+                : el('button', {
+                    class: 'btn btn--sm btn--primary',
+                    onclick: (event) => {
+                        event.stopPropagation();
+                        selectNetwork(network.id, network.name);
+                    },
+                }, el('i', { class: 'bx bx-check-circle' }), 'Select'),
+            el('span', { class: 'push' }),
+            el('button', {
+                class: 'btn btn--sm',
+                onclick: (event) => { event.stopPropagation(); open(); },
+            }, 'Open', el('i', { class: 'bx bx-right-arrow-alt' }))));
 }
 
 async function renderNetwork(host, id, requestedTab) {
@@ -361,9 +391,16 @@ function nodeOnline(node) {
     return Number.isFinite(seen) && Date.now() - seen < 120000;
 }
 
+// selectNetwork moves this machine into a network. That is not only a view
+// change: a machine runs one Ray process and it belongs to one network, so
+// selecting another one takes this machine out of the old network's Ray cluster
+// and into the new one's. Say so, because a job running here will stop.
 async function selectNetwork(id, name) {
-    await api(`/api/networks/${encodeURIComponent(id)}/active`, { method: 'PUT' });
-    toast(`${name} is now selected.`); location.reload();
+    const result = await api(`/api/networks/${encodeURIComponent(id)}/active`, { method: 'PUT' });
+    toast(result && result.ray_moving
+        ? `${name} is now selected. This machine is leaving the previous Ray cluster.`
+        : `${name} is now selected.`);
+    location.reload();
 }
 
 function emptyBlock(icon, text) {
@@ -371,10 +408,29 @@ function emptyBlock(icon, text) {
         el('span', { class: 'empty__text' }, text));
 }
 
-function emptyNetworkList() {
+// emptyNetworkList tells the two empty cases apart. "Nothing matched your
+// search" and "this node belongs to nothing" look identical and lead somewhere
+// completely different, and the second one is usually a person looking at a
+// different node than the one they set up — one machine can run a packaged
+// system node and a personal one, each with its own database — so it names the
+// node it is actually talking to.
+function emptyNetworkList(filtered) {
+    if (filtered) {
+        return el('div', { class: 'panel empty' },
+            el('i', { class: 'bx bx-search empty__ico' }),
+            el('strong', {}, 'No networks match that search.'));
+    }
+    const overview = state.overview || {};
+    const node = overview.node || {};
     return el('div', { class: 'panel empty' }, el('i', { class: 'bx bx-network-chart empty__ico' }),
-        el('strong', {}, 'No networks match this view.'),
-        el('span', { class: 'empty__text' }, 'Create one or join with a code from another machine.'));
+        el('strong', {}, 'This node belongs to no networks.'),
+        el('span', { class: 'empty__text' },
+            'Create one, or join with a code from another machine.'),
+        overview.networks_error
+            ? el('span', { class: 'empty__text', style: 'color:var(--bad)' }, overview.networks_error)
+            : null,
+        el('span', { class: 'mono dim', style: 'font-size:10px;margin-top:10px' },
+            `node ${node.name || '?'} · ${node.root || 'unknown root'}`));
 }
 
 function joinNetwork() {

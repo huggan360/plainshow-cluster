@@ -148,6 +148,40 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 .top__title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .top__spacer { flex: 1; }
 
+/* The network pill reports; it does not select. Choosing a network changes
+ * which Ray cluster this machine joins, so that decision belongs on the
+ * Networks page where the consequences are visible. */
+.netpill {
+    display: flex; align-items: center; gap: 10px;
+    max-width: 340px; padding: 6px 10px 6px 12px;
+    border: 1px solid var(--line); border-radius: 11px;
+    background: var(--elev); color: inherit; text-decoration: none;
+    transition: border-color .16s ease, background .16s ease;
+}
+.netpill:hover { border-color: var(--line-2); background: #131722; }
+.netpill__dot { flex: none; }
+.netpill__body { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.netpill__name {
+    overflow: hidden; font-size: 12.5px; font-weight: 600;
+    text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em;
+}
+.netpill__meta {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10px; color: var(--tx-3); white-space: nowrap;
+}
+.netpill__ip { font-size: 10px; color: var(--tx-2); }
+.netpill__warn { color: var(--warn); }
+.netpill__sep { color: var(--tx-4); }
+.netpill__chev { color: var(--tx-4); font-size: 16px; }
+.topbar__power { color: var(--tx-3); }
+.topbar__power:hover { color: var(--bad); border-color: rgba(251,113,133,.4); }
+
+.snippet {
+    margin: 12px 0; padding: 11px 13px; overflow-x: auto;
+    border: 1px solid var(--line); border-radius: 9px; background: #05070b;
+    font-family: var(--mono); font-size: 11.5px; color: var(--tx-2);
+}
+
 .page { padding: 26px 28px 80px; max-width: 1580px; }
 .page__head { margin-bottom: 22px; }
 .page__eyebrow {
@@ -249,9 +283,9 @@ a.ps-status-row:hover, button.ps-status-row:hover { border-color: rgba(255,255,2
 .section-heading a { color: var(--tx-3); font-size: 12px; }
 
 .ps-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.ps-project-card { display: flex; min-height: 140px; height: 100%; flex-direction: column;
-    padding: 16px; color: inherit; text-decoration: none; transition: transform .2s ease,
-    border-color .2s ease, box-shadow .2s ease; }
+.ps-project-card { position: relative; display: flex; min-height: 140px; height: 100%;
+    flex-direction: column; padding: 16px; color: inherit; text-decoration: none;
+    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
 .ps-project-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.14);
     box-shadow: 0 16px 38px rgba(0,0,0,.14); text-decoration: none; }
 .ps-project-card__top { display: flex; align-items: flex-start; gap: 12px; }
@@ -271,6 +305,12 @@ a.ps-status-row:hover, button.ps-status-row:hover { border-color: rgba(255,255,2
     color: var(--tx-3); font-size: 10px; }
 .ps-project-card__foot .push { margin-left: auto; }
 .ps-network-mark { background: linear-gradient(135deg,#15803d,#4ade80 52%,#bbf7d0); color: #052e16; }
+.ps-project-card--on { border-color: rgba(103,232,249,.42); background: #0c141b; }
+.ps-project-card--on::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(103,232,249,.22); pointer-events: none;
+}
+.ps-card-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .ps-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding: 12px; }
 .ps-search { position: relative; flex: 1; }
 .ps-search .bx { position: absolute; left: 14px; top: 50%; color: var(--tx-4); transform: translateY(-50%); }
@@ -582,3 +622,109 @@ td:first-child { color: #e2e8f0; }
 	.welcome-title { margin-bottom: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------------------------------------------------------------- folds -- */
+
+/* A fold keeps configuration reachable without letting it dominate a panel
+ * that exists to answer one question. */
+.fold { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.fold > summary {
+    cursor: pointer; list-style: none; color: var(--tx-3);
+    font-size: 12px; user-select: none;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: '\203A'; display: inline-block; margin-right: 8px;
+    transition: transform .15s ease; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover { color: var(--tx-2); }
+
+.spin-icon { display: inline-block; animation: spin-icon .9s linear infinite; }
+@keyframes spin-icon { to { transform: rotate(360deg); } }
+
+/* --------------------------------------------------------------- GitHub -- */
+
+/* One centred card, matching the Plainshow console's account pages, so the
+ * same task looks the same in both places. */
+.gh-page { max-width: 780px; margin: 0 auto; }
+.gh-card { position: relative; overflow: hidden; padding: 0; }
+.gh-card__head {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 44px 40px 34px; text-align: center;
+}
+.gh-mark {
+    display: flex; width: 64px; height: 64px; align-items: center; justify-content: center;
+    border: 1px solid var(--line-2); border-radius: 18px;
+    background: rgba(255,255,255,.035); color: #fff; font-size: 34px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.18);
+}
+.gh-card__body { display: flex; width: 100%; flex-direction: column; align-items: center; }
+.gh-pill {
+    display: inline-flex; align-items: center; gap: 8px; margin-top: 24px;
+    border-radius: 999px; background: rgba(148,163,184,.08); padding: 5px 13px;
+    color: var(--tx-3); font-size: 10px; font-weight: 600;
+    letter-spacing: .16em; text-transform: uppercase;
+}
+.gh-pill__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tx-4); }
+.gh-pill--on { background: rgba(52,211,153,.08); color: #6ee7b7; }
+.gh-pill--on .gh-pill__dot { background: var(--good); }
+.gh-title { margin: 16px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.035em; }
+.gh-sub { margin: 5px 0 0; color: var(--tx-3); font-size: 12.5px; }
+.gh-error { margin: 16px 0 0; color: #fda4af; font-size: 12px; }
+.gh-action { margin-top: 26px; }
+
+.gh-stats {
+    display: grid; width: 100%; margin-top: 30px; grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 16px 0;
+}
+.gh-stat { padding: 0 8px; }
+.gh-stat + .gh-stat { border-left: 1px solid var(--line); }
+.gh-stat__value { display: block; color: var(--tx); font-size: 18px; font-weight: 600; }
+.gh-stat__value--on { color: #6ee7b7; }
+.gh-stat__value--off { color: #fda4af; }
+.gh-stat__label {
+    display: block; margin-top: 3px; color: var(--tx-4);
+    font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase;
+}
+
+.gh-warn {
+    width: 100%; margin-top: 20px; border-radius: 12px;
+    background: rgba(251,113,133,.07); padding: 12px 16px; text-align: left;
+}
+.gh-warn__head {
+    display: flex; align-items: center; gap: 7px;
+    color: #fda4af; font-size: 11px; font-weight: 600;
+}
+.gh-warn__text { margin: 7px 0 0; color: rgba(253,164,175,.82); font-size: 11.5px; line-height: 1.6; }
+
+.gh-resync {
+    position: absolute; top: 14px; right: 14px; z-index: 2;
+    display: flex; width: 34px; height: 34px; align-items: center; justify-content: center;
+    border: 0; border-radius: 9px; background: transparent; color: var(--tx-4);
+    cursor: pointer; font-size: 19px; transition: color .16s ease;
+}
+.gh-resync:hover { color: var(--cyan); }
+.gh-resync:disabled { cursor: wait; }
+
+.gh-form { border-top: 1px solid var(--line); background: rgba(0,0,0,.16); padding: 24px 40px 26px; }
+.gh-form__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.gh-form__title { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--tx); }
+.gh-form__note { margin: 5px 0 0; color: var(--tx-4); font-size: 11px; line-height: 1.6; }
+.gh-link { color: var(--cyan); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.gh-link:hover { text-decoration: underline; }
+.gh-input { position: relative; margin-top: 18px; }
+.gh-input .input { padding-right: 46px; }
+.gh-reveal {
+    position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+    display: flex; width: 32px; height: 32px; align-items: center; justify-content: center;
+    border: 0; border-radius: 8px; background: transparent; color: var(--tx-3);
+    cursor: pointer; font-size: 17px;
+}
+.gh-reveal:hover { background: rgba(255,255,255,.05); color: var(--tx-2); }
+.gh-form__foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+
+@media (max-width: 720px) {
+    .gh-card__head { padding: 34px 22px 26px; }
+    .gh-form { padding: 22px; }
+    .netpill { max-width: 190px; }
+    .netpill__chev { display: none; }
+}

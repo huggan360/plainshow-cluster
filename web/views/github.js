@@ -1,152 +1,171 @@
-// GitHub — connect an account once, then use your repositories from here.
+// GitHub — the Plainshow console's GitHub page, on a node.
+//
+// This is deliberately the same page as plainshow.se/console: one centred card,
+// the connection pill, the three counts, and the token form folded into the
+// card rather than thrown into a dialog. Someone who has connected GitHub on
+// the web should recognise this immediately and not have to learn it twice.
 
 import { el, mount, ago } from '../lib/ui.js';
-import { api, toast, modal, navigate, refresh } from '../lib/client.js';
+import { api, toast, modal, refresh } from '../lib/client.js';
 
 const TOKEN_URL =
     'https://github.com/settings/tokens/new?description=Plainshow%20Cluster&scopes=repo,workflow';
 
 export async function renderGitHub(host) {
-    const page = el('div', { class: 'page' });
+    const page = el('div', { class: 'page gh-page' });
     mount(host, page);
 
+    let editing = false;
     const draw = async () => {
         const status = await api('/api/github');
-        mount(page,
-            el('div', { class: 'detail-head', style: 'margin-bottom:24px' },
-                el('span', { class: 'ps-project-mark' }, el('i', { class: 'bx bxl-github' })),
-                el('div', { class: 'detail-head__copy' },
-                    el('p', { class: 'page__eyebrow' }, 'Source control'),
-                    el('h1', { class: 'page__title' }, 'GitHub'),
-                    el('p', { class: 'page__sub' },
-                        'Connect once to clone repositories, push changes and keep project access in sync.'))),
-            status.connected ? connected(status, draw) : disconnected(status, draw));
+        // A node that has never had a token opens straight into the form; there
+        // is nothing else on the page to do.
+        if (!status.connected && !status.error) editing = true;
+        mount(page, card(status, {
+            editing,
+            setEditing: (value) => { editing = value; draw(); },
+            reload: draw,
+        }));
     };
 
     await draw();
     return null;
 }
 
-function connected(status, draw) {
+function card(status, control) {
+    const connected = Boolean(status.connected);
+    return el('section', { class: 'panel gh-card' },
+        connected ? resyncButton(control.reload) : null,
+        el('div', { class: 'gh-card__head' },
+            el('span', { class: 'gh-mark' }, el('i', { class: 'bx bxl-github' })),
+            connected ? connectedHead(status, control) : disconnectedHead(status, control)),
+        control.editing ? tokenForm(status, control) : null);
+}
+
+function connectedHead(status, control) {
     const repos = status.repositories || {};
-    return el('div', { class: 'grid grid--2' },
-        el('div', { class: 'frame' }, el('div', { class: 'frame__in' },
-            el('div', { class: 'panel__head' },
-                el('span', { class: 'grow' }, 'Connected'),
-                el('span', { class: 'chip chip--good' }, 'active')),
-            el('div', { style: 'font-size:20px;font-weight:700;letter-spacing:-.02em' },
-                `@${status.account}`),
-            el('p', { class: 'muted', style: 'margin:4px 0 18px;font-size:12.5px' },
-                [status.name, status.email].filter(Boolean).join(' · ') || 'No public name set'),
-            el('div', { class: 'grid grid--3', style: 'gap:10px' },
-                stat(repos.total, 'Repositories'),
-                stat(repos.private, 'Private'),
-                stat(status.git_ready ? 'Ready' : 'Limited', 'Access',
-                    status.git_ready ? 'var(--good)' : 'var(--warn)')),
-            status.error
-                ? el('p', {
-                    style: 'margin:16px 0 0;font-size:12.5px;color:#fda4af;line-height:1.5',
-                }, status.error)
-                : null,
-            el('div', { style: 'display:flex;gap:8px;margin-top:20px' },
-                el('button', { class: 'btn btn--sm', onclick: () => connectForm(draw, true) },
-                    el('i', { class: 'bx bx-refresh' }), 'Replace token'),
-                el('button', {
-                    class: 'btn btn--sm btn--danger',
-                    onclick: () => disconnect(draw),
-                }, el('i', { class: 'bx bx-unlink' }), 'Disconnect')))),
-
-        el('div', { class: 'panel' },
-            el('div', { class: 'panel__head' }, 'What you can do now'),
-            el('div', { class: 'rows' },
-                action('Clone a repository into a project',
-                    'Bring existing code onto this machine.',
-                    () => cloneForm()),
-                action('Connect a project to a repository',
-                    'Open a project, then use the Repository panel.',
-                    () => navigate('projects')),
-                action('Share a project with someone',
-                    'Add their GitHub username under Team; they are invited to the repository too.',
-                    () => navigate('projects')))));
-}
-
-function stat(value, label, colour) {
-    return el('div', {},
-        el('span', {
-            style: `display:block;font-size:19px;font-weight:700;${colour ? `color:${colour}` : ''}`,
-        }, value ?? 0),
-        el('span', {
-            class: 'mono',
-            style: 'display:block;margin-top:2px;font-size:9.5px;letter-spacing:.14em;' +
-                   'text-transform:uppercase;color:#475569',
-        }, label));
-}
-
-function action(title, description, onclick) {
-    return el('button', {
-        class: 'row', style: 'text-align:left;border-width:1px', onclick,
-    },
-        el('span', { class: 'row__main' },
-            el('span', { class: 'row__title' }, title),
-            el('span', { class: 'row__meta' }, description)),
-		el('i', { class: 'bx bx-right-arrow-alt dim' }));
-}
-
-function disconnected(status, draw) {
-    return el('div', { class: 'panel', style: 'max-width:620px' },
-        el('div', { class: 'empty', style: 'padding-bottom:12px' },
-			el('i', { class: 'bx bxl-github empty__ico' }),
-            el('span', { class: 'empty__text' },
-                'No GitHub account is connected to this node yet.')),
-        status.error
-            ? el('p', {
-                style: 'margin:0 0 16px;font-size:12.5px;color:#fda4af;text-align:center',
-            }, status.error)
+    const ready = Boolean(status.git_ready);
+    return el('div', { class: 'gh-card__body' },
+        el('span', { class: 'gh-pill gh-pill--on' },
+            el('span', { class: 'gh-pill__dot' }), 'Connected'),
+        el('h1', { class: 'gh-title' }, `@${status.account}`),
+        el('p', { class: 'gh-sub' },
+            [status.name, status.email].filter(Boolean).join(' · ') || 'No public name set'),
+        el('div', { class: 'gh-stats' },
+            stat(repos.total, 'Repositories'),
+            stat(repos.private, 'Private'),
+            stat(ready ? 'Ready' : 'Missing', 'Git access', ready ? 'on' : 'off')),
+        !ready && status.error
+            ? el('div', { class: 'gh-warn' },
+                el('div', { class: 'gh-warn__head' },
+                    el('i', { class: 'bx bx-error-circle' }), 'Access needed'),
+                el('p', { class: 'gh-warn__text' }, status.error))
             : null,
-        el('div', { style: 'display:flex;justify-content:center' },
-            el('button', { class: 'btn btn--primary', onclick: () => connectForm(draw, false) },
-                el('i', { class: 'bx bxl-github' }), 'Connect GitHub')));
+        control.editing ? null : el('button', {
+            class: 'btn gh-action', onclick: () => control.setEditing(true),
+        }, el('i', { class: 'bx bx-key' }), 'New token'));
 }
 
-function connectForm(draw, replacing) {
+function disconnectedHead(status, control) {
+    return el('div', { class: 'gh-card__body' },
+        el('span', { class: 'gh-pill' }, el('span', { class: 'gh-pill__dot' }), 'Not connected'),
+        el('h1', { class: 'gh-title' }, 'Connect GitHub'),
+        el('p', { class: 'gh-sub' }, 'Use your repositories directly from Plainshow.'),
+        status.error ? el('p', { class: 'gh-error' }, status.error) : null,
+        control.editing ? null : el('button', {
+            class: 'btn btn--primary gh-action', onclick: () => control.setEditing(true),
+        }, el('i', { class: 'bx bxl-github' }), 'Connect GitHub'));
+}
+
+function stat(value, label, tone) {
+    return el('div', { class: 'gh-stat' },
+        el('span', {
+            class: `gh-stat__value ${tone ? `gh-stat__value--${tone}` : ''}`,
+        }, String(value ?? 0)),
+        el('span', { class: 'gh-stat__label' }, label));
+}
+
+function resyncButton(reload) {
+    const icon = el('i', { class: 'bx bx-refresh' });
+    const button = el('button', {
+        class: 'gh-resync', title: 'Resync GitHub', 'aria-label': 'Resync GitHub',
+        onclick: async () => {
+            button.disabled = true;
+            icon.classList.add('spin-icon');
+            try { await reload(); } catch (err) { toast(err.message, 'err'); }
+            icon.classList.remove('spin-icon');
+            button.disabled = false;
+        },
+    }, icon);
+    return button;
+}
+
+// tokenForm lives inside the card, as it does on the console. A dialog hides
+// the account you are about to replace at the moment you decide whether to.
+function tokenForm(status, control) {
+    const connected = Boolean(status.connected);
     const token = el('input', {
         class: 'input input--mono', type: 'password', autocomplete: 'off',
-        placeholder: 'ghp_… or github_pat_…',
+        placeholder: 'github_pat_… or ghp_…',
     });
-
-    modal({
-        title: replacing ? 'Replace token' : 'Connect GitHub',
-        confirmLabel: replacing ? 'Replace' : 'Connect',
-        body: () => el('div', {},
-            el('p', { style: 'margin:0 0 16px;font-size:12.5px;color:#94a3b8;line-height:1.6' },
-                'Create a classic personal access token with the ',
-                el('strong', {}, 'repo'),
-                ' and ',
-                el('strong', {}, 'workflow'),
-                ' scopes. That is what lets Plainshow Cluster create repositories, push, ' +
-                'pull, and manage who may work on a project.'),
-            el('a', {
-                class: 'btn btn--sm', href: TOKEN_URL, target: '_blank', rel: 'noreferrer',
-                style: 'margin-bottom:16px',
-            }, el('i', { class: 'bx bx-link-external' }), 'Create a token on GitHub'),
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Token'), token),
-            el('p', { class: 'muted', style: 'margin:0;font-size:11.5px' },
-                'The token is stored inside this node’s own directory, readable only ' +
-                'by the account running it, and is never written into a project.')),
-        onConfirm: async (close) => {
-            const value = token.value.trim();
-            if (value.length < 20) throw new Error('That does not look like a GitHub token.');
-            const result = await api('/api/github', { method: 'POST', body: { token: value } });
-            close();
-            toast(`Connected as @${result.account}.`);
-            await refresh();
-            await draw();
+    const reveal = el('button', {
+        class: 'gh-reveal', type: 'button', 'aria-label': 'Show token',
+        onclick: () => {
+            const hidden = token.getAttribute('type') === 'password';
+            token.setAttribute('type', hidden ? 'text' : 'password');
+            reveal.setAttribute('aria-label', hidden ? 'Hide token' : 'Show token');
+            mount(reveal, el('i', { class: `bx ${hidden ? 'bx-hide' : 'bx-show'}` }));
         },
-    });
+    }, el('i', { class: 'bx bx-show' }));
+
+    const submit = el('button', {
+        class: 'btn btn--primary',
+        onclick: async () => {
+            const value = token.value.trim();
+            if (value.length < 20) {
+                toast('That does not look like a GitHub token.', 'err');
+                return;
+            }
+            submit.disabled = true;
+            try {
+                const result = await api('/api/github', { method: 'POST', body: { token: value } });
+                toast(`Connected as @${result.account}.`);
+                await refresh();
+                control.setEditing(false);
+            } catch (err) {
+                toast(err.message, 'err');
+                submit.disabled = false;
+            }
+        },
+    }, el('i', { class: 'bx bx-check' }), connected ? 'Replace' : 'Connect');
+
+    return el('div', { class: 'gh-form' },
+        el('div', { class: 'gh-form__head' },
+            el('div', {},
+                el('h2', { class: 'gh-form__title' },
+                    connected ? 'Replace token' : 'Classic token'),
+                el('p', { class: 'gh-form__note' },
+                    'Repository and workflow scope · create, sync, push and CI')),
+            el('a', {
+                class: 'gh-link', href: TOKEN_URL, target: '_blank', rel: 'noreferrer',
+            }, 'Create token ', el('i', { class: 'bx bx-link-external' }))),
+        el('div', { class: 'gh-input' }, token, reveal),
+        el('p', { class: 'gh-form__note', style: 'margin-top:10px' },
+            'The token is stored inside this node’s own directory, readable only by ' +
+            'the account running it, and is never written into a project.'),
+        el('div', { class: 'gh-form__foot' },
+            connected
+                ? el('button', { class: 'btn btn--danger', onclick: () => disconnect(control) },
+                    el('i', { class: 'bx bx-unlink' }), 'Disconnect')
+                : null,
+            el('span', { style: 'flex:1' }),
+            connected
+                ? el('button', { class: 'btn', onclick: () => control.setEditing(false) }, 'Cancel')
+                : null,
+            submit));
 }
 
-function disconnect(draw) {
+function disconnect(control) {
     modal({
         title: 'Disconnect GitHub?',
         confirmLabel: 'Disconnect',
@@ -160,7 +179,7 @@ function disconnect(draw) {
             close();
             toast('GitHub disconnected.');
             await refresh();
-            await draw();
+            control.setEditing(true);
         },
     });
 }

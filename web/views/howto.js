@@ -69,6 +69,46 @@ results = ray.get([train.remote(s) for s in shards])`),
         step(6, 'Watch it',
             'Jobs shows what Ray is running and which machines are busy.'),
 
+        explainer('Run on the Projects page, or run it yourself?',
+            'Both reach the same cluster. Pressing Run submits the job to Ray ' +
+            'rather than starting a process on this machine:',
+            [
+                ['The project folder travels with it',
+                 'Ray packages the folder and ships it to every machine that runs ' +
+                 'part of the job, so they all see the same files. A very large ' +
+                 'data/ folder is shipped too, which is the one thing to watch.'],
+                ['It is tracked',
+                 'The job gets an id, appears under Jobs for everyone in the ' +
+                 'network, streams its logs, and has a Stop button.'],
+                ['It outlives the page',
+                 'Closing the tab, or the window, does not stop it. A terminal run ' +
+                 'dies with the terminal.'],
+                ['It uses the node’s Ray runtime',
+                 'Not your shell’s environment. Packages your code needs must be ' +
+                 'installed where Ray runs.'],
+            ],
+            'Running python train.py yourself still joins the cluster — ray.init() ' +
+            'finds the local Ray either way. You just do not get the id, the log ' +
+            'capture or the stop button.'),
+
+        explainer('What happens when you switch network',
+            'A machine works in one network at a time, and it runs one Ray ' +
+            'process, so switching moves it:',
+            [
+                ['It leaves the old Ray cluster',
+                 'Immediately, not on a timer. Anything this machine was ' +
+                 'contributing to that network stops.'],
+                ['If it was the head, the others are told',
+                 'A head that vanishes without saying so leaves every other ' +
+                 'machine retrying an address that will never answer.'],
+                ['It joins the new network’s cluster',
+                 'Attaching to that network’s head, or becoming it when there is ' +
+                 'none yet and this machine accepts work.'],
+                ['Nothing is deleted',
+                 'Projects, history and settings in the other network are exactly ' +
+                 'where you left them. Switch back and it rejoins.'],
+            ]),
+
         el('div', { class: 'panel', style: 'margin-top:18px' },
             el('div', { class: 'panel__head' }, 'If something is missing'),
             el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px' },
@@ -97,6 +137,30 @@ function step(n, title, body, note) {
                 note
                     ? el('p', { class: 'mono', style: 'margin:8px 0 0;font-size:11.5px;color:var(--tx-4)' }, note)
                     : null)));
+}
+
+// explainer answers a question people actually ask, rather than describing a
+// feature. Kept on this page so the answer is one click from the thing itself.
+function explainer(title, lead, points, footnote) {
+    return el('div', { class: 'panel', style: 'margin:18px 0 12px' },
+        el('div', { class: 'panel__head' }, title),
+        el('p', { class: 'muted', style: 'margin:0 0 14px;font-size:13px;line-height:1.6' }, lead),
+        el('div', { class: 'rows' }, ...points.map(([heading, body]) =>
+            el('div', { class: 'row', style: 'cursor:default;align-items:flex-start' },
+                el('i', {
+                    class: 'bx bx-check ',
+                    style: 'color:var(--cyan);font-size:15px;margin-top:2px;flex:none',
+                }),
+                el('span', { class: 'row__main' },
+                    el('span', { class: 'row__title' }, heading),
+                    el('span', {
+                        class: 'row__meta',
+                        style: 'white-space:normal;line-height:1.6',
+                    }, body))))),
+        footnote
+            ? el('p', { class: 'muted', style: 'margin:14px 0 0;font-size:12px;line-height:1.6' },
+                footnote)
+            : null);
 }
 
 function code(text, tight) {

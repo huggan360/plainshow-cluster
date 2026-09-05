@@ -200,6 +200,21 @@ func Up(ctx context.Context, authKey, hostname, loginServer string) error {
 	return err
 }
 
+// Down disconnects this machine from the tailnet without forgetting who it is.
+//
+// It is the counterpart of Up for "stop everything": the daemon keeps running
+// and the node stays enrolled, so signing back in does not need a fresh key.
+// A machine that was never connected is already down, which is a success.
+func Down(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	_, err := runner(ctx, "down")
+	if errors.Is(err, ErrNotInstalled) {
+		return nil
+	}
+	return err
+}
+
 // Address returns this machine's tailnet address, or "" when it has none.
 func Address(ctx context.Context) string { return Probe(ctx).Self.Address }
 

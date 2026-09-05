@@ -169,6 +169,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/service", s.getService)
+	mux.HandleFunc("PUT /api/service/boot", s.putServiceBoot)
+	mux.HandleFunc("POST /api/service/shutdown", s.shutdownService)
 
 	mux.HandleFunc("GET /ws", s.serveWS)
 
@@ -185,6 +188,14 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("api: encode response: %v", err)
 	}
+}
+
+// errorText renders an error for a JSON field that is empty when all is well.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // fail returns an error the interface can show directly. Messages say what went
@@ -273,7 +284,10 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	networks, _ := s.networkSummaries()
+	// A failure here used to be swallowed, which rendered as "you belong to no
+	// networks" — the one answer guaranteed to send someone looking in the
+	// wrong place.
+	networks, networksErr := s.networkSummaries()
 	controllers, _ := s.store.NetworkControllers(s.cfg.ActiveNetwork)
 	var activeController any
 	if len(controllers) > 0 {
@@ -302,6 +316,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		},
 		"version":        version.Version,
 		"networks":       networks,
+		"networks_error": errorText(networksErr),
 		"active_network": s.cfg.ActiveNetwork,
 		"machines":       machines,
 		"projects":       projects,

@@ -180,3 +180,34 @@ func TestAuthKeyIsRedactedFromCommandErrors(t *testing.T) {
 		t.Fatalf("redacted arguments = %q", got)
 	}
 }
+
+// TestDownOnAMachineWithoutTailscale: "stop everything" must not fail on a
+// machine that never had the client. Nothing to disconnect is a success.
+func TestDownOnAMachineWithoutTailscale(t *testing.T) {
+	original := runner
+	runner = func(ctx context.Context, args ...string) ([]byte, error) {
+		return nil, ErrNotInstalled
+	}
+	defer func() { runner = original }()
+
+	if err := Down(context.Background()); err != nil {
+		t.Fatalf("Down() = %v, want nil when tailscale is absent", err)
+	}
+}
+
+func TestDownAsksTheDaemonToDisconnect(t *testing.T) {
+	original := runner
+	var got []string
+	runner = func(ctx context.Context, args ...string) ([]byte, error) {
+		got = args
+		return nil, nil
+	}
+	defer func() { runner = original }()
+
+	if err := Down(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "down" {
+		t.Fatalf("Down() ran tailscale %v, want [down]", got)
+	}
+}
