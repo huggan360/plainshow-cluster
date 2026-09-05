@@ -9,10 +9,8 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"os"
@@ -41,11 +39,11 @@ func main() {
 			return
 		}
 
-		nodeURL, detail := findNodeURLWithin(args, 0)
+		nodeURL, _ := findNodeURLWithin(args, 0)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		if nodeURL == "" {
-			_, _ = io.WriteString(w, unavailablePage(detail))
+			_, _ = io.WriteString(w, unavailablePage())
 			return
 		}
 		target, _ := json.Marshal(nodeURL)
@@ -53,7 +51,9 @@ func main() {
 			"<meta name=\"color-scheme\" content=\"dark\"><title>Plainshow Cluster</title>" +
 			"<style>html,body{background:#07090d;color:#dce5ee;font:14px system-ui;margin:0}" +
 			"body{display:grid;place-items:center;height:100vh}.brand{display:flex;align-items:center;gap:12px}" +
-			".brand img{width:42px;height:42px}.word{font-size:19px;font-weight:700}.show{color:#55d6be}" +
+			".brand img{width:42px;height:42px}.word{font-size:19px;font-weight:700}" +
+			".show{color:transparent;background:linear-gradient(100deg,#ff3bf4 0%,#7c3cff 29%,#176bff 61%,#18e5e5 100%);" +
+			"background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent}" +
 			"small{display:block;color:#536171;font-size:9px;letter-spacing:.2em;text-transform:uppercase}" +
 			".muted{color:#73808e;margin-top:8px}</style></head><body>" +
 			"<div>" + desktopBrand() +
@@ -81,33 +81,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, "plainshow-cluster:", err)
 		os.Exit(1)
 	}
-}
-
-func unavailablePage(detail string) string {
-	return "<!doctype html><html><head><meta charset=\"utf-8\">" +
-		"<meta name=\"color-scheme\" content=\"dark\"><title>Plainshow Cluster</title>" +
-		"<style>*{box-sizing:border-box}html,body{background:#07090d;color:#dce5ee;font:14px system-ui;margin:0}" +
-		"body{display:grid;place-items:center;min-height:100vh}.card{width:min(520px,calc(100% - 40px));" +
-		"border:1px solid #252c35;border-radius:18px;padding:30px;background:#0d1117}" +
-		".brand{display:flex;align-items:center;gap:12px}.brand img{width:42px;height:42px}" +
-		".word{font-size:19px;font-weight:700}.show{color:#55d6be}" +
-		"small{display:block;color:#536171;font-size:9px;letter-spacing:.2em;text-transform:uppercase}" +
-		"h1{font-size:25px;margin:18px 0 10px}" +
-		"p{color:#8a98a8;line-height:1.6}.cmd{font:12px ui-monospace,monospace;color:#b9c7d5;" +
-		"background:#07090d;border:1px solid #252c35;padding:12px;border-radius:9px;margin-top:18px}</style>" +
-		"</head><body><main class=\"card\">" + desktopBrand() +
-		"<h1>Connecting to your node</h1><p id=\"detail\">" + html.EscapeString(detail) + "</p>" +
-		"<p>This window reconnects automatically as soon as the local service is ready.</p>" +
-		"<div class=\"cmd\">sudo systemctl restart plainshow-cluster</div>" +
-		"<script>(function poll(){fetch('/node',{cache:'no-store'}).then(function(r){return r.json()})" +
-		".then(function(v){if(v.url){location.replace(v.url);return}" +
-		"if(v.detail){document.getElementById('detail').textContent=v.detail}})" +
-		".catch(function(){}).finally(function(){setTimeout(poll,750)})})()</script></main></body></html>"
-}
-
-func desktopBrand() string {
-	icon := base64.StdEncoding.EncodeToString(brand.IconWebP)
-	return "<div class=\"brand\"><img src=\"data:image/webp;base64," + icon + "\" alt=\"\">" +
-		"<span><span class=\"word\">plain<span class=\"show\">show</span></span>" +
-		"<small>cluster</small></span></div>"
 }

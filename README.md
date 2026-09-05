@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The `v0.1.1-alpha.3` release provides one complete archive for each supported
+The `v0.1.1-alpha.4` release provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`

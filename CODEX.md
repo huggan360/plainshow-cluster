@@ -1,6 +1,6 @@
 # Plainshow Cluster handover
 
-Last updated: 2026-09-05. Target release: `v0.1.1-alpha.3`.
+Last updated: 2026-09-05. Target release: `v0.1.1-alpha.4`.
 
 ## Current state
 
@@ -13,13 +13,19 @@ back into the global account service.
 `v0.1.1-alpha.1` is already tagged at `b584647`. Main then received AMD/Intel
 telemetry commits `d0d477e` and `1d09b2b`. Alpha.2 at `f62e8e3` proved the
 desktop builds but its packaging workflow failed before publishing any assets.
-Do not move either tag. Alpha.3 includes the functional fixes and removes Snap
-distribution by explicit product decision:
+Do not move any published tag. Alpha.3 includes the multi-vendor functional
+fixes and removes Snap distribution by explicit product decision. Alpha.4
+corrects native desktop discovery for packaged system nodes:
 
 - The Wails/GTK/WebKit application is named exactly **Plainshow Cluster** and
   uses the established Plainshow icon. Its bootstrap page now retries runtime
   descriptor discovery continuously. Opening the app during daemon startup no
   longer freezes forever on a false “node offline” result.
+- A desktop-menu launch no longer passes the unprivileged user's default root
+  in place of `/opt/plainshow-cluster`. Discovery also keeps the packaged
+  system root as a fallback, so a running systemd node opens directly. The
+  waiting screen is deliberately limited to the branded heading, spinner, and
+  `systemctl start` command.
 - Nodes use an OS-selected ephemeral loopback port and publish it in
   `<root>/run/node.json` mode 0644. The desktop and CLI discover that file;
   there is deliberately no localhost:9999 scan.
@@ -69,7 +75,7 @@ Run on this Pi with Go added to `PATH`:
 ```sh
 PATH=/usr/local/go/bin:$PATH make check
 PATH=/usr/local/go/bin:$PATH make smoke
-PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.3 dist
+PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.4 dist
 ```
 
 All three passed after the application changes; the smoke suite reports 71
@@ -79,14 +85,14 @@ The Pi lacks GTK/WebKit development headers and Arch `makepkg`.
 Do not install them on this production server merely for validation. Native
 desktop and Arch package builds run on native GitHub runners.
 
-Release without rewriting alpha.1 or alpha.2:
+Release without rewriting an earlier alpha:
 
 ```sh
 git add -A
-git commit -m "Fix desktop discovery and pool every GPU vendor"
+git commit -m "Connect the desktop to packaged system nodes"
 git push origin main
-git tag -a v0.1.1-alpha.3 -m "Plainshow Cluster v0.1.1-alpha.3"
-git push origin v0.1.1-alpha.3
+git tag -a v0.1.1-alpha.4 -m "Plainshow Cluster v0.1.1-alpha.4"
+git push origin v0.1.1-alpha.4
 ```
 
 The tag triggers `.github/workflows/release.yml`. Confirm both native desktop

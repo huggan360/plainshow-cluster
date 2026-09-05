@@ -39,12 +39,15 @@ func findNodeURLWithin(args []string, within time.Duration) (string, string) {
 		return strings.TrimRight(raw, "/"), ""
 	}
 
-	roots := []string{root}
+	// Always retain the packaged system root as a fallback. `pscluster app` is
+	// normally launched by an unprivileged desktop user, whereas its systemd
+	// node runs below /opt. Older launchers passed the user's default root as an
+	// argument and otherwise made a healthy system service impossible to find.
+	roots := uniqueRoots(root, "/opt/plainshow-cluster")
 	if home, err := os.UserHomeDir(); err == nil {
-		personal := filepath.Join(home, ".plainshow-cluster")
-		if personal != root {
-			roots = append(roots, personal)
-		}
+		roots = uniqueRoots(append(roots,
+			filepath.Join(home, ".plainshow-cluster"),
+			filepath.Join(home, ".pscluster"))...)
 	}
 	deadline := time.Now().Add(within)
 	for {
@@ -64,6 +67,20 @@ func findNodeURLWithin(args []string, within time.Duration) (string, string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return "", "The Plainshow Cluster node service is not responding on this machine."
+}
+
+func uniqueRoots(roots ...string) []string {
+	result := make([]string, 0, len(roots))
+	seen := make(map[string]bool, len(roots))
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "." || seen[root] {
+			continue
+		}
+		seen[root] = true
+		result = append(result, root)
+	}
+	return result
 }
 
 func nodeIsPlainshow(target string) bool {

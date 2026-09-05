@@ -49,3 +49,17 @@ func TestFindNodeURLDoesNotProbeLegacyPort(t *testing.T) {
 		t.Fatalf("desktop discovered an unpublished address: %q", got)
 	}
 }
+
+func TestSystemRootRemainsDiscoveryFallback(t *testing.T) {
+	roots := uniqueRoots("/home/alice/.plainshow-cluster", "/opt/plainshow-cluster",
+		"/home/alice/.plainshow-cluster", "/home/alice/.pscluster")
+	want := []string{"/home/alice/.plainshow-cluster", "/opt/plainshow-cluster", "/home/alice/.pscluster"}
+	if len(roots) != len(want) {
+		t.Fatalf("roots = %#v; want %#v", roots, want)
+	}
+	for i := range want {
+		if roots[i] != want[i] {
+			t.Fatalf("roots = %#v; want %#v", roots, want)
+		}
+	}
+}

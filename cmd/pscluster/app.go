@@ -98,7 +98,15 @@ func launchNativeDesktop(f flags) (bool, error) {
 	}
 	if l, err := layoutFrom(f); err == nil {
 		candidates = append(candidates, l.Root+"/bin/plainshow-cluster-desktop")
-		desktopArgs = []string{"--root", l.Root}
+		// A desktop-menu launch runs as the signed-in user, while the packaged
+		// node is a root-owned service in /opt. config.DefaultRoot consequently
+		// points at the user's home here even though that is not the service the
+		// window must open. Only forward a root the caller explicitly selected;
+		// otherwise the desktop discovers the system node first and then any
+		// personal node.
+		if f.has("root") || os.Getenv(config.EnvRoot) != "" {
+			desktopArgs = []string{"--root", l.Root}
+		}
 	}
 	candidates = append(candidates,
 		"/usr/lib/plainshow-cluster/plainshow-cluster-desktop",
