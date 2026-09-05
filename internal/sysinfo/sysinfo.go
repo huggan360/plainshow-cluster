@@ -24,10 +24,12 @@ import (
 type GPU struct {
 	Index int    `json:"index"`
 	Name  string `json:"name"`
-	// Vendor is "nvidia", "amd" or "intel". It decides more than a label:
-	// a job can only be placed on a GPU whose framework stack is present, and
-	// a single distributed run cannot span vendors, because the collective
-	// libraries are vendor-specific — NCCL is NVIDIA's, RCCL is AMD's.
+	// Vendor is "nvidia", "amd" or "intel". It decides more than a label: a job
+	// can only be placed on a GPU whose framework stack is present, and a run
+	// spanning vendors has to fall back from the vendor collective library to a
+	// neutral one, because NCCL is NVIDIA's and RCCL is AMD's. Neither speaks to
+	// the other, but torch's gloo backend speaks to both, so a mixed run is a
+	// slower run rather than an impossible one.
 	Vendor string `json:"vendor"`
 	// Trainable reports whether this device is worth scheduling work on. An
 	// integrated display GPU is reported so the machine's hardware is visible,
