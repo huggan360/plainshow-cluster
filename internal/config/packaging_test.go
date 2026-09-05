@@ -15,6 +15,7 @@ func TestPackagingYAMLParses(t *testing.T) {
 	for _, path := range []string{
 		"../../.github/workflows/release.yml",
 		"../../.github/workflows/check.yml",
+		"../../snap/snapcraft.yaml",
 	} {
 		raw, err := os.ReadFile(path)
 		if err != nil {

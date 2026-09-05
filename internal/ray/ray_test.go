@@ -174,12 +174,16 @@ func TestStartHeadRefusesWithoutAnAddress(t *testing.T) {
 func TestStartWorkerAttachesToTheHead(t *testing.T) {
 	args := stubRunner(t, "", nil)
 	if err := StartWorker(context.Background(), "100.64.0.2", "100.64.0.1:6379",
-		ResourcePolicy{AllowGPU: true}); err != nil {
+		ResourcePolicy{AllowGPU: true, GPUsKnown: true, GPUCount: 2,
+			AMDGPUCount: 1, IntelGPUCount: 1}); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(*args, " ")
 	if !strings.Contains(joined, "--address=100.64.0.1:6379") ||
-		!strings.Contains(joined, "--node-ip-address=100.64.0.2") {
+		!strings.Contains(joined, "--node-ip-address=100.64.0.2") ||
+		!strings.Contains(joined, "--num-gpus=2") ||
+		!strings.Contains(joined, `"plainshow_gpu_amd":1`) ||
+		!strings.Contains(joined, `"plainshow_gpu_intel":1`) {
 		t.Errorf("ran %q", joined)
 	}
 }

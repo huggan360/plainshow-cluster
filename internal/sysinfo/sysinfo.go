@@ -1,7 +1,7 @@
 // Package sysinfo probes the host for the resources the cluster cares about.
 //
 // Everything here degrades rather than fails: a machine with no GPU, no
-// /proc/loadavg or no nvidia-smi reports what it can and leaves the rest empty.
+// /proc/loadavg or no vendor utility reports what it can and leaves the rest empty.
 // A worker that cannot describe itself is still a worker.
 package sysinfo
 
@@ -24,16 +24,14 @@ import (
 type GPU struct {
 	Index int    `json:"index"`
 	Name  string `json:"name"`
-	// Vendor is "nvidia", "amd" or "intel". It decides more than a label: a job
-	// can only be placed on a GPU whose framework stack is present, and a run
-	// spanning vendors has to fall back from the vendor collective library to a
-	// neutral one, because NCCL is NVIDIA's and RCCL is AMD's. Neither speaks to
-	// the other, but torch's gloo backend speaks to both, so a mixed run is a
-	// slower run rather than an impossible one.
+	// Vendor is "nvidia", "amd" or "intel". It is also advertised as a custom
+	// Ray resource so a job that needs CUDA, ROCm or oneAPI can request a node
+	// with the matching framework stack. Whether one distributed run can mix
+	// vendors is ultimately a property of that project's framework/backend.
 	Vendor string `json:"vendor"`
-	// Trainable reports whether this device is worth scheduling work on. An
-	// integrated display GPU is reported so the machine's hardware is visible,
-	// but it is not something to train on.
+	// Trainable reports whether this device is offered to Ray. Integrated Intel
+	// graphics are compute devices too when the project's oneAPI/OpenCL stack is
+	// installed, so all three supported vendors are trainable by default.
 	Trainable   bool `json:"trainable"`
 	VRAMTotalMB int  `json:"vram_total_mb"`
 	VRAMUsedMB  int  `json:"vram_used_mb"`
@@ -184,8 +182,6 @@ func uptime() int64 {
 	return int64(v)
 }
 
-// probeGPUs asks nvidia-smi for the accelerators on this host. A machine with
-// no NVIDIA driver simply has no GPUs, which is not an error.
 // probeGPUs reports every accelerator on the host.
 //
 // Each vendor is asked in its own way and none of them being present is an
@@ -293,10 +289,10 @@ func firstField(fields map[string]string, keys ...string) string {
 	return ""
 }
 
-// probeIntel finds Intel graphics. These are reported so a machine's hardware
-// is visible, but not marked trainable: an integrated display GPU is not
-// something to schedule training on.
-func probeIntel() []GPU { return probeSysfsVendor("0x8086", "intel", false) }
+// probeIntel finds integrated and discrete Intel graphics through the kernel.
+// Whether a particular job can use one depends on that project's oneAPI,
+// OpenCL or framework runtime, just as AMD needs ROCm and NVIDIA needs CUDA.
+func probeIntel() []GPU { return probeSysfsVendor("0x8086", "intel", true) }
 
 // probeSysfsVendor reads the kernel's own view of the graphics devices, which
 // needs no vendor tooling installed.
@@ -335,6 +331,8 @@ func vendorName(vendor string) string {
 		return "AMD"
 	case "intel":
 		return "Intel"
+	case "nvidia":
+		return "NVIDIA"
 	}
 	return vendor
 }

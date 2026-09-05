@@ -349,7 +349,7 @@ function deviceStat(value, label) {
 }
 
 function networkGPUs(nodes) {
-    return nodes.flatMap((node) => {
+    return nodes.filter(nodeOnline).flatMap((node) => {
         const gpus = node.is_self ? (state.system?.gpus || node.capacity?.gpus || []) : (node.capacity?.gpus || []);
         return gpus.map((gpu) => ({ ...gpu, machine: node.name }));
     });

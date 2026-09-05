@@ -10,6 +10,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/events"
 	"github.com/huggan360/plainshow-cluster/internal/ray"
 	"github.com/huggan360/plainshow-cluster/internal/store"
+	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 )
 
 func discoveryNode(networkID, nodeID, name, seen string) store.NetworkNode {
@@ -25,6 +26,36 @@ func discoveryNode(networkID, nodeID, name, seen string) store.NetworkNode {
 		Policy:   map[string]any{},
 		Capacity: map[string]any{},
 		LastSeen: seen,
+	}
+}
+
+func TestOnlyOnlineNodesContributeCapacity(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	recent := store.NetworkNode{LastSeen: now.Add(-30 * time.Second).Format(time.RFC3339)}
+	stale := store.NetworkNode{LastSeen: now.Add(-3 * time.Minute).Format(time.RFC3339)}
+	self := store.NetworkNode{IsSelf: true, LastSeen: ""}
+	if !nodeCapacityOnline(recent, now) {
+		t.Fatal("recent peer was treated as offline")
+	}
+	if nodeCapacityOnline(stale, now) {
+		t.Fatal("stale peer still contributed usable capacity")
+	}
+	if !nodeCapacityOnline(self, now) {
+		t.Fatal("the running local node was treated as offline")
+	}
+}
+
+func TestRayInventoryIncludesEveryGPUVendor(t *testing.T) {
+	policy := ray.ResourcePolicy{AllowGPU: true, GPUsKnown: true}
+	addGPUInventory(&policy, []sysinfo.GPU{
+		{Vendor: "nvidia", Trainable: true},
+		{Vendor: "amd", Trainable: true},
+		{Vendor: "intel", Trainable: true},
+		{Vendor: "unknown", Trainable: false},
+	})
+	if policy.GPUCount != 3 || policy.NVIDIAGPUCount != 1 ||
+		policy.AMDGPUCount != 1 || policy.IntelGPUCount != 1 {
+		t.Fatalf("mixed GPU inventory = %+v", policy)
 	}
 }
 
@@ -110,7 +141,7 @@ func TestRayPolicyIntersectsDeviceAndNetworkLimits(t *testing.T) {
 	srv := &Server{cfg: cfg}
 
 	policy, eligible := srv.rayPolicy("network")
-	want := ray.ResourcePolicy{MaxCPU: 6, MaxRAMMB: 32000, AllowGPU: false}
+	want := ray.ResourcePolicy{MaxCPU: 6, MaxRAMMB: 32000, AllowGPU: false, GPUsKnown: true}
 	if !eligible || policy != want {
 		t.Fatalf("policy = %+v, eligible %v; want %+v, true", policy, eligible, want)
 	}

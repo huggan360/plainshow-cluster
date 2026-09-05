@@ -136,9 +136,14 @@ type Status struct {
 // the scheduler. A machine that forbids jobs is never started at all by the
 // API; these limits describe an admitted worker.
 type ResourcePolicy struct {
-	MaxCPU   int  `json:"max_cpu"`
-	MaxRAMMB int  `json:"max_ram_mb"`
-	AllowGPU bool `json:"allow_gpu"`
+	MaxCPU         int  `json:"max_cpu"`
+	MaxRAMMB       int  `json:"max_ram_mb"`
+	AllowGPU       bool `json:"allow_gpu"`
+	GPUsKnown      bool `json:"gpus_known"`
+	GPUCount       int  `json:"gpu_count"`
+	NVIDIAGPUCount int  `json:"nvidia_gpu_count"`
+	AMDGPUCount    int  `json:"amd_gpu_count"`
+	IntelGPUCount  int  `json:"intel_gpu_count"`
 }
 
 // Installed reports whether the ray command exists.
@@ -381,6 +386,27 @@ func resourceArguments(policy ResourcePolicy) []string {
 	}
 	if !policy.AllowGPU {
 		args = append(args, "--num-gpus=0")
+	} else if policy.GPUsKnown {
+		// Explicitly advertise the kernel-visible inventory. This matters for
+		// AMD and Intel devices on which Ray's default NVIDIA-oriented probe can
+		// otherwise report zero. GPU remains the common scheduling pool, while
+		// custom vendor resources let advanced jobs require a compatible stack.
+		args = append(args, "--num-gpus="+strconv.Itoa(policy.GPUCount))
+		vendors := map[string]int{}
+		if policy.NVIDIAGPUCount > 0 {
+			vendors["plainshow_gpu_nvidia"] = policy.NVIDIAGPUCount
+		}
+		if policy.AMDGPUCount > 0 {
+			vendors["plainshow_gpu_amd"] = policy.AMDGPUCount
+		}
+		if policy.IntelGPUCount > 0 {
+			vendors["plainshow_gpu_intel"] = policy.IntelGPUCount
+		}
+		if len(vendors) > 0 {
+			if encoded, err := json.Marshal(vendors); err == nil {
+				args = append(args, "--resources="+string(encoded))
+			}
+		}
 	}
 	return args
 }

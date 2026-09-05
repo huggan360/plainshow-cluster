@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+case "$SNAP_ARCH" in
+    amd64) library_arch=x86_64-linux-gnu ;;
+    arm64) library_arch=aarch64-linux-gnu ;;
+    *) library_arch="$SNAP_ARCH-linux-gnu" ;;
+esac
+
+export PATH="$SNAP/bin:$SNAP/usr/bin:$PATH"
+export LD_LIBRARY_PATH="$SNAP/lib/$library_arch:$SNAP/usr/lib/$library_arch:$SNAP/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="$SNAP/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+webkit_path="$SNAP/usr/lib/$library_arch/webkit2gtk-4.1"
+if [ -d "$webkit_path" ]; then
+    export WEBKIT_EXEC_PATH="$webkit_path"
+fi
+
+exec "$SNAP/bin/plainshow-cluster-desktop" --root "$SNAP_COMMON/node" "$@"

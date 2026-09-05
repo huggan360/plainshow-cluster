@@ -190,6 +190,7 @@ function networkPreview(network) {
 function gpuInventory(overview, system) {
     const inventory = [];
     for (const machine of overview.machines || []) {
+        if (!machineOnline(machine)) continue;
         const items = machine.is_self ? (system.gpus || []) : (machine.capacity?.gpus || []);
         for (const gpu of items) inventory.push({ ...gpu, machine: machine.name });
     }
@@ -197,6 +198,12 @@ function gpuInventory(overview, system) {
         for (const gpu of system.gpus || []) inventory.push({ ...gpu, machine: overview.node.name });
     }
     return inventory;
+}
+
+function machineOnline(machine) {
+    if (machine.is_self) return true;
+    const seen = Date.parse(machine.last_seen);
+    return Number.isFinite(seen) && Date.now() - seen >= 0 && Date.now() - seen < 120000;
 }
 
 function percent(value, total) {

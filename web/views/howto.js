@@ -42,7 +42,9 @@ export async function renderHowTo(host) {
 
         step(4, 'Write ordinary Ray code',
             'Nothing here is Plainshow-specific. If it works on one Ray cluster ' +
-            'it works on this one.'),
+            'it works on this one. Ray pools all online CPU cores and enabled ' +
+            'NVIDIA, AMD and Intel GPUs. The project still needs the matching ' +
+            'vendor runtime on the machine that receives a GPU task.'),
 
         code(`import ray
 
@@ -53,6 +55,11 @@ def train(shard):
     ...
 
 results = ray.get([train.remote(s) for s in shards])`),
+
+        step(null, 'Mixing GPU brands',
+            'A normal num_gpus request can land on any available GPU. When code ' +
+            'requires one vendor, add a Ray custom resource such as ' +
+            'plainshow_gpu_amd, plainshow_gpu_intel or plainshow_gpu_nvidia.'),
 
         step(5, 'Run it',
             'From the project folder, in your own terminal:'),
@@ -83,7 +90,7 @@ function step(n, title, body, note) {
                 style: 'flex:none;width:24px;height:24px;display:flex;align-items:center;' +
                        'justify-content:center;border-radius:8px;border:1px solid var(--line-2);' +
                        'font-size:11px;color:var(--cyan)',
-            }, String(n)),
+            }, n == null ? '•' : String(n)),
             el('div', { style: 'min-width:0;flex:1' },
                 el('div', { style: 'font-size:14.5px;font-weight:600;color:#fff' }, title),
                 el('p', { class: 'muted', style: 'margin:5px 0 0;font-size:13px;line-height:1.6' }, body),

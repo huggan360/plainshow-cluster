@@ -1,169 +1,145 @@
 # Plainshow Cluster handover
 
-Last updated: 2026-09-05. Target release: `v0.1.1-alpha.1`.
+Last updated: 2026-09-05. Target release: `v0.1.1-alpha.2`.
 
 ## Current state
 
-This repository is the Linux node, native desktop, global account/key service,
-web workspace, installers, and release automation for **Plainshow Cluster**.
-The separate Cowork controller is the clean sibling repository
-`../cluster-controller` at commit `2920a05`; its own `CODEX.md` describes its
-deployment. Do not merge its relay back into the global account service.
+This repository contains the Linux node and CLI, native desktop, embedded web
+workspace, global account/key service, installers, and release automation for
+**Plainshow Cluster**. The separate Cowork relay/controller is the sibling
+repository `../cluster-controller` at commit `2920a05`; never merge that relay
+back into the global account service.
 
-The migration requested in the latest Claude/user session is implemented for
-the `v0.1.1-alpha.1` release:
+`v0.1.1-alpha.1` is already tagged at `b584647`. Main then received AMD/Intel
+telemetry commits `d0d477e` and `1d09b2b`. Do not move the alpha.1 tag. The next
+release is alpha.2 and includes these further fixes:
 
+- The Wails/GTK/WebKit application is named exactly **Plainshow Cluster** and
+  uses the established Plainshow icon. Its bootstrap page now retries runtime
+  descriptor discovery continuously. Opening the app during daemon startup no
+  longer freezes forever on a false “node offline” result.
+- Nodes use an OS-selected ephemeral loopback port and publish it in
+  `<root>/run/node.json` mode 0644. The desktop and CLI discover that file;
+  there is deliberately no localhost:9999 scan.
+- Host telemetry detects NVIDIA with `nvidia-smi`, AMD with ROCm or Linux DRM
+  sysfs, and Intel with DRM sysfs. Integrated Intel devices are valid compute
+  resources when the project's Intel runtime is installed.
+- Ray receives every enabled GPU explicitly through `--num-gpus`, including
+  AMD and Intel devices that default detection can miss. All vendors share the
+  normal `GPU` pool. Custom resources `plainshow_gpu_nvidia`,
+  `plainshow_gpu_amd`, and `plainshow_gpu_intel` allow vendor-specific jobs.
+  With a zero CPU cap Ray uses every logical core. Only online peers contribute
+  capacity to UI totals; Ray itself only schedules on live raylets.
 - Ray 2.58.0 is the distributed runtime. One device starts a head for a logical
-  network; signed peer gossip converges the head announcement and tombstones;
-  other devices attach automatically. Local state restores Ray after a reboot
-  and moves the one local Ray process when the active network changes.
-- Project Run and `pscluster run --project NAME ...` submit through Ray Jobs,
-  upload the project working directory, stream logs, list jobs, and stop jobs.
-  Submission uses `--no-wait` so HTTP requests do not remain open for a run.
-- `cmd/plainshow-cluster-desktop` is the real Wails/GTK/WebKit Linux app. Its
-  visible title is exactly **Plainshow Cluster** and it uses the established
-  Plainshow icon. The static Go node remains independently cross-compilable.
-- New nodes bind an OS-selected ephemeral loopback port. The daemon publishes
-  `<root>/run/node.json` mode 0644; the CLI and desktop read only that file.
-  There is deliberately no localhost:9999 compatibility scan.
-- The Projects view is a usable Cowork IDE again: project creation/clone,
-  nested file tree, new files/folders, streamed multi-file uploads and drop,
-  downloads, rename/delete, highlighted editor, line numbers, save/run
-  shortcuts, Git/GitHub panels, live OT edits, presence, and durable offline
-  outboxes. The independent controller supplies optional cross-node WebSocket
-  relay while nodes durably apply operations.
-- The node UI now mirrors the production `plainshow.se` console instead of the
-  old cluster prototype. It bundles the real Boxicons 2.1.4 font offline and
-  uses the official embedded Plainshow ribbon mark everywhere, including the
-  Wails startup/offline screen. Home has the requested project/network counts,
-  clickable network status, real GPU inventory, local CPU/RAM/disk/GPU health,
-  recent commits/Ray jobs, and network cards.
-- Networks are now first-class workspaces. `/api/networks/{id}` supplies one
-  network's projects, devices, GPU counts, membership policy, members, and
-  sanitized controller presence. The UI has Connected devices, Settings, and
-  My machine tabs; projects are shown inside their network and selecting a
-  project from another network activates that network first.
-- Project cards include their live Git branch. Project pages now have Overview,
-  current-branch editor, Run, Git, Team, and Settings tabs. There is one folder
-  and one branch working copy (no separate production/workspace trees), and
-  project descriptions can be edited through `PUT /api/projects/{name}`.
+  network, signed peer gossip converges the announcement/tombstone, and other
+  eligible online devices attach automatically. Reboot and active-network
+  changes are reconciled without creating a second scheduler.
+- Project Run and `pscluster run --project NAME ...` use Ray Jobs, upload the
+  project working directory, stream logs, list jobs and stop jobs. The project
+  command is a Ray driver; distributed code uses ordinary Ray tasks/actors.
+- Networks are first-class workspaces with Connected devices, Settings and My
+  machine tabs. Projects belong to one network. Project pages provide Overview,
+  the current-branch editor, Run, Git, Team and Settings. There is one folder
+  and one working copy, not separate production/workspace trees.
+- The Cowork IDE supports create/clone, nested files and folders, multi-file
+  upload/drop, download, rename/delete, highlighted editing, line numbers,
+  shortcuts, Git/GitHub, live OT edits, presence and durable offline outboxes.
+- The UI follows the production plainshow.se console, bundles Boxicons 2.1.4
+  and the official Plainshow mark, and provides the requested home statistics,
+  activity feed, network cards, projects and machine resource controls.
 - `clusteradmin.plainshow.se` remains account/key management only. Its SQLite
-  registry now returns canonical network members and lets network owners/admins
-  change roles or remove non-owners. Nodes synchronize those roles and the
-  Networks page exposes role/remove controls.
-- Plainshow account login requests one-time enrollment from the global service
-  and connects the host Tailscale client to the self-hosted Headscale service
-  at `tailnet.plainshow.se`; users need no Tailscale account.
-- The portable installer supports pacman, apt, dnf, and zypper; installs Git,
-  Tailscale, Python/venv, GTK/WebKit, and pinned Ray; initializes the account
-  server to `https://clusteradmin.plainshow.se`; and enables services on
-  systemd machines.
-- Release CI builds static node/admin binaries, native desktop binaries,
-  complete tarballs, and classic Snap packages on native amd64/arm64 GitHub
-  runners, plus an x86_64 Arch package. The Snap contains Git, GTK/WebKit,
-  Python and pinned Ray, stores its system node below `$SNAP_COMMON`, and lets
-  separate Snap Store registration/classic-confinement approval to publish.
+  registry stores accounts, network membership/roles, recovery keys,
+  controller registration and aggregate statistics. It never stores projects
+  and never relays Cowork traffic.
+- Plainshow login obtains one-time enrollment and connects the host Tailscale
+  client to the self-hosted Headscale plane at `tailnet.plainshow.se`; end users
+  do not need Tailscale accounts.
+- The portable installer covers pacman, apt, dnf and zypper and installs Git,
+  Tailscale, Python/venv, GTK/WebKit and pinned Ray. Release CI builds static
+  node/admin binaries, native desktop binaries and full tarballs for amd64 and
+  arm64, an x86_64 Arch package, and classic Snaps for amd64 and arm64.
+- The classic Snap bundles the desktop, node, Git, GTK/WebKit, Python and Ray,
+  keeps its node in `$SNAP_COMMON`, and delegates updates to snapd. Tailscale is
+  still a host service. Store distribution requires separate name registration
+  and classic-confinement approval.
 
-## Verification completed
+## Verification and release
 
-From this Raspberry Pi, with `/usr/local/go/bin` on `PATH`:
-
-```sh
-make check
-make smoke
-make dist VERSION=v0.1.1-alpha.1
-```
-
-`make check` passed after the final Snap changes (Go formatting/vet/tests, web
-module graph, installer and PKGBUILD syntax). The final smoke run passed all 71
-end-to-end checks. The versioned static amd64/arm64 distribution build also
-completed. The Pi does not have GTK/WebKit development headers, Snapcraft, or
-Arch `makepkg`, so native Wails, Snap, and pacman builds are validated by
-release CI or the user's Arch test machine, not locally. Do not install those
-build dependencies on this production Pi merely to validate.
-
-The separate `../cluster-controller` repository is clean and `make check`
-passes (controller package tests plus vet).
-
-The user explicitly authorized building and releasing `v0.1.1-alpha.1` on
-2026-09-05. No production service deployment is part of that authorization.
-
-## Release procedure
-
-The existing `v0.1.0-alpha.4` and `v0.1.0-alpha.5` tags both point at old commit
-`531b6ec`. Do not move or reuse them. Finish with a new tag:
+Run on this Pi with Go added to `PATH`:
 
 ```sh
-git status --short
 PATH=/usr/local/go/bin:$PATH make check
 PATH=/usr/local/go/bin:$PATH make smoke
-PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.1 dist
-git add -A
-git commit -m "Complete the Ray and native desktop migration"
-git push origin main
-git tag -a v0.1.1-alpha.1 -m "Plainshow Cluster v0.1.1-alpha.1"
-git push origin v0.1.1-alpha.1
+PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.2 dist
 ```
 
-The tag triggers `.github/workflows/release.yml`. Confirm native desktop and
-Snap builds for both architectures, the release-assets job, and the Arch
-package job. Expected end-user downloads include
-`plainshow-cluster-linux-amd64.tar.gz`, the arm64 equivalent, and matching
-Each tarball contains the CLI, native app, installer, checksums,
-desktop entry, and icons. The GitHub release must be marked prerelease
-automatically because the tag contains `-alpha.1`.
+All three passed after the final alpha.2 changes; the smoke suite reports 71
+passed and 0 failed, and the distribution build produced both architectures.
+
+The Pi lacks GTK/WebKit development headers, Snapcraft/LXD and Arch `makepkg`.
+Do not install them on this production server merely for validation. Native
+desktop, Snap and Arch package builds run on native GitHub runners.
+
+Release without rewriting alpha.1:
+
+```sh
+git add -A
+git commit -m "Fix desktop discovery and pool every GPU vendor"
+git push origin main
+git tag -a v0.1.1-alpha.2 -m "Plainshow Cluster v0.1.1-alpha.2"
+git push origin v0.1.1-alpha.2
+```
+
+The tag triggers `.github/workflows/release.yml`. Confirm both native desktop
+builds, both Snap builds, the release-assets job, and the Arch package job.
+Expected downloads include complete amd64/arm64 tarballs, matching `.snap`
+files, raw node/admin/desktop binaries, checksums, installer and Arch package.
 
 ## Architecture map
 
 - `cmd/pscluster`: node service and CLI.
-- `cmd/plainshow-cluster-desktop`: native Linux application and descriptor
-  discovery.
-- `cmd/pscluster-admin`, `internal/accountserver`, `adminweb`: global
-  account/key/statistics authority.
-- `internal/api`: local browser/CLI API, peer mesh, Ray reconciliation, Cowork
-  operations, projects, GitHub, and updater.
-- `internal/ray`: managed Ray command and dashboard/job protocol.
-- `internal/collab`, `internal/store/collab_ops.go`: OT transformation,
-  deduplication, revision persistence, and operation application.
-- `web`: dependency-free node UI embedded in the node binary.
-- `deploy`: account server and Headscale reference configuration. Do not alter
-  the production Pi's services, Apache, firewall, or Headscale just to build a
-  release.
+- `cmd/plainshow-cluster-desktop`: native app and descriptor discovery.
+- `cmd/pscluster-admin`, `internal/accountserver`, `adminweb`: global authority.
+- `internal/api`: local API, mesh, Ray reconciliation, Cowork, projects and Git.
+- `internal/ray`: managed Ray CLI/dashboard/job protocol.
+- `internal/sysinfo`: CPU, memory, disk and multi-vendor accelerator discovery.
+- `internal/collab`, `internal/store/collab_ops.go`: OT and durable operations.
+- `web`: dependency-free UI embedded into the node.
+- `install.sh`, `packaging/arch`, `packaging/desktop`, `snap`: distribution.
+- `deploy`: account and Headscale reference configuration. Do not alter this
+  Pi's services, Apache, firewall or Headscale merely to build a release.
 
-## Important operational boundaries
+## Operational boundaries
 
-- The Raspberry Pi may host one ordinary Plainshow node/controller workload,
-  the global account/key database, and Headscale. The global account service
-  does not relay Cowork traffic and does not store projects, commands, logs,
-  datasets, or model artifacts.
-- Network membership is enforced in Plainshow's signed mesh and controller
-  authorization. Headscale currently supplies a shared account transport; raw
-  Ray ports are not yet isolated by generated Headscale ACLs per logical
-  Plainshow network. Treat this alpha as trusted-team software.
-- Removing a member centrally removes their application/controller access when
-  nodes next synchronize. It does not erase a management key already copied to
-  a removed device. Full cryptographic eviction requires rotating the network
-  key and distributing the new key to retained devices; the admin rotate API
-  and `pscluster network key ID` exist, but automated rotation distribution is
-  future hardening.
-- The old local job API/supervisor remains for backward-compatible internal
-  tests, but the shipped UI and documented CLI use Ray Jobs. Do not build new
-  features on the local scheduler.
-- The built-in updater replaces and verifies the static node binary. Re-running
-  the release installer also refreshes the native desktop and system runtime
-  dependencies; it preserves all node data. Snap installations disable that
+- The Raspberry Pi can host an ordinary node workload, the global account/key
+  service and Headscale. The global service stores no code, commands, datasets,
+  artifacts or job logs and is not a collaboration relay.
+- Headscale currently provides shared private transport. Logical Plainshow
+  network membership is enforced by signed mesh/controller authorization, but
+  generated per-network Headscale ACLs are not implemented. Treat the alpha as
+  trusted-team software.
+- Removing an account centrally revokes application/controller access after
+  sync, but does not erase a management key already copied to that device. Full
+  eviction needs network key rotation and distribution to retained devices.
+- The old local job supervisor remains for compatibility tests. New features
+  and the shipped UI/CLI use Ray Jobs.
+- The built-in updater atomically replaces the static node binary. Re-running
+  a portable installer also refreshes the desktop/dependencies while preserving
+  data. Snap installs disable that updater because snapd owns refresh/rollback.
+- CUDA, ROCm, oneAPI/OpenCL, PyTorch and other project-specific GPU frameworks
+  are not installed globally. Every target machine needs the vendor runtime
+  required by its workload. Mixed-vendor distributed work is possible when the
+  framework/backend supports it; Plainshow cannot make incompatible frameworks
+  interoperable by itself.
 
-## Recommended next work after alpha
+## After alpha
 
-1. Test the complete tarball and Arch package on two real Arch machines: sign
-   in, join the same network, start Ray, observe automatic worker attachment,
-   run a project, stop it, reboot both machines, and repeat.
-2. Test Debian/Ubuntu installation and GPU workloads with project-specific
-   environments.
-3. Add generated Headscale ACL policy and automatic key rotation/eviction if
-   networks must be mutually hostile rather than trusted collaboration groups.
-4. Publish the signed pacman repository and Snap Store package only after those
-   real-machine tests.
+Test two real Arch machines, then Debian/Ubuntu: login, join one network, start
+Ray, observe automatic attachment, run CPU and each available GPU workload,
+stop, reboot and repeat. Register `plainshow-cluster` in the Snap Store, request
+classic-confinement approval, then upload both architectures to edge using
+`snap/README.md`. Add generated Headscale ACLs and automatic rotation if future
+networks must be mutually hostile rather than trusted.
 
-`CLAUDE.md` is historical planning context and contains stale pre-Ray details.
+`CLAUDE.md` is historical planning context and includes stale pre-Ray details.
 Use this file and the current code as the authoritative handover.

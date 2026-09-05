@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+root="$SNAP_COMMON/node"
+if [ ! -f "$root/config.yaml" ]; then
+    "$SNAP/bin/pscluster" init --root "$root" \
+        --account-server https://clusteradmin.plainshow.se
+fi
+
+# snapd owns refresh and rollback; $SNAP itself is read-only.
+"$SNAP/bin/pscluster" config --root "$root" set update.enabled false

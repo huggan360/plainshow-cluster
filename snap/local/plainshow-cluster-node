@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+export PATH="$SNAP/bin:$SNAP/usr/bin:$PATH"
+exec "$SNAP/bin/pscluster" serve --root "$SNAP_COMMON/node"

@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+root="$SNAP_COMMON/node"
+if [ -f "$root/config.yaml" ]; then
+    "$SNAP/bin/pscluster" config --root "$root" set update.enabled false
+fi

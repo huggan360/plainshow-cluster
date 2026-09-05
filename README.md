@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The `v0.1.1-alpha.1` release provides one complete archive for each supported
+The `v0.1.1-alpha.2` release provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`
@@ -37,6 +37,14 @@ GPU drivers, CUDA, PyTorch and project-specific Python packages are not
 installed globally because the correct versions depend on each machine and
 project.
 
+Plainshow detects NVIDIA, AMD and Intel graphics through vendor tools or the
+Linux DRM device tree. By default Ray receives every CPU core and every enabled
+GPU from each online machine; per-machine and per-network caps can reduce that
+pool. GPU projects still need the matching CUDA, ROCm or Intel oneAPI/OpenCL
+runtime on the machine where a task lands. Advanced Ray tasks can constrain a
+vendor with the custom resources `plainshow_gpu_nvidia`, `plainshow_gpu_amd`,
+or `plainshow_gpu_intel` in addition to `num_gpus`.
+
 You do not need a Tailscale account. After you sign in to Plainshow Cluster,
 the account service obtains a one-time key and connects the local Tailscale
 client to Plainshow's Headscale service at `tailnet.plainshow.se`.
@@ -52,6 +60,28 @@ sudo pacman -U ./plainshow-cluster-*.pkg.tar.zst
 
 `pacman -S plainshow-cluster` will become possible after the package is placed
 in a signed public repository. For this alpha, use `pacman -U`.
+
+### Snap
+
+The release also contains classic Snap packages for amd64 and arm64. Install
+the downloaded file matching your architecture:
+
+```sh
+sudo snap install --dangerous --classic ./plainshow-cluster_0.1.1-alpha.2_amd64.snap
+```
+
+The host must already have Tailscale installed and `tailscaled` running. A Snap
+cannot install or enable that host-level VPN daemon, so the portable installer
+is the fully automatic option. After the Snap Store package receives classic-
+confinement approval, install the published alpha with:
+
+```sh
+sudo snap install plainshow-cluster --classic --edge
+```
+
+Store-installed snaps refresh automatically through snapd. The Snap therefore
+disables the app's separate binary updater. System-node CLI commands use the
+namespaced command, for example `sudo plainshow-cluster.pscluster status`.
 
 
 ## First use

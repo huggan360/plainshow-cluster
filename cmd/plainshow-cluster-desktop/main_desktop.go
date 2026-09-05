@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -28,8 +29,19 @@ import (
 const programName = "plainshow-cluster"
 
 func main() {
-	nodeURL, detail := findNodeURL(os.Args[1:])
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	args := append([]string(nil), os.Args[1:]...)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/node" {
+			// The service can still be starting when the window opens. Keep this
+			// endpoint live instead of freezing the result of one startup probe.
+			nodeURL, detail := findNodeURLWithin(args, 350*time.Millisecond)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(map[string]string{"url": nodeURL, "detail": detail})
+			return
+		}
+
+		nodeURL, detail := findNodeURLWithin(args, 0)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		if nodeURL == "" {
@@ -84,9 +96,20 @@ func unavailablePage(detail string) string {
 		"p{color:#8a98a8;line-height:1.6}.cmd{font:12px ui-monospace,monospace;color:#b9c7d5;" +
 		"background:#07090d;border:1px solid #252c35;padding:12px;border-radius:9px;margin-top:18px}</style>" +
 		"</head><body><main class=\"card\">" + desktopBrand() +
-		"<h1>The node is offline</h1><p>" + html.EscapeString(detail) + "</p>" +
-		"<p>Start the installed service, then reopen this program.</p>" +
-		"<div class=\"cmd\">sudo systemctl start plainshow-cluster</div></main></body></html>"
+		"<h1>Connecting to your node</h1><p id=\"detail\">" + html.EscapeString(detail) + "</p>" +
+		"<p>This window reconnects automatically as soon as the local service is ready.</p>" +
+		"<div class=\"cmd\">" + html.EscapeString(restartCommand()) + "</div>" +
+		"<script>(function poll(){fetch('/node',{cache:'no-store'}).then(function(r){return r.json()})" +
+		".then(function(v){if(v.url){location.replace(v.url);return}" +
+		"if(v.detail){document.getElementById('detail').textContent=v.detail}})" +
+		".catch(function(){}).finally(function(){setTimeout(poll,750)})})()</script></main></body></html>"
+}
+
+func restartCommand() string {
+	if os.Getenv("SNAP") != "" {
+		return "sudo snap restart plainshow-cluster.node"
+	}
+	return "sudo systemctl restart plainshow-cluster"
 }
 
 func desktopBrand() string {

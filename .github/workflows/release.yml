@@ -41,8 +41,32 @@ jobs:
           path: plainshow-cluster-desktop-linux-${{ matrix.arch }}
           if-no-files-found: error
 
+  snap-package:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build classic Snap
+        id: snapcraft
+        uses: snapcore/action-build@v1
+        with:
+          path: .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plainshow-cluster-snap-${{ matrix.arch }}
+          path: ${{ steps.snapcraft.outputs.snap }}
+          if-no-files-found: error
+
   release:
-    needs: [desktop]
+    needs: [desktop, snap-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,8 +96,14 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Add the desktop applications to checksums
-        run: cd dist && sha256sum plainshow-cluster-desktop-linux-* >> checksums.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plainshow-cluster-snap-*
+          path: dist
+          merge-multiple: true
+
+      - name: Add desktop applications and snaps to checksums
+        run: cd dist && sha256sum plainshow-cluster-desktop-linux-* plainshow-cluster_*.snap >> checksums.txt
 
       - name: Build complete portable installer bundles
         run: |
@@ -92,6 +122,10 @@ jobs:
             tar -czf "dist/plainshow-cluster-linux-$arch.tar.gz" -C "$temporary" "$folder"
             rm -rf "$temporary"
           done
+          test "$(find dist -maxdepth 1 -name 'plainshow-cluster_*.snap' | wc -l)" -eq 2 || {
+            echo "expected one snap for amd64 and one for arm64"
+            exit 1
+          }
           cd dist && sha256sum plainshow-cluster-linux-*.tar.gz >> checksums.txt
 
       - name: Verify the assets are what a node will look for
@@ -148,6 +182,7 @@ jobs:
             dist/plainshow-cluster-desktop-linux-arm64
             dist/plainshow-cluster-linux-amd64.tar.gz
             dist/plainshow-cluster-linux-arm64.tar.gz
+            dist/plainshow-cluster_*.snap
             dist/install.sh
             dist/checksums.txt
           generate_release_notes: true

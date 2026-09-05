@@ -13,6 +13,7 @@ import (
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/ray"
+	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 )
 
@@ -340,11 +341,33 @@ func (s *Server) rayPolicy(networkID string) (ray.ResourcePolicy, bool) {
 		}
 	}
 	eligible := found && device.Enabled && device.AllowJobs && network.Enabled && network.AllowJobs
-	return ray.ResourcePolicy{
-		MaxCPU:   minNonzero(device.MaxCPU, network.MaxCPU),
-		MaxRAMMB: minNonzero(device.MaxRAMMB, network.MaxRAMMB),
-		AllowGPU: device.AllowGPU && network.AllowGPU,
-	}, eligible
+	policy := ray.ResourcePolicy{
+		MaxCPU:    minNonzero(device.MaxCPU, network.MaxCPU),
+		MaxRAMMB:  minNonzero(device.MaxRAMMB, network.MaxRAMMB),
+		AllowGPU:  device.AllowGPU && network.AllowGPU,
+		GPUsKnown: true,
+	}
+	if policy.AllowGPU {
+		addGPUInventory(&policy, sysinfo.Probe(s.layout.Root).GPUs)
+	}
+	return policy, eligible
+}
+
+func addGPUInventory(policy *ray.ResourcePolicy, gpus []sysinfo.GPU) {
+	for _, gpu := range gpus {
+		if !gpu.Trainable {
+			continue
+		}
+		policy.GPUCount++
+		switch gpu.Vendor {
+		case "nvidia":
+			policy.NVIDIAGPUCount++
+		case "amd":
+			policy.AMDGPUCount++
+		case "intel":
+			policy.IntelGPUCount++
+		}
+	}
 }
 
 func minNonzero(a, b int) int {

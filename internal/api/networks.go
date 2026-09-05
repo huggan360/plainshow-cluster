@@ -50,7 +50,9 @@ func (s *Server) networkSummaries() ([]networkSummary, error) {
 			}
 		}
 		for _, node := range nodes {
-			summary.GPUCount += capacityGPUCount(node.Capacity)
+			if nodeCapacityOnline(node, time.Now()) {
+				summary.GPUCount += capacityGPUCount(node.Capacity)
+			}
 		}
 		out = append(out, summary)
 	}
@@ -135,13 +137,26 @@ func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
 	summary := networkSummary{Network: network, ProjectCount: len(projects), NodeCount: len(nodes),
 		Enabled: membership.Enabled}
 	for _, node := range nodes {
-		summary.GPUCount += capacityGPUCount(node.Capacity)
+		if nodeCapacityOnline(node, time.Now()) {
+			summary.GPUCount += capacityGPUCount(node.Capacity)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"network": summary, "membership": membership, "projects": projects,
 		"nodes": nodes, "members": members, "controllers": controllers,
 		"active": id == s.cfg.ActiveNetwork,
 	})
+}
+
+// nodeCapacityOnline keeps summary capacity honest: stale inventory is useful
+// for showing which machine belongs to a network, but it is not compute that a
+// job can use right now. Peer telemetry normally refreshes every 30 seconds.
+func nodeCapacityOnline(node store.NetworkNode, now time.Time) bool {
+	if node.IsSelf {
+		return true
+	}
+	seen, err := time.Parse(time.RFC3339Nano, node.LastSeen)
+	return err == nil && now.Sub(seen) >= 0 && now.Sub(seen) < 2*time.Minute
 }
 
 type recentCommit struct {
