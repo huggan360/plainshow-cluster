@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -117,11 +120,39 @@ func launchNativeDesktop(f flags) (bool, error) {
 			continue
 		}
 		cmd := exec.Command(candidate, desktopArgs...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		return true, cmd.Run()
+		cmd.Stdin, cmd.Stdout = os.Stdin, os.Stdout
+		var stderr bytes.Buffer
+		cmd.Stderr = ioMultiWriter(os.Stderr, &stderr)
+		cmd.Env = desktopEnvironment(os.Environ())
+		err = cmd.Run()
+		// WebKitGTK can be rejected by Wayland on some NVIDIA/Arch setups.
+		// Retry through XWayland automatically instead of crashing the app.
+		if err != nil && os.Getenv("WAYLAND_DISPLAY") != "" &&
+			os.Getenv("GDK_BACKEND") == "" &&
+			(strings.Contains(stderr.String(), "Wayland display") ||
+				strings.Contains(stderr.String(), "Protocol error")) {
+			retry := exec.Command(candidate, desktopArgs...)
+			retry.Stdin, retry.Stdout, retry.Stderr = os.Stdin, os.Stdout, os.Stderr
+			retry.Env = append(desktopEnvironment(os.Environ()), "GDK_BACKEND=x11")
+			return true, retry.Run()
+		}
+		return true, err
 	}
 	return false, nil
 }
+
+func desktopEnvironment(env []string) []string {
+	for _, value := range env {
+		if strings.HasPrefix(value, "WEBKIT_DISABLE_DMABUF_RENDERER=") {
+			return env
+		}
+	}
+	return append(env, "WEBKIT_DISABLE_DMABUF_RENDERER=1")
+}
+
+// Kept behind a tiny helper so app.go does not expose an io implementation
+// detail throughout the launcher.
+func ioMultiWriter(writers ...io.Writer) io.Writer { return io.MultiWriter(writers...) }
 
 func nodeAnswering(url string) bool {
 	if url == "" {

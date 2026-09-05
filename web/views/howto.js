@@ -3,18 +3,30 @@
 // product is wrong.
 
 import { el, mount } from '../lib/ui.js';
+import { toast } from '../lib/client.js';
 
-export async function renderHowTo(host) {
+export async function renderHowTo(host, args = []) {
+    const active = args[0] === 'presets' ? 'presets' : 'start';
     const page = el('div', { class: 'page' });
     mount(host, page);
 
     mount(page,
         el('div', { class: 'page__head' },
             el('p', { class: 'page__eyebrow' }, 'How to'),
-            el('h1', { class: 'page__title' }, 'Running work on your machines'),
+            el('h1', { class: 'page__title' }, active === 'presets' ? 'Ray presets' : 'Running work on your machines'),
             el('p', { class: 'page__sub' },
                 'Plainshow connects the machines and keeps your projects in step. ' +
                 'Ray runs the work. You use your own editor.')),
+        el('nav', { class: 'tabs', 'aria-label': 'How-to sections' },
+            howToTab('start', 'Getting started', 'bx-play', active),
+            howToTab('presets', 'Ray presets', 'bx-code-alt', active)));
+
+    if (active === 'presets') {
+        mount(page, ...rayPresets());
+        return null;
+    }
+
+    mount(page,
 
         step(1, 'Join a network',
             'Networks → create one, or join with a code. Every machine in a ' +
@@ -113,6 +125,102 @@ results = ray.get([train.remote(s) for s in shards])`),
                 'nothing works until a machine is on it.')));
 
     return null;
+}
+
+function howToTab(id, label, icon, active) {
+    return el('a', {
+        class: `tab ${active === id ? 'tab--on' : ''}`,
+        href: `#/howto/${id}`,
+    }, el('i', { class: `bx ${icon}` }), label);
+}
+
+function rayPresets() {
+    return [
+        el('p', { class: 'muted', style: 'margin:0 0 14px;font-size:13px' },
+            'Copy a complete starting point into your project, then replace the marked section with your work.'),
+        preset('Use every CPU', 'Splits independent CPU work across every online machine.', 'cpu_cluster.py', `import ray
+
+ray.init()
+
+@ray.remote
+def process(item):
+    # PUT YOUR CPU WORK HERE
+    return item * item
+
+items = list(range(100))
+results = ray.get([process.remote(item) for item in items])
+print(results)`),
+        preset('Use any available GPU', 'Schedules one task per available GPU, regardless of brand.', 'gpu_cluster.py', `import ray
+
+ray.init()
+
+@ray.remote(num_gpus=1)
+def train(shard):
+    # PUT GPU CODE THAT SUPPORTS THE RECEIVING MACHINE HERE
+    return {"shard": shard, "status": "done"}
+
+results = ray.get([train.remote(shard) for shard in range(8)])
+print(results)`),
+        preset('Target NVIDIA, AMD and Intel', 'Routes vendor-specific code only to compatible machines.', 'mixed_gpus.py', `import ray
+
+ray.init()
+
+@ray.remote(num_gpus=1, resources={"plainshow_gpu_nvidia": 1})
+def nvidia_job():
+    # PUT CUDA CODE HERE
+    return "NVIDIA finished"
+
+@ray.remote(num_gpus=1, resources={"plainshow_gpu_amd": 1})
+def amd_job():
+    # PUT ROCm CODE HERE
+    return "AMD finished"
+
+@ray.remote(num_gpus=1, resources={"plainshow_gpu_intel": 1})
+def intel_job():
+    # PUT ONEAPI / XPU CODE HERE
+    return "Intel finished"
+
+results = ray.get([
+    nvidia_job.remote(),
+    amd_job.remote(),
+    intel_job.remote(),
+])
+print(results)`),
+        preset('Mixed CPU and GPU pipeline', 'Runs preparation on all CPUs and training on available GPUs.', 'pipeline.py', `import ray
+
+ray.init()
+
+@ray.remote
+def prepare(shard):
+    # LOAD AND PREPARE ONE DATA SHARD HERE
+    return shard
+
+@ray.remote(num_gpus=1)
+def train(prepared):
+    # TRAIN ONE SHARD HERE
+    return {"shard": prepared, "status": "trained"}
+
+prepared = [prepare.remote(i) for i in range(16)]
+results = ray.get([train.remote(item) for item in prepared])
+print(results)`),
+    ];
+}
+
+function preset(title, description, filename, source) {
+    return el('div', { class: 'panel', style: 'margin-bottom:12px' },
+        el('div', { style: 'display:flex;align-items:flex-start;gap:12px;margin-bottom:10px' },
+            el('span', { style: 'min-width:0;flex:1' },
+                el('span', { class: 'panel__head', style: 'display:block;margin:0 0 4px' }, title),
+                el('span', { class: 'muted', style: 'font-size:12.5px' }, description)),
+            el('button', {
+                class: 'btn btn--sm',
+                onclick: async () => {
+                    await navigator.clipboard.writeText(source);
+                    toast(`${filename} copied.`);
+                },
+            }, el('i', { class: 'bx bx-copy' }), 'Copy')),
+        el('div', { class: 'mono', style: 'margin-bottom:8px;font-size:11px;color:var(--tx-4)' }, filename),
+        code(source, true));
 }
 
 function step(n, title, body, note) {
