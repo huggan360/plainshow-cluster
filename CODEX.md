@@ -1,6 +1,6 @@
 # Plainshow Cluster handover
 
-Last updated: 2026-09-05. Target release: `v0.1.1-alpha.5`.
+Last updated: 2026-09-05. Current release: `v0.1.1-alpha.6`.
 
 ## Current state
 
