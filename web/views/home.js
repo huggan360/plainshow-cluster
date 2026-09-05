@@ -90,7 +90,7 @@ function accountDeviceCard(device, thisDevice) {
             el('span', { class: 'row__main' },
                 el('span', { class: 'row__title' }, device.name),
                 el('span', { class: 'row__meta' },
-                    network ? network.name : 'no network')),
+                    network ? `Compute · ${network.name}` : 'Compute not assigned')),
             el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
             device.id === thisDevice
                 ? el('span', { class: 'chip chip--cyan' }, 'this machine') : null),
@@ -184,7 +184,7 @@ function activityPanel(overview, rayJobs) {
             kind: 'commit', project: commit.project, branch: commit.branch,
             text: commit.subject, detail: `${commit.author} committed ${commit.short}`,
             at: Date.parse(commit.when) || 0,
-            href: `#/projects/${encodeURIComponent(commit.project)}/git`,
+            href: `#/projects/${encodeURIComponent(commit.project_id || commit.project)}/git`,
         })),
         ...(overview.recent_jobs || []).map((job) => ({
             kind: 'job', project: job.project || 'Cluster', branch: '',
@@ -229,7 +229,7 @@ function networkPreview(network) {
                 el('strong', {}, network.name), el('span', {}, network.role || 'member')),
             el('span', { class: 'ps-project-card__status' },
                 el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
-                network.enabled ? 'Active' : 'Paused')),
+                network.enabled ? 'Ready' : 'Paused')),
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count}`),
             el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count}`),

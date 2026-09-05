@@ -59,13 +59,15 @@ async function renderProjectList(host) {
 }
 
 function card(p) {
+    const network = (state.overview.networks || []).find((item) => item.id === p.network_id);
     return el('a', {
-        class: 'panel ps-project-card', href: `#/projects/${encodeURIComponent(p.name)}`,
+        class: 'panel ps-project-card', href: `#/projects/${encodeURIComponent(p.id)}`,
     },
         el('div', { class: 'ps-project-card__top' },
             el('span', { class: 'ps-project-mark' }, el('i', { class: 'bx bx-layer' })),
             el('span', { class: 'ps-project-card__copy' },
-                el('strong', {}, p.name), el('span', {}, p.description || 'Local project')),
+                el('strong', {}, p.name),
+                el('span', {}, p.description || (network ? network.name : 'Local project'))),
             el('span', { class: 'ps-project-card__status' },
                 el('i', { class: 'bx bx-git-branch' }), p.branch || 'main')),
         el('div', { class: 'ps-project-card__foot' },
@@ -76,10 +78,18 @@ function card(p) {
 }
 
 export function newProject(after) {
+    const networks = state.overview.networks || [];
+    if (!networks.length) {
+        toast('Create or join a network before creating a project.', 'err');
+        navigate('networks');
+        return;
+    }
     const name = el('input', {
         class: 'input', placeholder: 'vision-model', autocomplete: 'off',
     });
     const desc = el('input', { class: 'input', placeholder: 'What is it for? (optional)' });
+    const network = el('select', { class: 'input' }, ...networks.map((item) =>
+        el('option', { value: item.id }, item.name)));
 
     modal({
         title: 'New project',
@@ -89,35 +99,40 @@ export function newProject(after) {
                 el('label', { class: 'field__label' }, 'Name'), name),
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, 'Description'), desc),
+            el('div', { class: 'field' },
+                el('label', { class: 'field__label' }, 'Network'), network),
             el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
                 'Letters, numbers, dashes and underscores.')),
         onConfirm: async (close) => {
             const project = await api('/api/projects', {
                 method: 'POST',
-                body: { name: name.value.trim(), description: desc.value.trim() },
+                body: { name: name.value.trim(), description: desc.value.trim(), network_id: network.value },
             });
             close();
             toast(`Created ${project.name}.`);
             await refresh();
             if (after) await after();
-            navigate(`projects/${encodeURIComponent(project.name)}`);
+            navigate(`projects/${encodeURIComponent(project.id)}`);
         },
     });
 }
 
 // --------------------------------------------------------- project view ----
 
-async function renderProject(host, name, routeParts) {
+async function renderProject(host, reference, routeParts) {
     const page = el('div', { class: 'page' });
     mount(host, page);
 
-    const projectTabs = new Set(['overview', 'branch', 'run', 'git', 'team', 'settings']);
+    const projectTabs = new Set(['overview', 'branch', 'run', 'git', 'devices', 'team', 'settings']);
     const requested = routeParts[0] || 'overview';
     const activeTab = projectTabs.has(requested) ? requested : 'branch';
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
-    const projectSummary = state.overview.projects.find((project) => project.name === name);
-    if (!projectSummary) throw new Error('No such project in the selected network.');
-    const gitSnapshot = await api(`/api/projects/${encodeURIComponent(name)}/git`);
+    const projectSummary = state.overview.projects.find((project) =>
+        project.id === reference || project.name === reference);
+    if (!projectSummary) throw new Error('No such project in your networks.');
+    const name = projectSummary.name;
+    const projectRef = projectSummary.id;
+    const gitSnapshot = await api(`/api/projects/${encodeURIComponent(projectRef)}/git`);
     const branch = gitSnapshot.branch || projectSummary.branch || 'main';
 
     const ctx = {
@@ -127,7 +142,7 @@ async function renderProject(host, name, routeParts) {
         dirty: false,
         saving: false,
 		projectId: projectSummary.id,
-        networkId: state.overview.active_network,
+        networkId: projectSummary.network_id,
 		revision: 0,
 		nextBase: 0,
 		pending: new Set(),
@@ -158,7 +173,7 @@ async function renderProject(host, name, routeParts) {
     // ---- file tree ----
 
     async function loadTree() {
-        const tree = await api(`/api/projects/${encodeURIComponent(name)}/tree`);
+        const tree = await api(`/api/projects/${encodeURIComponent(projectRef)}/tree`);
         mount(treeBox, ...renderTree(tree, 0));
         if (tree.length === 0) {
             mount(treeBox, el('p', { class: 'muted', style: 'font-size:12px;padding:8px' },
@@ -203,7 +218,7 @@ async function renderProject(host, name, routeParts) {
 				!entry.dir ? el('a', {
 					class: 'tree__action', title: `Download ${entry.name}`,
 					'aria-label': `Download ${entry.name}`, download: entry.name,
-					href: `/api/projects/${encodeURIComponent(name)}/raw?path=${encodeURIComponent(entry.path)}`,
+					href: `/api/projects/${encodeURIComponent(projectRef)}/raw?path=${encodeURIComponent(entry.path)}`,
 					}, el('i', { class: 'bx bx-download' })) : null,
 				el('button', {
 					class: 'tree__action', title: `Rename ${entry.name}`,
@@ -237,7 +252,7 @@ async function renderProject(host, name, routeParts) {
 				if (!target) continue;
 				const form = new FormData();
 				form.append('file', file, file.name);
-				await api(`/api/projects/${encodeURIComponent(name)}/upload?path=${encodeURIComponent(target)}`, {
+				await api(`/api/projects/${encodeURIComponent(projectRef)}/upload?path=${encodeURIComponent(target)}`, {
 					method: 'POST', body: form,
 				});
 				uploaded.push(target);
@@ -273,7 +288,7 @@ async function renderProject(host, name, routeParts) {
 				if (movingOpenFile && ctx.dirty) {
 					throw new Error('Wait for the open file to finish syncing before renaming it.');
 				}
-				await api(`/api/projects/${encodeURIComponent(name)}/rename`, {
+				await api(`/api/projects/${encodeURIComponent(projectRef)}/rename`, {
 					method: 'POST', body: { from: entry.path, to },
 				});
 				const movedPath = movingOpenFile ? `${to}${ctx.path.slice(entry.path.length)}` : '';
@@ -297,7 +312,7 @@ async function renderProject(host, name, routeParts) {
 				if (deletingOpenFile && ctx.dirty) {
 					throw new Error('Wait for the open file to finish syncing before deleting it.');
 				}
-				await api(`/api/projects/${encodeURIComponent(name)}/entry?path=${encodeURIComponent(entry.path)}`,
+				await api(`/api/projects/${encodeURIComponent(projectRef)}/entry?path=${encodeURIComponent(entry.path)}`,
 					{ method: 'DELETE' });
 				if (deletingOpenFile) closeEditor();
 				close();
@@ -386,7 +401,7 @@ async function renderProject(host, name, routeParts) {
         if (ctx.dirty && !window.confirm('You have unsaved changes. Discard them?')) return;
         try {
 			const file = await api(
-				`/api/projects/${encodeURIComponent(name)}/collab?path=${encodeURIComponent(path)}`);
+				`/api/projects/${encodeURIComponent(projectRef)}/collab?path=${encodeURIComponent(path)}`);
             ctx.path = path;
             ctx.content = file.content;
             ctx.revision = file.revision;
@@ -398,7 +413,7 @@ async function renderProject(host, name, routeParts) {
             setDirty(false);
             paint();
             history.replaceState(null, '',
-                `#/projects/${encodeURIComponent(name)}/branch/${encodeURIComponent(path)}`);
+                `#/projects/${encodeURIComponent(projectRef)}/branch/${encodeURIComponent(path)}`);
             treeBox.querySelectorAll('.tree__item').forEach((node) => {
                 node.classList.toggle('tree__item--on', node.title === path);
             });
@@ -433,7 +448,7 @@ async function renderProject(host, name, routeParts) {
 		input.disabled = true;
 		pathLabel.textContent = 'No file open';
 		setDirty(false);
-		history.replaceState(null, '', `#/projects/${encodeURIComponent(name)}/branch`);
+		history.replaceState(null, '', `#/projects/${encodeURIComponent(projectRef)}/branch`);
 		paint();
 	}
 
@@ -451,11 +466,11 @@ async function renderProject(host, name, routeParts) {
             dirtyDot, pathLabel, el('span', { style: 'flex:1' }),
             el('button', {
                 class: 'btn btn--sm', title: 'New file',
-                onclick: () => newEntry(name, 'file', loadTree, openFile),
+                onclick: () => newEntry(projectRef, 'file', loadTree, openFile),
             }, el('i', { class: 'bx bx-file-blank' }), 'File'),
             el('button', {
                 class: 'btn btn--sm', title: 'New folder',
-                onclick: () => newEntry(name, 'dir', loadTree),
+                onclick: () => newEntry(projectRef, 'dir', loadTree),
             }, el('i', { class: 'bx bx-folder-plus' }), 'Folder'),
             saveBtn),
         el('div', { class: 'code' }, gutter,
@@ -481,7 +496,7 @@ async function renderProject(host, name, routeParts) {
             `$ ${command}`));
         try {
 			currentJob = await api('/api/ray/jobs', {
-				method: 'POST', body: { project: name, command },
+				method: 'POST', body: { project_id: projectRef, command },
             });
 			currentCommand = command;
             runBtn.classList.add('hide');
@@ -497,7 +512,8 @@ async function renderProject(host, name, routeParts) {
     async function stop() {
         if (!currentJob) return;
         try {
-			await api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/stop`, { method: 'POST' });
+			await api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/stop?network_id=${encodeURIComponent(ctx.networkId)}`,
+				{ method: 'POST' });
         } catch (err) { toast(err.message, 'err'); }
     }
 
@@ -505,8 +521,8 @@ async function renderProject(host, name, routeParts) {
 		if (!currentJob) return;
 		try {
 			const [logData, listing] = await Promise.all([
-				api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/logs`).catch(() => ({ logs: '' })),
-				api('/api/ray/jobs').catch(() => ({ jobs: [] })),
+				api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/logs?network_id=${encodeURIComponent(ctx.networkId)}`).catch(() => ({ logs: '' })),
+				api(`/api/ray/jobs?network_id=${encodeURIComponent(ctx.networkId)}`).catch(() => ({ jobs: [] })),
 			]);
 			const job = (listing.jobs || []).find((item) => item.id === currentJob.id);
 			const lines = String(logData.logs || '').replace(/\s+$/, '').split('\n');
@@ -533,8 +549,8 @@ async function renderProject(host, name, routeParts) {
 
     // ---- repository and team ----
 
-    const repository = repositoryPanel(name, loadTree);
-    const team = teamPanel(name);
+    const repository = repositoryPanel(projectRef, loadTree);
+    const team = teamPanel(projectRef);
     const loadGit = repository.reload;
 
     // ---- assemble ----
@@ -591,7 +607,8 @@ async function renderProject(host, name, routeParts) {
 	const settingsPane = projectSettingsPane(projectSummary);
 	const devicesPane = projectDevicesPane(projectSummary);
 	const raySnapshot = activeTab === 'overview'
-		? await api('/api/ray').catch((error) => ({ running: false, detail: error.message })) : null;
+		? await api(`/api/ray?network_id=${encodeURIComponent(projectSummary.network_id)}`)
+			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const panes = { overview: overviewPane, branch: branchPane, run: runPane,
 		git: gitPane, devices: devicesPane, team: teamPane, settings: settingsPane };
@@ -617,7 +634,7 @@ async function renderProject(host, name, routeParts) {
 				el('i', { class: 'bx bx-left-arrow-alt' }), 'All projects')),
 		el('nav', { class: 'tabs', 'aria-label': 'Project sections' }, ...tabs.map(([key, label, icon]) =>
 			el('a', { class: `tab ${activeTab === key ? 'tab--on' : ''}`,
-				href: `#/projects/${encodeURIComponent(name)}/${key}` },
+				href: `#/projects/${encodeURIComponent(projectRef)}/${key}` },
 				el('i', { class: `bx ${icon}` }), label))),
 		panes[activeTab]);
 
@@ -637,9 +654,11 @@ async function renderProject(host, name, routeParts) {
 
     // ---- live updates ----
 
-    const offTree = on('tree.changed', (e) => { if (e.project === name) loadTree(); });
+	const isThisProject = (event) => event.project_id
+		? event.project_id === ctx.projectId : event.project === name;
+    const offTree = on('tree.changed', (e) => { if (isThisProject(e)) loadTree(); });
 	const offReplace = on('file.replaced', async (event) => {
-		if (event.project !== name || event.path !== ctx.path) return;
+		if (!isThisProject(event) || event.path !== ctx.path) return;
 		if (ctx.dirty) {
 			toast(`${event.path} was replaced while you had pending edits. Reload it before continuing.`, 'err');
 			return;
@@ -647,7 +666,7 @@ async function renderProject(host, name, routeParts) {
 		await openFile(ctx.path);
 	});
 	const offRename = on('entry.renamed', async (event) => {
-		if (event.project !== name ||
+		if (!isThisProject(event) ||
 			(ctx.path !== event.from && !ctx.path.startsWith(`${event.from}/`))) return;
 		if (ctx.dirty) {
 			toast('An open path was renamed while you had pending edits. Reload this branch.', 'err');
@@ -656,7 +675,7 @@ async function renderProject(host, name, routeParts) {
 		await openFile(`${event.to}${ctx.path.slice(event.from.length)}`);
 	});
 	const offDelete = on('entry.deleted', (event) => {
-		if (event.project !== name ||
+		if (!isThisProject(event) ||
 			(ctx.path !== event.path && !ctx.path.startsWith(`${event.path}/`))) return;
 		if (ctx.dirty) {
 			toast('An open path was deleted while you had pending edits. Reload this branch.', 'err');
@@ -722,7 +741,7 @@ function projectOverview(project, git, ray) {
 			el('section', { class: 'panel' },
 				el('div', { class: 'panel__head' },
 					el('span', { class: 'grow' }, 'Recent commits'),
-					el('a', { class: 'chip chip--cyan', href: `#/projects/${encodeURIComponent(project.name)}/git` }, 'full history')),
+					el('a', { class: 'chip chip--cyan', href: `#/projects/${encodeURIComponent(project.id)}/git` }, 'full history')),
 				commits.length ? el('div', { class: 'rows' }, ...commits.slice(0, 8).map((entry) =>
 					el('div', { class: 'row', style: 'cursor:default' },
 						el('i', { class: 'bx bx-git-commit', style: 'color:var(--cyan);font-size:18px' }),
@@ -767,7 +786,7 @@ function projectDevicesPane(project) {
 	const load = async () => {
 		let data;
 		try {
-			data = await api(`/api/projects/${encodeURIComponent(project.name)}/devices`);
+			data = await api(`/api/projects/${encodeURIComponent(project.id)}/devices`);
 		} catch (err) {
 			mount(box, el('div', { class: 'panel' },
 				el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message)));
@@ -799,7 +818,7 @@ function deviceReadinessRow(project, device, reload) {
 		toast(`${label} ${project.name}…`);
 		try {
 			const result = await api(
-				`/api/projects/${encodeURIComponent(project.name)}/${direction}`,
+				`/api/projects/${encodeURIComponent(project.id)}/${direction}`,
 				{ method: 'POST', body: { node_id: device.node_id } });
 			toast(`${project.name} · ${megabytes(Math.round((result.bytes || 0) / 1048576))} transferred.`);
 			await reload();
@@ -845,7 +864,7 @@ function projectSettingsPane(project) {
 				el('input', { class: 'input input--mono', value: project.name, disabled: true })),
 			el('label', { class: 'field' }, el('span', { class: 'field__label' }, 'Description'), description),
 			el('button', { class: 'btn btn--primary', onclick: async () => {
-				const updated = await api(`/api/projects/${encodeURIComponent(project.name)}`, {
+				const updated = await api(`/api/projects/${encodeURIComponent(project.id)}`, {
 					method: 'PUT', body: { description: description.value },
 				});
 				project.description = updated.description;
@@ -857,7 +876,7 @@ function projectSettingsPane(project) {
 				el('div', { class: 'panel__head' }, 'Delete project'),
 				el('p', { class: 'muted', style: 'font-size:12px;line-height:1.6' },
 					'Deleting removes the local folder and its complete Git history from this machine.'),
-				el('button', { class: 'btn btn--danger', onclick: () => removeProject(project.name) },
+				el('button', { class: 'btn btn--danger', onclick: () => removeProject(project) },
 					el('i', { class: 'bx bx-trash' }), 'Delete permanently'))));
 }
 
@@ -901,7 +920,7 @@ function moveProject(project, picker) {
 			'leaving stop seeing it, and people in ' + name + ' start. Its Git ' +
 			'history and its GitHub repository are untouched.'),
 		onConfirm: async (close) => {
-			await api(`/api/projects/${encodeURIComponent(project.name)}/network`,
+			await api(`/api/projects/${encodeURIComponent(project.id)}/network`,
 				{ method: 'PUT', body: { network_id: target } });
 			close();
 			toast(`${project.name} moved to ${name}.`);
@@ -985,7 +1004,8 @@ function commit(project, after) {
     });
 }
 
-function removeProject(name) {
+function removeProject(project) {
+    const name = project.name;
     const confirmName = el('input', { class: 'input input--mono', placeholder: name });
     modal({
         title: `Delete ${name}?`,
@@ -1002,7 +1022,7 @@ function removeProject(name) {
             if (confirmName.value.trim() !== name) {
                 throw new Error('That name does not match.');
             }
-            await api(`/api/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' });
             close();
             toast(`Deleted ${name}.`);
             navigate('projects');

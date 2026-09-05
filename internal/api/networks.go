@@ -59,6 +59,35 @@ func (s *Server) networkSummaries() ([]networkSummary, error) {
 	return out, nil
 }
 
+// allNetworkNodes returns account-wide device inventory without counting one
+// physical machine once for every shared network. The newest observation wins.
+func (s *Server) allNetworkNodes() ([]store.NetworkNode, error) {
+	byID := make(map[string]store.NetworkNode)
+	for _, membership := range s.cfg.Memberships {
+		nodes, err := s.store.NetworkNodes(membership.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, node := range nodes {
+			current, exists := byID[node.NodeID]
+			if !exists || node.IsSelf || node.LastSeen > current.LastSeen {
+				byID[node.NodeID] = node
+			}
+		}
+	}
+	out := make([]store.NetworkNode, 0, len(byID))
+	for _, node := range byID {
+		out = append(out, node)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsSelf != out[j].IsSelf {
+			return out[i].IsSelf
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out, nil
+}
+
 func capacityGPUCount(capacity map[string]any) int {
 	raw, ok := capacity["gpus"]
 	if !ok || raw == nil {
@@ -83,6 +112,14 @@ func capacityGPUCount(capacity map[string]any) int {
 }
 
 func (s *Server) listNetworks(w http.ResponseWriter, r *http.Request) {
+	// A direct visit to Networks should not have to wait for the background
+	// heartbeat. Pull account-owned memberships first and retain local data if
+	// the management plane is temporarily unreachable.
+	if client, token, authorityErr := s.authority(r.Context()); authorityErr == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		_, _ = s.AdoptAccountNetworks(ctx, client, token)
+		cancel()
+	}
 	networks, err := s.networkSummaries()
 	if err != nil {
 		fail(w, 500, err.Error())
@@ -160,13 +197,14 @@ func nodeCapacityOnline(node store.NetworkNode, now time.Time) bool {
 }
 
 type recentCommit struct {
-	Project string `json:"project"`
-	Branch  string `json:"branch"`
-	Hash    string `json:"hash"`
-	Short   string `json:"short"`
-	Author  string `json:"author"`
-	When    string `json:"when"`
-	Subject string `json:"subject"`
+	ProjectID string `json:"project_id"`
+	Project   string `json:"project"`
+	Branch    string `json:"branch"`
+	Hash      string `json:"hash"`
+	Short     string `json:"short"`
+	Author    string `json:"author"`
+	When      string `json:"when"`
+	Subject   string `json:"subject"`
 }
 
 func (s *Server) decorateProjects(projects []store.Project) {
@@ -200,7 +238,8 @@ func (s *Server) recentCommits(projects []store.Project, limit int) []recentComm
 			continue
 		}
 		for _, entry := range entries {
-			commits = append(commits, recentCommit{Project: project.Name, Branch: branch,
+			commits = append(commits, recentCommit{ProjectID: project.ID,
+				Project: project.Name, Branch: branch,
 				Hash: entry.Hash, Short: entry.Short, Author: entry.Author,
 				When: entry.When, Subject: entry.Subject})
 		}
@@ -361,7 +400,9 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		RayHead: response.Ray.Head, RayHeadNode: response.Ray.NodeID,
 		RayHeadUpdated: response.Ray.Updated}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
-	s.cfg.SetActiveNetwork(membership.ID)
+	if s.cfg.ActiveNetwork == "" {
+		s.cfg.SetActiveNetwork(membership.ID)
+	}
 	s.cfg.Network.Advertise = strings.TrimRight(body.Endpoint, "/")
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		fail(w, 500, err.Error())
@@ -381,7 +422,7 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 	s.hub.Publish("networks.changed", membership)
 	go s.checkInAccountServer(context.Background())
 	writeJSON(w, 201, map[string]any{"network": response.Network, "role": response.Role,
-		"nodes": response.Nodes, "active": membership.ID})
+		"nodes": response.Nodes, "active": s.cfg.ActiveNetwork})
 }
 
 func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +448,9 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 		ManagementKey: config.NewSecret(), Enabled: true, Policy: s.cfg.Worker,
 	}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
-	s.cfg.SetActiveNetwork(membership.ID)
+	if s.cfg.ActiveNetwork == "" {
+		s.cfg.SetActiveNetwork(membership.ID)
+	}
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		fail(w, 500, err.Error())
 		return

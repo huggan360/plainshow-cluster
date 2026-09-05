@@ -1,6 +1,6 @@
 # Plainshow Cluster handover
 
-Last updated: 2026-09-05. Target release: `v0.1.1-alpha.4`.
+Last updated: 2026-09-05. Target release: `v0.1.1-alpha.5`.
 
 ## Current state
 
@@ -75,10 +75,10 @@ Run on this Pi with Go added to `PATH`:
 ```sh
 PATH=/usr/local/go/bin:$PATH make check
 PATH=/usr/local/go/bin:$PATH make smoke
-PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.4 dist
+PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.5 dist
 ```
 
-All three passed after the application changes; the smoke suite reports 71
+All three passed after the application changes; the smoke suite reports 73
 passed and 0 failed, and the distribution build produced both architectures.
 
 The Pi lacks GTK/WebKit development headers and Arch `makepkg`.
@@ -89,10 +89,10 @@ Release without rewriting an earlier alpha:
 
 ```sh
 git add -A
-git commit -m "Connect the desktop to packaged system nodes"
+git commit -m "Make projects and live updates network-aware"
 git push origin main
-git tag -a v0.1.1-alpha.4 -m "Plainshow Cluster v0.1.1-alpha.4"
-git push origin v0.1.1-alpha.4
+git tag -a v0.1.1-alpha.5 -m "Plainshow Cluster v0.1.1-alpha.5"
+git push origin v0.1.1-alpha.5
 ```
 
 The tag triggers `.github/workflows/release.yml`. Confirm both native desktop
@@ -193,3 +193,45 @@ because the heartbeat is still there to cover it.
 - Removing a device is bookkeeping, not revocation, and the interface says so.
   A machine with a valid credential re-registers. Signing it out is the thing
   that actually cuts it off.
+
+## Handover addendum — Stage 6 and account-wide workspaces
+
+The repository side of Stage 6 is complete. The production Apache reference
+config upgrades `/api/events`, `Client.Watch` now distinguishes a connection
+that opened and later closed from a handshake failure, and
+`watch_test.go` proves that wake-ups arrive again after reconnecting. The
+heartbeat remains unchanged.
+
+Production is **not** complete: a read-only WebSocket probe of
+`https://clusteradmin.plainshow.se/api/events` returned 404 on 2026-09-05. No
+live Apache file, process or system service was changed in this session. Deploy
+the updated `pscluster-admin` and `deploy/clusteradmin.plainshow.se.conf`, run
+`apache2ctl configtest`, reload Apache, then perform PLAN.md's two-real-node
+disconnect/reconnect test.
+
+The UI no longer treats the device's Ray assignment as an account workspace:
+
+- Networks, devices and projects are account-wide and the top bar has no
+  network selector/status.
+- Creating or cloning a project requires a network; links and all project APIs
+  use stable project ids, so identical names in different networks work.
+- Project Run resolves `project.network_id` and scopes submit, status, logs and
+  stop to that Ray head. Jobs aggregates all reachable network heads.
+- Send/fetch/readiness use the project's network, and the browser maintains a
+  Cowork controller socket per network instead of only the old active one.
+- A single physical machine still has one internal compute assignment and one
+  raylet, preventing the same CPU/GPU capacity from being advertised twice.
+  Starting Ray for another network moves only that contribution; it never hides
+  account networks or projects.
+
+Verification on the Pi after these changes:
+
+```sh
+PATH=/usr/local/go/bin:$PATH make check       # pass
+PATH=/usr/local/go/bin:$PATH make smoke       # 73 passed, 0 failed
+PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.5 dist  # amd64 + arm64 pass
+```
+
+The native GTK desktop and Arch package still belong to release CI; do not
+install their build dependencies on this production Pi. The intended next tag
+is `v0.1.1-alpha.5`; never move alpha.1 through alpha.4.

@@ -361,7 +361,8 @@ function deviceRow(device, networks, thisDevice, reload) {
     const isThis = device.id === thisDevice;
     const current = device.desired_network || device.active_network || '';
     const picker = el('select', {
-        class: 'select', 'aria-label': `Network for ${device.name}`,
+        class: 'select', 'aria-label': `Compute network for ${device.name}`,
+        title: 'The one Ray cluster receiving this machine’s CPU and GPUs',
         onchange: async () => {
             picker.disabled = true;
             try {

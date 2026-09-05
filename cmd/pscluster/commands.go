@@ -48,7 +48,7 @@ func cmdNetwork(args []string) error {
 			}
 			fmt.Printf("  %s %-18s %-18s\n", marker, n.Name, n.ID)
 		}
-		fmt.Printf("\n  * is the active network.\n\n")
+		fmt.Printf("\n  * receives this machine's Ray compute. All networks remain available.\n\n")
 		return nil
 
 	case "use":
@@ -58,7 +58,7 @@ func cmdNetwork(args []string) error {
 		if err := d.call("PUT", "/api/networks/"+f.rest[1]+"/active", nil, nil); err != nil {
 			return err
 		}
-		fmt.Printf("Active network is now %s.\n", f.rest[1])
+		fmt.Printf("This machine now contributes Ray compute to %s.\n", f.rest[1])
 		return nil
 
 	case "key":
@@ -91,7 +91,7 @@ func cmdInvite(args []string) error {
 	}
 	network := f.get("network", cfg.ActiveNetwork)
 	if network == "" {
-		return errors.New("this node has no active network")
+		return errors.New("choose a network with --network ID")
 	}
 	role := f.get("role", "member")
 

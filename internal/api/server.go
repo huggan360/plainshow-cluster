@@ -255,9 +255,14 @@ func fsError(w http.ResponseWriter, err error) {
 	}
 }
 
-// project resolves the named project to a rooted filesystem view.
-func (s *Server) project(name string) (store.Project, projectfs.Project, error) {
-	p, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, name)
+// project resolves a stable project id, with a name fallback for older clients.
+// It deliberately does not consult ActiveNetwork: a project carries the
+// network it belongs to, so the account can work in several networks at once.
+func (s *Server) project(reference string) (store.Project, projectfs.Project, error) {
+	p, err := s.store.ProjectByID(reference)
+	if err != nil {
+		p, err = s.store.ProjectByName(reference)
+	}
 	if err != nil {
 		return p, projectfs.Project{}, err
 	}
@@ -279,12 +284,12 @@ func (s *Server) projectDir(p store.Project) string {
 // ------------------------------------------------------------- overview ----
 
 func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
-	machines, err := s.store.NetworkNodes(s.cfg.ActiveNetwork)
+	machines, err := s.allNetworkNodes()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
-	projects, err := s.store.ProjectsInNetwork(s.cfg.ActiveNetwork)
+	projects, err := s.store.Projects()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -304,16 +309,25 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	// networks" — the one answer guaranteed to send someone looking in the
 	// wrong place.
 	networks, networksErr := s.networkSummaries()
-	controllers, _ := s.store.NetworkControllers(s.cfg.ActiveNetwork)
+	accountControllers := make([]map[string]string, 0, len(networks))
 	var activeController any
-	if len(controllers) > 0 {
+	for _, membership := range s.cfg.Memberships {
+		controllers, _ := s.store.NetworkControllers(membership.ID)
+		if len(controllers) == 0 {
+			continue
+		}
 		item := controllers[0]
 		wsURL := strings.Replace(item.Address, "https://", "wss://", 1)
 		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-		activeController = map[string]string{"id": item.ID, "name": item.Name,
+		target := map[string]string{"id": item.ID, "name": item.Name,
+			"network_id":   item.NetworkID,
 			"collab_token": item.CollabToken,
 			"ws_url": strings.TrimRight(wsURL, "/") + "/ws?network=" +
 				url.QueryEscape(item.NetworkID)}
+		accountControllers = append(accountControllers, target)
+		if item.NetworkID == s.cfg.ActiveNetwork {
+			activeController = target
+		}
 	}
 	writeJSON(w, 200, map[string]any{
 		"cluster": map[string]string{
@@ -344,6 +358,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		"github":         map[string]bool{"connected": s.tokenStore().Connected()},
 		"update":         s.updater.Status(),
 		"controller":     activeController,
+		"controllers":    accountControllers,
 	})
 }
 
@@ -352,7 +367,7 @@ func (s *Server) getSysinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getMachines(w http.ResponseWriter, r *http.Request) {
-	machines, err := s.store.NetworkNodes(s.cfg.ActiveNetwork)
+	machines, err := s.allNetworkNodes()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -363,7 +378,7 @@ func (s *Server) getMachines(w http.ResponseWriter, r *http.Request) {
 // ------------------------------------------------------------- projects ----
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.store.ProjectsInNetwork(s.cfg.ActiveNetwork)
+	projects, err := s.store.Projects()
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -376,6 +391,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		NetworkID   string `json:"network_id"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
@@ -386,12 +402,17 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Project names use letters, numbers, dashes and underscores, and cannot start with a dot.")
 		return
 	}
-	if _, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, body.Name); err == nil {
+	body.NetworkID = strings.TrimSpace(body.NetworkID)
+	if !hasMembership(s.cfg, body.NetworkID) {
+		fail(w, http.StatusBadRequest, "Choose a network for this project.")
+		return
+	}
+	if _, err := s.store.ProjectByNameInNetwork(body.NetworkID, body.Name); err == nil {
 		fail(w, 409, fmt.Sprintf("A project called %q already exists.", body.Name))
 		return
 	}
 
-	p := store.Project{ID: config.NewID(), NetworkID: s.cfg.ActiveNetwork,
+	p := store.Project{ID: config.NewID(), NetworkID: body.NetworkID,
 		Name: body.Name, Description: body.Description}
 	dir := s.projectDir(p)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -466,7 +487,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	s.hub.Publish("project.deleted", map[string]string{"name": p.Name})
+	s.hub.Publish("project.deleted", map[string]string{"id": p.ID, "name": p.Name})
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 
@@ -527,9 +548,9 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
-	s.hub.Publish("file.saved", map[string]string{"project": name, "path": body.Path})
-	s.hub.Publish("file.replaced", map[string]string{"project": name, "path": body.Path})
-	s.hub.Publish("tree.changed", map[string]string{"project": name})
+	s.hub.Publish("file.saved", map[string]string{"project_id": p.ID, "project": p.Name, "path": body.Path})
+	s.hub.Publish("file.replaced", map[string]string{"project_id": p.ID, "project": p.Name, "path": body.Path})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, map[string]string{"status": "saved"})
 }
 
@@ -590,8 +611,8 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = s.store.TouchProjectID(p.ID)
-		s.hub.Publish("file.replaced", map[string]string{"project": name, "path": rel})
-		s.hub.Publish("tree.changed", map[string]string{"project": name})
+		s.hub.Publish("file.replaced", map[string]string{"project_id": p.ID, "project": p.Name, "path": rel})
+		s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 		writeJSON(w, http.StatusCreated, map[string]any{"path": rel, "size": n})
 		return
 	}
@@ -652,7 +673,7 @@ func (s *Server) createDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
-	s.hub.Publish("tree.changed", map[string]string{"project": name})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 201, map[string]string{"status": "created"})
 }
 
@@ -684,8 +705,8 @@ func (s *Server) renameEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
-	s.hub.Publish("entry.renamed", map[string]string{"project": name, "from": body.From, "to": body.To})
-	s.hub.Publish("tree.changed", map[string]string{"project": name})
+	s.hub.Publish("entry.renamed", map[string]string{"project_id": p.ID, "project": p.Name, "from": body.From, "to": body.To})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, map[string]string{"status": "renamed"})
 }
 
@@ -706,8 +727,8 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.store.TouchProjectID(p.ID)
-	s.hub.Publish("entry.deleted", map[string]string{"project": name, "path": rel})
-	s.hub.Publish("tree.changed", map[string]string{"project": name})
+	s.hub.Publish("entry.deleted", map[string]string{"project_id": p.ID, "project": p.Name, "path": rel})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 
@@ -782,7 +803,7 @@ func (s *Server) gitCommit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"committed": false, "message": "Nothing to commit."})
 		return
 	}
-	s.hub.Publish("git.committed", map[string]string{"project": p.Name})
+	s.hub.Publish("git.committed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, map[string]any{"committed": true})
 }
 

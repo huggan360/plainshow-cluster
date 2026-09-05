@@ -58,6 +58,7 @@ export const state = { overview: null, system: null };
 export async function refresh() {
     state.overview = await api('/api/overview');
     state.system = state.overview.system;
+    if (live) connectControllers();
     return state.overview;
 }
 
@@ -78,7 +79,7 @@ export function emit(topic, data) {
 }
 
 let socket = null;
-let controllerSocket = null;
+const controllerSockets = new Map();
 let attempts = 0;
 let live = false;
 const connectionListeners = new Set();
@@ -98,11 +99,7 @@ export function send(topic, data, durable = false) {
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
         if (topic.startsWith('collab.')) {
-            if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN) {
-                controllerSocket.send(JSON.stringify(message));
-            } else if (durable) {
-                queueForController(message);
-            }
+            deliverToController(message, durable);
         }
         return true;
     }
@@ -118,10 +115,12 @@ function queueForController(message) {
     localStorage.setItem(controllerOutboxKey, JSON.stringify(controllerOutbox));
 }
 
-function deliverToController(message) {
-    if (controllerSocket && controllerSocket.readyState === WebSocket.OPEN) {
-        controllerSocket.send(JSON.stringify(message));
-    } else {
+function deliverToController(message, durable = true) {
+    const networkID = message.data && message.data.network_id;
+    const target = controllerSockets.get(networkID);
+    if (target && target.readyState === WebSocket.OPEN) {
+        target.send(JSON.stringify(message));
+    } else if (durable) {
         queueForController(message);
     }
 }
@@ -154,7 +153,7 @@ export function connect() {
             socket.send(JSON.stringify(message));
             if (message.topic.startsWith('collab.')) deliverToController(message);
         });
-        connectController();
+        connectControllers();
     };
     socket.onmessage = (event) => {
         let msg;
@@ -174,24 +173,39 @@ export function connect() {
     socket.onerror = () => socket.close();
 }
 
-function connectController() {
-    const target = state.overview && state.overview.controller;
-    if (!target || !target.ws_url || (controllerSocket && controllerSocket.readyState < 2)) return;
-    controllerSocket = new WebSocket(target.ws_url, [`plainshow.${target.collab_token}`]);
-    controllerSocket.onopen = () => {
-        const pending = controllerOutbox;
-        controllerOutbox = [];
-        localStorage.setItem(controllerOutboxKey, '[]');
-        pending.forEach((message) => controllerSocket.send(JSON.stringify(message)));
+function connectControllers() {
+    const overview = state.overview || {};
+    const targets = overview.controllers || (overview.controller ? [overview.controller] : []);
+    targets.forEach(connectController);
+}
+
+function connectController(target) {
+    if (!target || !target.network_id || !target.ws_url) return;
+    const existing = controllerSockets.get(target.network_id);
+    if (existing && existing.readyState < 2) return;
+    const connection = new WebSocket(target.ws_url, [`plainshow.${target.collab_token}`]);
+    controllerSockets.set(target.network_id, connection);
+    connection.onopen = () => {
+        const pending = controllerOutbox.filter((message) =>
+            message.data && message.data.network_id === target.network_id);
+        controllerOutbox = controllerOutbox.filter((message) =>
+            !message.data || message.data.network_id !== target.network_id);
+        localStorage.setItem(controllerOutboxKey, JSON.stringify(controllerOutbox));
+        pending.forEach((message) => connection.send(JSON.stringify(message)));
     };
-    controllerSocket.onmessage = (event) => {
+    connection.onmessage = (event) => {
         // The sending browser already delivered the operation to its node.
         // Other browsers deliver the controller copy to their own node, which
         // writes it to that clone and publishes the normal local event.
         if (socket && socket.readyState === WebSocket.OPEN) socket.send(event.data);
     };
-    controllerSocket.onclose = () => setTimeout(connectController, 3000);
-    controllerSocket.onerror = () => controllerSocket.close();
+    connection.onclose = () => {
+        if (controllerSockets.get(target.network_id) === connection) {
+            controllerSockets.delete(target.network_id);
+        }
+        setTimeout(() => connectController(target), 3000);
+    };
+    connection.onerror = () => connection.close();
 }
 
 // --------------------------------------------------------------- toasts ----

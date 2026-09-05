@@ -11,10 +11,15 @@ export async function renderJobs(host) {
     mount(host, page);
 
     const draw = async () => {
-        const [status, listing] = await Promise.all([
-            api('/api/ray').catch(() => ({})),
+        const [networkData, listing] = await Promise.all([
+            api('/api/networks').catch(() => ({ networks: [] })),
             api('/api/ray/jobs').catch(() => ({ jobs: [] })),
         ]);
+        const statuses = await Promise.all((networkData.networks || []).map(async (network) => ({
+            network,
+            status: await api(`/api/ray?network_id=${encodeURIComponent(network.id)}`).catch((error) =>
+                ({ detail: error.message })),
+        })));
         const jobs = listing.jobs || [];
         const running = jobs.filter((j) => ['PENDING', 'RUNNING'].includes(j.status));
 
@@ -23,17 +28,23 @@ export async function renderJobs(host) {
                 el('p', { class: 'page__eyebrow' }, 'Jobs'),
                 el('h1', { class: 'page__title' }, 'Jobs'),
                 el('p', { class: 'page__sub' },
-                    'Everything Ray is running across this network.')),
+                    'Everything Ray is running across all of your networks.')),
 
+            statuses.length ? el('div', { class: 'ps-card-grid', style: 'margin-bottom:14px' },
+                ...statuses.map(({ network, status }) => clusterCard(network, status))) : null,
             el('div', { class: 'grid grid--2', style: 'margin-bottom:14px' },
-                clusterCard(status),
                 el('div', { class: 'panel' },
                     el('div', { class: 'panel__head' },
                         el('span', { class: 'grow' }, 'Running'),
                         el('span', { class: 'chip' }, String(running.length))),
                     running.length
                         ? el('div', { class: 'rows' }, ...running.map((job) => jobRow(job, draw)))
-                        : empty('Nothing is running right now.'))),
+                        : empty('Nothing is running right now.')),
+                el('div', { class: 'panel' },
+                    el('div', { class: 'panel__head' }, 'How jobs choose a network'),
+                    el('p', { class: 'muted', style: 'margin:0;font-size:13px;line-height:1.65' },
+                        'Every project belongs to exactly one network. Running a project sends it ' +
+                        'to that network automatically; there is no workspace-wide network selector.'))),
 
             el('div', { class: 'panel' },
                 el('div', { class: 'panel__head' }, 'Recent'),
@@ -49,12 +60,12 @@ export async function renderJobs(host) {
     return () => { off(); clearInterval(timer); };
 }
 
-function clusterCard(status) {
+function clusterCard(network, status) {
     const ok = status.running;
     return el('div', { class: `frame ${ok ? 'frame--good' : ''}` },
         el('div', { class: 'frame__in' },
             el('div', { class: 'panel__head' },
-                el('span', { class: 'grow' }, 'Ray cluster'),
+                el('span', { class: 'grow' }, network.name),
                 el('span', { class: `chip ${ok ? 'chip--good' : 'chip--warn'}` },
                     ok ? 'running' : 'not running')),
             ok
@@ -76,8 +87,8 @@ function clusterCard(status) {
                         status.advice || status.detail || 'No Ray cluster for this network yet.'),
                     el('button', {
                         class: 'btn btn--primary btn--sm',
-                        onclick: () => navigate('howto'),
-                    }, 'How to start one'))));
+                        onclick: () => navigate(`networks/${encodeURIComponent(network.id)}`),
+                    }, 'Open network'))));
 }
 
 function jobRow(job, redraw) {
@@ -88,7 +99,7 @@ function jobRow(job, redraw) {
             el('span', { class: 'row__title mono', style: 'font-size:12.5px' },
                 job.entrypoint || job.id),
             el('span', { class: 'row__meta' },
-                [job.id, job.started_at ? ago(new Date(job.started_at).toISOString()) : null,
+                [job.network_name, job.id, job.started_at ? ago(new Date(job.started_at).toISOString()) : null,
                     job.message].filter(Boolean).join(' · '))),
         el('span', { class: `chip ${tone}` }, (job.status || '').toLowerCase()),
 		el('button', { class: 'btn btn--sm', onclick: () => showLogs(job) }, 'Logs'),
@@ -96,7 +107,8 @@ function jobRow(job, redraw) {
 			class: 'btn btn--sm btn--danger',
 			onclick: async () => {
 				try {
-					await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/stop`, { method: 'POST' });
+					await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/stop?network_id=${encodeURIComponent(job.network_id || '')}`,
+						{ method: 'POST' });
 					toast('Ray is stopping the job.');
 					await redraw();
 				} catch (error) { toast(error.message, 'err'); }
@@ -107,7 +119,7 @@ function jobRow(job, redraw) {
 async function showLogs(job) {
 	let text = 'Loading logs…';
 	try {
-		const response = await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/logs`);
+		const response = await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/logs?network_id=${encodeURIComponent(job.network_id || '')}`);
 		text = response.logs || 'This job has not written any output.';
 	} catch (error) { text = error.message; }
 	modal({

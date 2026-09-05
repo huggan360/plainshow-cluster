@@ -66,7 +66,7 @@ func (s *Server) openProject(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = decode(r, &body)
 
-	dir := filepath.Join(s.layout.Projects(), s.cfg.ActiveNetwork, project.Name)
+	dir := s.projectDir(project)
 	if _, err := filepath.Abs(dir); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return

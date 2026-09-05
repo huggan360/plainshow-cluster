@@ -162,6 +162,12 @@ func TestMovingAProjectBetweenNetworks(t *testing.T) {
 	if err := st.CreateProject(&clash); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.ProjectByName("vision"); err != ErrAmbiguous {
+		t.Fatalf("unscoped duplicate lookup error = %v, want ErrAmbiguous", err)
+	}
+	if byID, err := st.ProjectByID(clash.ID); err != nil || byID.NetworkID != "net-a" {
+		t.Fatalf("stable id lookup = %+v, %v", byID, err)
+	}
 	if err := st.MoveProjectToNetwork(clash.ID, "net-b"); err == nil {
 		t.Error("two projects with the same name landed in one network")
 	}

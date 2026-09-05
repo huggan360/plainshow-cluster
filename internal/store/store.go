@@ -22,6 +22,10 @@ var schema string
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("not found")
 
+// ErrAmbiguous means a human-readable name exists in more than one network.
+// Callers should retry with the stable project id (or an explicit network).
+var ErrAmbiguous = errors.New("ambiguous")
+
 // Store is a handle on the node's database.
 type Store struct{ db *sql.DB }
 
@@ -357,10 +361,35 @@ func (s *Store) ProjectsInNetwork(networkID string) ([]Project, error) {
 
 // ProjectByName looks a project up by its directory name.
 func (s *Store) ProjectByName(name string) (Project, error) {
+	rows, err := s.db.Query(`
+		SELECT id, network_id, name, description, repository, created_at, updated_at
+		FROM project WHERE name = ? ORDER BY updated_at DESC LIMIT 2`, name)
+	if err != nil {
+		return Project{}, err
+	}
+	defer rows.Close()
+	var p Project
+	if !rows.Next() {
+		return p, ErrNotFound
+	}
+	if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description,
+		&p.Repository, &p.Created, &p.Updated); err != nil {
+		return Project{}, err
+	}
+	if rows.Next() {
+		return Project{}, ErrAmbiguous
+	}
+	return p, rows.Err()
+}
+
+// ProjectByID resolves the stable project identity used by network-independent
+// API routes. Names are for people and may be reused in another network; ids
+// are what make opening a project unambiguous without a global network picker.
+func (s *Store) ProjectByID(id string) (Project, error) {
 	var p Project
 	err := s.db.QueryRow(`
 		SELECT id, network_id, name, description, repository, created_at, updated_at
-		FROM project WHERE name = ?`, name).
+		FROM project WHERE id = ?`, id).
 		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound

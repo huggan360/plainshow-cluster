@@ -25,6 +25,14 @@ type WatchEvent struct {
 	Topic string `json:"topic"`
 }
 
+// WatchClosedError means the WebSocket handshake succeeded and the live
+// connection later ended. Callers use this distinction to reset reconnect
+// backoff after a healthy connection, even when it carried no wake-up events.
+type WatchClosedError struct{ Err error }
+
+func (e *WatchClosedError) Error() string { return e.Err.Error() }
+func (e *WatchClosedError) Unwrap() error { return e.Err }
+
 // Watch streams wake-ups until the connection drops or ctx is cancelled. It
 // always returns an error, because returning is what "it stopped" means.
 func (c *Client) Watch(ctx context.Context, token string, onEvent func(WatchEvent)) error {
@@ -54,15 +62,20 @@ func (c *Client) Watch(ctx context.Context, token string, onEvent func(WatchEven
 		return conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(10*time.Second))
 	})
 
+	closed := make(chan struct{})
+	defer close(closed)
 	go func() {
-		<-ctx.Done()
-		conn.Close()
+		select {
+		case <-ctx.Done():
+			conn.Close()
+		case <-closed:
+		}
 	}()
 
 	for {
 		var event WatchEvent
 		if err := conn.ReadJSON(&event); err != nil {
-			return err
+			return &WatchClosedError{Err: err}
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(silenceLimit))
 		if event.Topic != "" && onEvent != nil {

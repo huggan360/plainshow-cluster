@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The `v0.1.1-alpha.4` release provides one complete archive for each supported
+The `v0.1.1-alpha.5` release provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`
@@ -69,8 +69,9 @@ open or configure.
 
 1. Create or sign in to your Plainshow account.
 2. Create a network, or paste a single-use invitation from its owner.
-3. Open **Ray** on the home page and start the network's first Ray head. Other
-   online machines in that selected network attach automatically.
+3. Open the network under **Networks** and press **Start** in its Ray card.
+   Repeat on each machine that should contribute compute; the first becomes the
+   head and the others attach automatically.
 4. Create or clone a project. The Projects view supports folders, file uploads,
    downloads, rename/delete, syntax highlighting, live collaborative editing,
    Git and GitHub.
@@ -78,9 +79,12 @@ open or configure.
    project is uploaded through Ray's job service and may execute on any suitable
    machine in that Ray cluster.
 
-One installation can join several networks, but its one local Ray process
-serves the currently selected network. Switching networks moves that process
-to the selected network automatically.
+One account can browse, edit and run projects across several networks at once;
+there is no global selected network. Every project routes its run to the Ray
+head for the network it belongs to. One physical machine still runs one local
+Ray process so its CPU and GPUs cannot be advertised twice. Starting Ray for a
+different network moves that machine's compute contribution without hiding or
+changing any projects.
 
 ## Services
 

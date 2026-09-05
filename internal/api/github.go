@@ -343,7 +343,7 @@ func (s *Server) gitPull(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	s.hub.Publish("tree.changed", map[string]string{"project": p.Name})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, result)
 }
 
@@ -362,7 +362,7 @@ func (s *Server) gitAbortMerge(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	s.hub.Publish("tree.changed", map[string]string{"project": p.Name})
+	s.hub.Publish("tree.changed", map[string]string{"project_id": p.ID, "project": p.Name})
 	writeJSON(w, 200, map[string]string{"status": "aborted"})
 }
 
@@ -371,6 +371,7 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Repository string `json:"repository"`
 		Name       string `json:"name"`
+		NetworkID  string `json:"network_id"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())
@@ -389,7 +390,12 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "That repository name cannot be used as a project name. Give one explicitly.")
 		return
 	}
-	if _, err := s.store.ProjectByNameInNetwork(s.cfg.ActiveNetwork, name); err == nil {
+	body.NetworkID = strings.TrimSpace(body.NetworkID)
+	if !hasMembership(s.cfg, body.NetworkID) {
+		fail(w, http.StatusBadRequest, "Choose a network for this project.")
+		return
+	}
+	if _, err := s.store.ProjectByNameInNetwork(body.NetworkID, name); err == nil {
 		fail(w, 409, fmt.Sprintf("A project called %q already exists.", name))
 		return
 	}
@@ -400,7 +406,7 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p := store.Project{ID: newID(), NetworkID: s.cfg.ActiveNetwork,
+	p := store.Project{ID: newID(), NetworkID: body.NetworkID,
 		Name: name, Repository: body.Repository}
 	dir := s.projectDir(p)
 	if err := gitrepo.Clone(token, body.Repository, dir); err != nil {

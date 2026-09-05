@@ -56,10 +56,16 @@ ok('GitHub starts disconnected', ov.github.connected === false);
 ok('updater is configured', ov.update.repository === 'huggan360/plainshow-cluster');
 
 console.log('\nPROJECTS');
-const created = await j('/api/projects', { method: 'POST', body: { name: 'demo', description: 'smoke' } });
+const created = await j('/api/projects', {
+  method: 'POST', body: { name: 'demo', description: 'smoke', network_id: defaultNetwork },
+});
 ok('create returns 201 with timestamps', created.status === 201 && !!created.body.created_at, JSON.stringify(created.body));
-ok('duplicate name refused', (await j('/api/projects', { method: 'POST', body: { name: 'demo' } })).status === 409);
-ok('bad name refused', (await j('/api/projects', { method: 'POST', body: { name: '../evil' } })).status === 400);
+ok('duplicate name refused', (await j('/api/projects', {
+  method: 'POST', body: { name: 'demo', network_id: defaultNetwork },
+})).status === 409);
+ok('bad name refused', (await j('/api/projects', {
+  method: 'POST', body: { name: '../evil', network_id: defaultNetwork },
+})).status === 400);
 ok('starter files present', (await j('/api/projects/demo/tree')).body.length === 2);
 ok('missing project 404s', (await j('/api/projects/ghost/tree')).status === 404);
 const updatedProject = await j('/api/projects/demo', {
@@ -175,11 +181,21 @@ ok('initial installation has one network', beforeNetworks.networks.length === 1)
 const secondNetwork = await j('/api/networks', {
   method: 'POST', body: { name: 'Friends lab' },
 });
-ok('create and activate a second network', secondNetwork.status === 201 &&
-  (await j('/api/networks')).body.active === secondNetwork.body.id);
-ok('projects are scoped to the active network', (await j('/api/projects')).body.length === 0);
+ok('create a second network without moving device compute', secondNetwork.status === 201 &&
+  (await j('/api/networks')).body.active === defaultNetwork);
+ok('project list covers all account networks', (await j('/api/projects')).body.length === 0);
+let secondProject;
 ok('same project name is valid in another network',
-  (await j('/api/projects', { method: 'POST', body: { name: 'demo' } })).status === 201);
+  (secondProject = await j('/api/projects', {
+    method: 'POST', body: { name: 'demo', network_id: secondNetwork.body.id },
+  })).status === 201);
+const originalTwin = await j('/api/projects', {
+  method: 'POST', body: { name: 'demo', network_id: defaultNetwork },
+});
+ok('same name can exist in both networks', originalTwin.status === 201 &&
+  (await j('/api/projects')).body.length === 2);
+ok('stable project id opens the correct project',
+  (await j(`/api/projects/${secondProject.body.id}/tree`)).status === 200);
 ok('network has this device',
   (await j(`/api/networks/${secondNetwork.body.id}/nodes`)).body.length === 1);
 ok('network has its owner account',
@@ -188,9 +204,9 @@ const networkDetail = await j(`/api/networks/${secondNetwork.body.id}`);
 ok('network workspace has projects, devices and policy', networkDetail.status === 200 &&
   networkDetail.body.projects.length === 1 && networkDetail.body.nodes.length === 1 &&
   networkDetail.body.membership.id === secondNetwork.body.id);
-ok('switch back to original network',
+ok('device compute assignment can switch independently',
   (await j(`/api/networks/${defaultNetwork}/active`, { method: 'PUT' })).status === 200);
-ok('second network project is hidden after switching', (await j('/api/projects')).body.length === 0);
+ok('switching device compute does not hide projects', (await j('/api/projects')).body.length === 2);
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

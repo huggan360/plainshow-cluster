@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -101,7 +102,7 @@ func usage() {
   pscluster status [--root DIR]
       Show what this node is and what it holds.
 
-  pscluster run [--root DIR] <command...>
+  pscluster run [--root DIR] --project NAME [--network ID] <command...>
       Submit a project command to Ray and stream its output.
 
   pscluster config [--root DIR] [get KEY | set KEY VALUE | path]
@@ -111,7 +112,7 @@ func usage() {
       Open the installed Plainshow Cluster desktop application.
 
   pscluster network [list | use ID]
-      Show the networks this machine belongs to, or switch the active one.
+      Show account networks, or assign this machine's compute to one.
 
   pscluster network key ID
       Read and install a rotated enterprise recovery key on this device.
@@ -592,13 +593,15 @@ func cmdRun(args []string) error {
 	}
 	command := strings.Join(f.rest, " ")
 	var submitted struct {
-		ID string `json:"id"`
+		ID        string `json:"id"`
+		NetworkID string `json:"network_id"`
 	}
 	if err := d.call("POST", "/api/ray/jobs", map[string]string{
-		"project": project, "command": command,
+		"project": project, "network_id": f.get("network", ""), "command": command,
 	}, &submitted); err != nil {
 		return err
 	}
+	jobScope := "?network_id=" + url.QueryEscape(submitted.NetworkID)
 	fmt.Printf("Ray job %s  ·  %s\n\n", submitted.ID, command)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -608,13 +611,13 @@ func cmdRun(args []string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = d.call("POST", "/api/ray/jobs/"+submitted.ID+"/stop", map[string]string{}, nil)
+			_ = d.call("POST", "/api/ray/jobs/"+submitted.ID+"/stop"+jobScope, map[string]string{}, nil)
 			return errors.New("job stopped")
 		case <-ticker.C:
 			var logs struct {
 				Logs string `json:"logs"`
 			}
-			if err := d.call("GET", "/api/ray/jobs/"+submitted.ID+"/logs", nil, &logs); err == nil && len(logs.Logs) > printed {
+			if err := d.call("GET", "/api/ray/jobs/"+submitted.ID+"/logs"+jobScope, nil, &logs); err == nil && len(logs.Logs) > printed {
 				fmt.Print(logs.Logs[printed:])
 				printed = len(logs.Logs)
 			}
@@ -624,7 +627,7 @@ func cmdRun(args []string) error {
 					Status string `json:"status"`
 				} `json:"jobs"`
 			}
-			if err := d.call("GET", "/api/ray/jobs", nil, &listing); err != nil {
+			if err := d.call("GET", "/api/ray/jobs"+jobScope, nil, &listing); err != nil {
 				continue
 			}
 			for _, job := range listing.Jobs {

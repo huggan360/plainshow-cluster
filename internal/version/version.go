@@ -3,7 +3,7 @@ package version
 
 // Version is the semantic version of this build. Overridden at release time
 // with -ldflags "-X .../internal/version.Version=x.y.z".
-var Version = "0.1.1-alpha.4-dev"
+var Version = "0.1.1-alpha.5-dev"
 
 // Commit is the git revision this binary was built from, when known.
 var Commit = "unknown"

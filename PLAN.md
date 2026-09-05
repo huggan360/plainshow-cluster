@@ -133,7 +133,7 @@ do" should be readable without opening anything.
 Cloning a repository is not push access. Push and pull require being a
 collaborator on GitHub, which already syncs both ways.
 
-### Stage 6 — Live instead of polled  ◐ code complete, unverified
+### Stage 6 — Live instead of polled  ◐ repository complete, deployment unverified
 
 **Read this before touching it. It is written and it builds, but it has never
 had two machines on it.**
@@ -157,13 +157,20 @@ Done:
 - The browser reloads Networks on `invitations.changed` and Devices on
   `devices.changed`.
 
-**Left to do, in order:**
+Repository work completed on 2026-09-05:
 
-1. **Two lines of Apache.** `clusteradmin.plainshow.se.conf` has no WebSocket
-   upgrade rule, so `/api/events` will 400 in production and the node will back
-   off forever — silently, because the fallback is the heartbeat. Copy from
-   `plainshow-cluster.plainshow.se.conf:29-30`, which already does this through
-   Cloudflare on the same box:
+- The production Apache reference config now upgrades `/api/events` to
+  WebSocket instead of sending it through the ordinary HTTP proxy.
+- `Client.Watch` is covered across a dropped connection and a fresh connection.
+  A successful idle handshake is distinguished from a failed handshake, so a
+  healthy connection resets node reconnect backoff even when it carried no
+  event before closing.
+
+**Operational work left to do, in order:**
+
+1. **Deploy the Apache reference change.** The repository config contains the
+   required rule, but this development session did not modify or reload the
+   production server configuration:
 
    ```apache
    RewriteCond %{HTTP:Upgrade} =websocket [NC]
@@ -176,9 +183,19 @@ Done:
    Sign a device out from another machine and time it: it should be immediate
    rather than up to a minute. Then kill the account service mid-connection and
    confirm the node backs off, reconnects, and never loses the heartbeat.
-3. **A test that the wake-up survives a reconnect.** The hub is covered
-   (`events_test.go`: per-account routing, non-blocking sends, double remove);
-   `Client.Watch` is not covered at all.
+
+### Stage 7 — No global workspace selection ✅ code complete
+
+The account UI is simultaneous across networks: Networks and Projects list all
+account memberships, the top bar has no network selector/status, projects are
+addressed by stable id, and create/clone explicitly chooses a network. Project
+Run, job status/log/stop, file transfer and Cowork controller connections all
+use the project's own network. Jobs aggregates every reachable Ray head.
+
+A physical machine still runs one local raylet so its finite CPU/GPU resources
+cannot be advertised to multiple schedulers at once. That internal compute
+assignment is a device resource setting, not an account workspace selection;
+changing it never hides networks or projects.
 
 **The boundary this sits next to.** Non-negotiable #4 says the management plane
 has no collaboration WebSocket and proxies no bulk bytes.

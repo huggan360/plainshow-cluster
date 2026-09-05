@@ -1,7 +1,7 @@
 // Networks — Plainshow-style network cards and one focused network workspace.
 
 import { el, mount, initials, megabytes, ago } from '../lib/ui.js';
-import { api, modal, toast, navigate, refresh, state, on } from '../lib/client.js';
+import { api, modal, toast, navigate, state, on } from '../lib/client.js';
 
 export async function renderNetworks(host, args = []) {
     if (args.length) return renderNetwork(host, args[0], args[1] || 'connected');
@@ -17,10 +17,8 @@ async function renderNetworkList(host) {
         // normal answer for a standalone machine rather than a page failure.
         api('/api/invitations').then((result) => result.invitations || []).catch(() => []),
     ]);
-    // The selected network first: it is the one every other page is about, so
-    // it should not be somewhere in an alphabetical list.
     const networks = [...(data.networks || [])].sort((a, b) =>
-        (b.id === data.active) - (a.id === data.active));
+        (a.name || '').localeCompare(b.name || ''));
     let query = '';
     const count = el('span', { class: 'chip' });
     const results = el('div');
@@ -30,7 +28,7 @@ async function renderNetworkList(host) {
             (network.name || '').toLowerCase().includes(query));
         count.textContent = `${visible.length} visible`;
         mount(results, visible.length
-                ? el('div', { class: 'ps-card-grid' }, ...visible.map((network) => networkCard(network, data.active)))
+                ? el('div', { class: 'ps-card-grid' }, ...visible.map(networkCard))
                 : emptyNetworkList(networks.length > 0));
     };
     search.addEventListener('input', () => { query = search.value.toLowerCase(); drawResults(); });
@@ -39,8 +37,8 @@ async function renderNetworkList(host) {
             el('div', { class: 'detail-head__copy' },
                 el('h1', { class: 'page__title' }, 'Networks'),
                 el('p', { class: 'page__sub' },
-                    'Every project, machine and collaborator belongs to a network. ' +
-                    'This machine works in one at a time — the selected one.')),
+                    'Your networks are available together. Projects choose where work runs; ' +
+                    'each machine controls which network receives its compute resources.')),
             el('button', { class: 'btn', onclick: joinNetwork },
                 el('i', { class: 'bx bx-link' }), 'Join by code'),
             el('button', { class: 'btn btn--primary', onclick: createNetwork },
@@ -92,13 +90,10 @@ function invitationRow(invite) {
             el('i', { class: 'bx bx-check' }), 'Accept'));
 }
 
-// networkCard is a div rather than a link because it carries its own Select
-// button, and a button inside an anchor is neither valid nor predictable.
-function networkCard(network, activeID) {
-    const active = network.id === activeID;
+function networkCard(network) {
     const open = () => navigate(`networks/${encodeURIComponent(network.id)}`);
     return el('div', {
-        class: `panel ps-project-card ${active ? 'ps-project-card--on' : ''}`,
+        class: 'panel ps-project-card',
         role: 'link', tabindex: '0', onclick: open,
         onkeydown: (event) => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
@@ -111,22 +106,12 @@ function networkCard(network, activeID) {
                 el('span', {}, network.role || 'member')),
             el('span', { class: 'ps-project-card__status' },
                 el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
-                active ? 'Selected' : network.enabled ? 'Ready' : 'Paused')),
+                network.enabled ? 'Ready' : 'Paused')),
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count} devices`),
             el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count} GPUs`),
             el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`)),
         el('div', { class: 'ps-card-actions' },
-            active
-                ? el('span', { class: 'chip chip--cyan' },
-                    el('i', { class: 'bx bx-check' }), ' Working here')
-                : el('button', {
-                    class: 'btn btn--sm btn--primary',
-                    onclick: (event) => {
-                        event.stopPropagation();
-                        selectNetwork(network.id, network.name);
-                    },
-                }, el('i', { class: 'bx bx-check-circle' }), 'Select'),
             el('span', { class: 'push' }),
             el('button', {
                 class: 'btn btn--sm',
@@ -152,8 +137,6 @@ async function renderNetwork(host, id, requestedTab) {
                     el('span', { class: `chip ${network.enabled ? 'chip--good' : 'chip--warn'}` },
                         network.enabled ? 'participating' : 'paused'),
                     el('span', { class: 'mono dim', style: 'font-size:10px' }, network.id))),
-            !data.active ? el('button', { class: 'btn btn--primary', onclick: () => selectNetwork(id, network.name) },
-                el('i', { class: 'bx bx-check-circle' }), 'Use this network') : null,
             el('button', { class: 'btn', onclick: () => navigate('networks') },
                 el('i', { class: 'bx bx-left-arrow-alt' }), 'All networks')),
         tabBar(id, activeTab),
@@ -177,7 +160,9 @@ function tabBar(id, active) {
 
 async function connectedTab(data) {
     const gpus = networkGPUs(data.nodes);
-    const ray = data.active ? await api('/api/ray').catch((error) => ({ detail: error.message })) : null;
+    const networkID = encodeURIComponent(data.network.id);
+    const ray = await api(`/api/ray?network_id=${networkID}`)
+        .catch((error) => ({ detail: error.message, network_id: data.network.id }));
     return el('div', {},
         el('section', { class: 'ps-metrics', style: 'grid-template-columns:repeat(3,minmax(0,1fr))' },
             signalMetric(data), gpuSummaryMetric(gpus), rayMetric(data, ray)),
@@ -197,7 +182,7 @@ async function connectedTab(data) {
         el('section', { style: 'margin-top:28px' },
             el('div', { class: 'section-heading' },
                 el('strong', {}, 'Projects connected to this network'),
-                data.active ? el('a', { href: '#/projects' }, 'View all ', el('i', { class: 'bx bx-right-arrow-alt' })) : null),
+                el('a', { href: '#/projects' }, 'View all ', el('i', { class: 'bx bx-right-arrow-alt' }))),
             data.projects.length
                 ? el('div', { class: 'ps-card-grid' }, ...data.projects.map((project) => projectCard(project, data)))
                 : emptyBlock('bx-layer', 'This network has no projects yet.')));
@@ -225,10 +210,14 @@ function gpuSummaryMetric(gpus) {
 
 function rayMetric(data, ray) {
     const running = Boolean(ray?.running);
-    const action = async (path, body = {}) => {
+    const localRunning = Boolean(ray?.local_running);
+    const networkID = encodeURIComponent(data.network.id);
+    const action = async (actionName) => {
         try {
-            await api(path, { method: 'POST', body });
-            toast(path.endsWith('/stop') ? 'Ray stopped.' : 'Ray is starting.');
+            await api(`/api/ray/${actionName}?network_id=${networkID}`, {
+                method: 'POST', body: { network_id: data.network.id },
+            });
+            toast(actionName === 'stop' ? 'Ray stopped on this machine.' : 'Ray is starting.');
             location.reload();
         } catch (error) { toast(error.message, 'err'); }
     };
@@ -238,14 +227,14 @@ function rayMetric(data, ray) {
                 el('span', { class: 'ps-metric-card__icon' }, el('i', { class: 'bx bx-broadcast' })),
                 el('span', { class: `chip ${running ? 'chip--good' : 'chip--warn'}` }, running ? 'running' : 'stopped')),
             el('p', { class: 'ps-status-row__title', style: 'margin:10px 6px 3px' },
-                !data.active ? 'Select this network to control Ray' : running
-                    ? `${ray.total_gpu || 0} GPU · ${ray.total_cpu || 0} CPU` : ray?.advice || 'Ray is not running.'),
+                running ? `${ray.total_gpu || 0} GPU · ${ray.total_cpu || 0} CPU`
+                    : ray?.advice || 'Ray is not running.'),
             el('div', { style: 'display:flex;gap:6px;margin:6px' },
-                data.active && ray?.installed && ray?.eligible && !running
-                    ? el('button', { class: 'btn btn--sm btn--primary', onclick: () => action('/api/ray/start') },
+                ray?.installed && ray?.eligible && !localRunning
+                    ? el('button', { class: 'btn btn--sm btn--primary', onclick: () => action('start') },
                         el('i', { class: 'bx bx-play' }), ray.head ? 'Attach' : 'Start') : null,
-                data.active && running
-                    ? el('button', { class: 'btn btn--sm', onclick: () => action('/api/ray/stop') },
+                localRunning
+                    ? el('button', { class: 'btn btn--sm', onclick: () => action('stop') },
                         el('i', { class: 'bx bx-stop-circle' }), 'Stop') : null)));
 }
 
@@ -276,14 +265,7 @@ function gpuRow(gpu) {
 }
 
 function projectCard(project, data) {
-    const open = async (event) => {
-        if (data.active) return;
-        event.preventDefault();
-        await api(`/api/networks/${encodeURIComponent(data.network.id)}/active`, { method: 'PUT' });
-        await refresh();
-        navigate(`projects/${encodeURIComponent(project.name)}`);
-    };
-    return el('a', { class: 'panel ps-project-card', href: `#/projects/${encodeURIComponent(project.name)}`, onclick: open },
+    return el('a', { class: 'panel ps-project-card', href: `#/projects/${encodeURIComponent(project.id)}` },
         el('div', { class: 'ps-project-card__top' },
             el('span', { class: 'ps-project-mark' }, el('i', { class: 'bx bx-layer' })),
             el('span', { class: 'ps-project-card__copy' }, el('strong', {}, project.name),
@@ -500,18 +482,6 @@ function nodeOnline(node) {
     if (node.is_self) return true;
     const seen = Date.parse(node.last_seen);
     return Number.isFinite(seen) && Date.now() - seen < 120000;
-}
-
-// selectNetwork moves this machine into a network. That is not only a view
-// change: a machine runs one Ray process and it belongs to one network, so
-// selecting another one takes this machine out of the old network's Ray cluster
-// and into the new one's. Say so, because a job running here will stop.
-async function selectNetwork(id, name) {
-    const result = await api(`/api/networks/${encodeURIComponent(id)}/active`, { method: 'PUT' });
-    toast(result && result.ray_moving
-        ? `${name} is now selected. This machine is leaving the previous Ray cluster.`
-        : `${name} is now selected.`);
-    location.reload();
 }
 
 function emptyBlock(icon, text) {

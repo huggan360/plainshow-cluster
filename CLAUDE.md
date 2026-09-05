@@ -73,13 +73,16 @@ tasks, and reaches every other one.
 **Project** — an ordinary folder, kept in step through git. Data lives in it
 like any other file. You open it in your own editor.
 
-Seven pages: Home, Networks, Projects, Jobs, GitHub, How to, Settings.
+Eight pages: Home, Networks, Projects, Jobs, GitHub, Devices, How to, Settings.
 
-The top bar reports which network this machine works in, its tailnet address and
-Ray's state; it does not select. Selecting happens on Networks, because it moves
-the machine's one Ray process from one cluster to another. The power control
-beside it stops jobs, Ray and the node service — anything the interface can
-start, it must be able to stop from the same window.
+There is no account-wide active-network selector or status in the top bar.
+Accounts browse, edit and run projects across every network concurrently, and a
+project's own `network_id` routes its Ray job and Cowork traffic. A physical
+machine still contributes its finite CPU and GPUs to one Ray cluster at a time;
+starting Ray from a different network moves that machine's one raylet without
+hiding or changing the account's other networks. The power control stops jobs,
+Ray and the node service — anything the interface can start, it must be able to
+stop from the same window.
 
 ### What we do not build
 

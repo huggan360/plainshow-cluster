@@ -162,7 +162,7 @@ func (s *Server) sendProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	networkID := s.cfg.ActiveNetwork
+	networkID := project.NetworkID
 	dir := s.projectDir(project)
 	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
 		fail(w, http.StatusConflict,
@@ -193,8 +193,13 @@ func (s *Server) sendProject(w http.ResponseWriter, r *http.Request) {
 
 // fetchProject copies a project onto this machine from one that has it.
 func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request) {
-	networkID := s.cfg.ActiveNetwork
-	name := r.PathValue("name")
+	project, _, err := s.project(r.PathValue("name"))
+	if err != nil {
+		fail(w, http.StatusNotFound, "No such project.")
+		return
+	}
+	networkID := project.NetworkID
+	name := project.Name
 	var body struct {
 		NodeID string `json:"node_id"`
 	}
@@ -219,7 +224,7 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	project, err := s.materialiseProject(networkID, payload)
+	project, err = s.materialiseProject(networkID, payload)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -237,7 +242,7 @@ func (s *Server) projectReadiness(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "No such project.")
 		return
 	}
-	nodes, err := s.store.NetworkNodes(s.cfg.ActiveNetwork)
+	nodes, err := s.store.NetworkNodes(project.NetworkID)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -247,7 +252,7 @@ func (s *Server) projectReadiness(w http.ResponseWriter, r *http.Request) {
 		held := false
 		if node.IsSelf {
 			// Never report this machine from gossip: the disk is right here.
-			held = s.hasProjectFiles(s.cfg.ActiveNetwork, project.Name)
+			held = s.hasProjectFiles(project.NetworkID, project.Name)
 		} else {
 			for _, name := range node.Projects {
 				if name == project.Name {
@@ -347,7 +352,8 @@ func (s *Server) moveProjectNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.Publish("project.moved", map[string]string{
-		"project": project.Name, "from": project.NetworkID, "to": target,
+		"project_id": project.ID, "project": project.Name,
+		"from": project.NetworkID, "to": target,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{
 		"project": project.Name, "network_id": target,

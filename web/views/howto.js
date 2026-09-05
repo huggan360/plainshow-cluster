@@ -3,14 +3,10 @@
 // product is wrong.
 
 import { el, mount } from '../lib/ui.js';
-import { api } from '../lib/client.js';
 
 export async function renderHowTo(host) {
     const page = el('div', { class: 'page' });
     mount(host, page);
-
-    const ray = await api('/api/ray').catch(() => ({}));
-    const head = ray.head || 'the first machine you start';
 
     mount(page,
         el('div', { class: 'page__head' },
@@ -34,11 +30,9 @@ export async function renderHowTo(host) {
             'data/ and it stays out of git.'),
 
         step(3, 'Start Ray on the machines',
-            'Home → Start Ray. Do it on each machine in the network. The first ' +
-            'one becomes the head and the rest attach to it.',
-            head !== 'the first machine you start'
-                ? `This network's head is ${head}.`
-                : null),
+            'Networks → open the network → Start. Do it on each machine that ' +
+            'should contribute compute. The first becomes the head and the rest ' +
+            'attach to it.'),
 
         step(4, 'Write ordinary Ray code',
             'Nothing here is Plainshow-specific. If it works on one Ray cluster ' +
@@ -91,22 +85,21 @@ results = ray.get([train.remote(s) for s in shards])`),
             'finds the local Ray either way. You just do not get the id, the log ' +
             'capture or the stop button.'),
 
-        explainer('What happens when you switch network',
-            'A machine works in one network at a time, and it runs one Ray ' +
-            'process, so switching moves it:',
+        explainer('Using several networks at once',
+            'Your account, projects and jobs are available across all networks at ' +
+            'the same time. A project always chooses its own network. One physical ' +
+            'machine contributes its CPU and GPUs to one Ray cluster at a time:',
             [
-                ['It leaves the old Ray cluster',
-                 'Immediately, not on a timer. Anything this machine was ' +
-                 'contributing to that network stops.'],
-                ['If it was the head, the others are told',
-                 'A head that vanishes without saying so leaves every other ' +
-                 'machine retrying an address that will never answer.'],
-                ['It joins the new network’s cluster',
-                 'Attaching to that network’s head, or becoming it when there is ' +
-                 'none yet and this machine accepts work.'],
-                ['Nothing is deleted',
-                 'Projects, history and settings in the other network are exactly ' +
-                 'where you left them. Switch back and it rejoins.'],
+                ['There is no selected workspace',
+                 'Open, edit and run projects from different networks without ' +
+                 'changing a global selector.'],
+                ['The project routes the run',
+                 'Run submits to the Ray head recorded for that project’s network.'],
+                ['The machine avoids double-counting',
+                 'Starting or attaching Ray for another network moves this machine’s ' +
+                 'one raylet there, so the same hardware is never advertised twice.'],
+                ['Nothing is deleted or hidden',
+                 'Projects, history and jobs in every other network stay visible.'],
             ]),
 
         el('div', { class: 'panel', style: 'margin-top:18px' },

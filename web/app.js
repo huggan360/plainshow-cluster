@@ -5,7 +5,7 @@
 
 import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
-import { networkStatus, powerButton } from './lib/statusbar.js';
+import { powerButton } from './lib/statusbar.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
 import { newProject, renderProjects } from './views/projects.js';
@@ -125,7 +125,6 @@ function shell(overview) {
             }, el('i', { class: 'bx bx-menu' })),
 			el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
-            networkStatus(),
             powerButton(),
 			el('button', { class: 'btn btn--sm', onclick: () => newProject(), title: 'New project' },
 				el('i', { class: 'bx bx-plus' }), el('span', {}, 'New project'))),

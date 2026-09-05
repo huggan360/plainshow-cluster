@@ -327,7 +327,8 @@ func (s *Server) watchAccountServer(ctx context.Context) bool {
 	// A connection that carried nothing still counts as established: an idle
 	// control channel is the normal case, and treating silence as failure would
 	// back a healthy device off to two minutes.
-	if watchErr == nil || errors.Is(watchErr, context.Canceled) {
+	var closed *accountclient.WatchClosedError
+	if watchErr == nil || errors.Is(watchErr, context.Canceled) || errors.As(watchErr, &closed) {
 		connected = true
 	}
 	return connected
