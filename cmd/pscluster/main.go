@@ -468,6 +468,7 @@ func cmdServe(args []string) error {
 	srv.StartPeerDiscovery(ctx, 30*time.Second)
 	srv.StartRayReconciler(ctx, 15*time.Second)
 	srv.StartAccountCheckIn(ctx, time.Minute)
+	srv.StartAccountWatch(ctx)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())

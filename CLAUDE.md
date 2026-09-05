@@ -19,8 +19,9 @@ exists inside the binary; the user does not meet it.
 ## Unfinished work
 
 `PLAN.md` holds the staged rebuild in progress: the account, not the device,
-owns networks, memberships, invitations and project placement. Stages 0 to 5
-are done; only Stage 6 (live sockets instead of a one-minute poll) is left. Read it before starting anything in that area.
+owns networks, memberships, invitations and project placement. Stages 0 to 5 are
+done and verified by running them. Stage 6 is written but has never run against
+two machines, and needs two lines of Apache config before it can. Read it before starting anything in that area.
 
 ## Non-negotiables
 

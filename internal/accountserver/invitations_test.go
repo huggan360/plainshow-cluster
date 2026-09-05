@@ -152,7 +152,7 @@ func TestSearchNeedsSomethingToGoOn(t *testing.T) {
 func TestRevokingRemovesAPendingInvitation(t *testing.T) {
 	store, hugo, albin := twoAccounts(t)
 	invite, _ := store.CreateInvitation(hugo.ID, "net-lab", "albin", "member")
-	if err := store.RevokeInvitation(hugo.ID, invite.ID); err != nil {
+	if _, err := store.RevokeInvitation(hugo.ID, invite.ID); err != nil {
 		t.Fatal(err)
 	}
 	waiting, err := store.InvitationsForAccount(albin.ID)

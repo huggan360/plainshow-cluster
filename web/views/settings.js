@@ -2,7 +2,7 @@
 // things.
 
 import { el, mount, ago } from '../lib/ui.js';
-import { api, toast, modal, state } from '../lib/client.js';
+import { api, toast, modal, state, on } from '../lib/client.js';
 import { confirmShutdown } from '../lib/statusbar.js';
 
 const TABS = [
@@ -353,7 +353,8 @@ async function renderDevices(page, tab) {
                     el('strong', {}, 'No devices have checked in yet.')));
     };
     await draw();
-    return null;
+    // Another machine can move or sign out a device while this page is open.
+    return on('devices.changed', draw);
 }
 
 function deviceRow(device, networks, thisDevice, reload) {

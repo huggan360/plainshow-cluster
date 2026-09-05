@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -268,5 +269,81 @@ func (s *Server) syncEnterpriseMembers(networkID string, members []accountserver
 	}
 	if configurationChanged {
 		_ = config.Save(s.layout, s.cfg)
+	}
+}
+
+// StartAccountWatch keeps a live connection to the account service so a
+// sign-out, a device move or an invitation arrives now rather than on the next
+// heartbeat.
+//
+// It is deliberately additive. Everything it triggers is something the
+// heartbeat already does on its own schedule, so a machine where this never
+// connects — no socket through a proxy, a captive network, an old account
+// service — behaves exactly as it did before, only a minute slower.
+func (s *Server) StartAccountWatch(ctx context.Context) {
+	go func() {
+		// Backoff exists so a service that is down, or one that refuses this
+		// endpoint entirely, is not hammered once a second forever.
+		delay := 2 * time.Second
+		const maxDelay = 2 * time.Minute
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			connected := s.watchAccountServer(ctx)
+			if connected {
+				delay = 2 * time.Second
+			} else if delay < maxDelay {
+				delay *= 2
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+	}()
+}
+
+// watchAccountServer holds one connection open, and reports whether it was ever
+// established — which is what tells the caller to reset its backoff.
+func (s *Server) watchAccountServer(ctx context.Context) bool {
+	if !s.usesCentralAccounts() || s.cfg.Account.ID == "" {
+		return false
+	}
+	token, err := config.LoadAccountToken(s.layout)
+	if err != nil || token == "" {
+		return false
+	}
+	client, err := accountclient.New(s.cfg.Account.Server)
+	if err != nil {
+		return false
+	}
+	connected := false
+	watchErr := client.Watch(ctx, token, func(event accountclient.WatchEvent) {
+		connected = true
+		s.handleAccountEvent(ctx, event.Topic)
+	})
+	// A connection that carried nothing still counts as established: an idle
+	// control channel is the normal case, and treating silence as failure would
+	// back a healthy device off to two minutes.
+	if watchErr == nil || errors.Is(watchErr, context.Canceled) {
+		connected = true
+	}
+	return connected
+}
+
+// handleAccountEvent turns a wake-up into the question it stands for.
+//
+// The event carries no data on purpose, so there is nothing here to trust: the
+// device re-asks the account service over its own authenticated call and the
+// answer goes through exactly the same code the heartbeat uses.
+func (s *Server) handleAccountEvent(ctx context.Context, topic string) {
+	switch topic {
+	case accountserver.TopicDevices:
+		s.checkInAccountServer(ctx)
+		s.hub.Publish("devices.changed", map[string]string{"reason": "account"})
+	case accountserver.TopicInvitations:
+		s.hub.Publish("invitations.changed", map[string]string{"reason": "account"})
 	}
 }

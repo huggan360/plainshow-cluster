@@ -171,22 +171,24 @@ func (s *Store) RespondToInvitation(accountID, invitationID string, accept bool)
 	return s.invitation(networkID, accountID)
 }
 
-// RevokeInvitation withdraws an offer that has not been answered.
-func (s *Store) RevokeInvitation(actorID, invitationID string) error {
-	var networkID string
-	err := s.db.QueryRow(`SELECT network_id FROM network_invitation WHERE id=?`,
-		invitationID).Scan(&networkID)
+// RevokeInvitation withdraws an offer that has not been answered. It returns
+// the account the offer was addressed to, which is the one that has to be told
+// the invitation is gone.
+func (s *Store) RevokeInvitation(actorID, invitationID string) (string, error) {
+	var networkID, invitee string
+	err := s.db.QueryRow(`SELECT network_id,account_id FROM network_invitation WHERE id=?`,
+		invitationID).Scan(&networkID, &invitee)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !s.canInvite(networkID, actorID) {
-		return ErrInviteNotAllowed
+		return "", ErrInviteNotAllowed
 	}
 	_, err = s.db.Exec(`DELETE FROM network_invitation WHERE id=?`, invitationID)
-	return err
+	return invitee, err
 }
 
 const invitationColumns = `i.id,i.network_id,n.name,i.account_id,a.username,a.display_name,

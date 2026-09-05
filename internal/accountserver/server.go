@@ -31,11 +31,14 @@ type Server struct {
 	store   *Store
 	web     fs.FS
 	tailnet tailnetProvisioner
+	// watchers wakes a device when something it owns changes, so a sign-out or
+	// an invitation does not wait out the heartbeat.
+	watchers *watchers
 }
 
 // NewServer builds the account authority.
 func NewServer(config *Config, store *Store, web fs.FS) *Server {
-	server := &Server{config: config, store: store, web: web}
+	server := &Server{config: config, store: store, web: web, watchers: newWatchers()}
 	if config != nil && config.Tailnet.LoginServer != "" {
 		server.tailnet = &headscaleProvisioner{config: config.Tailnet}
 	}
@@ -58,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/networks", s.requireAdmin(http.HandlerFunc(s.networks)))
 	mux.Handle("GET /api/controllers", s.requireAdmin(http.HandlerFunc(s.controllers)))
 	mux.Handle("GET /api/networks/mine", s.requireAccount(http.HandlerFunc(s.myNetworks)))
+	mux.Handle("GET /api/events", s.requireAccount(http.HandlerFunc(s.serveEvents)))
 	mux.Handle("GET /api/devices", s.requireAccount(http.HandlerFunc(s.myDevices)))
 	mux.Handle("PUT /api/devices/{id}/network", s.requireAccount(http.HandlerFunc(s.setDeviceNetwork)))
 	mux.Handle("POST /api/devices/{id}/sign-out", s.requireAccount(http.HandlerFunc(s.signOutDevice)))

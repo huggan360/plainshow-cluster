@@ -146,3 +146,50 @@ future networks must be mutually hostile rather than trusted.
 
 `CLAUDE.md` is historical planning context and includes stale pre-Ray details.
 Use this file and the current code as the authoritative handover.
+
+## Handover — 2026-09-05
+
+Six staged changes landed this session. `PLAN.md` is the authority on all of
+them and says what is verified and what is not. Read it first.
+
+**Stages 0–5 are done and verified by running them** against a real account
+server and two or three real nodes: sessions survive closing the desktop,
+networks follow the account onto a new machine, devices can be moved and signed
+out from elsewhere, invitations go to a person rather than a code, a project
+moves between networks with its files, and Team matches the console.
+
+**Stage 6 is code complete and has never run against two machines.** It is the
+one thing to pick up. `PLAN.md` lists exactly what is left; the first item is
+two lines of Apache config without which it fails silently in production,
+because the heartbeat is still there to cover it.
+
+### Three traps this session found, all now in CLAUDE.md
+
+- A new field inside `Memberships` **cannot be defaulted**. `config.Load` merges
+  onto `Defaults()`, so a missing top-level key keeps its default — but a slice
+  element is built from zero. `Config.Version` exists for this, and the version
+  must be read from the raw document *before* the merge or an old file reports
+  as current.
+- **Project membership is keyed by GitHub login**, or the node name when no
+  GitHub is connected, never the Plainshow account username. Checking one guess
+  refused the owner their own project.
+- **`systemctl is-enabled` reports through its exit code.** Read the output.
+
+### What is still unproven, in the order it will bite
+
+1. **Ray has never run against a live cluster.** Unchanged from before.
+2. **Cross-machine project transfer** (`/mesh/v1/projects`) is covered by tests
+   only. Peer gossip needs tailnet addresses the development Pi does not have,
+   so the archive round trip was tested in-process rather than over the wire.
+3. **Stage 6**, as above.
+4. **Two real CUDA machines.** Still the highest-risk gate, still untouched.
+
+### Do not undo
+
+- The heartbeat stays even once the socket works. It carries telemetry the
+  socket does not, and it is the floor when the socket is half-open.
+- Nothing sends *content* over `/api/events`. It wakes a device; the device
+  re-asks. That is what keeps the management plane from becoming a relay.
+- Removing a device is bookkeeping, not revocation, and the interface says so.
+  A machine with a valid credential re-registers. Signing it out is the thing
+  that actually cuts it off.

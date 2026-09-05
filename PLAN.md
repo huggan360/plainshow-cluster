@@ -133,12 +133,60 @@ do" should be readable without opening anything.
 Cloning a repository is not push access. Push and pull require being a
 collaborator on GitHub, which already syncs both ways.
 
-### Stage 6 — Live instead of polled
+### Stage 6 — Live instead of polled  ◐ code complete, unverified
 
-Devices currently check in once a minute. Add a socket from node to
-`clusteradmin.plainshow.se` so device, network and invitation changes arrive
-when they happen. Until then the interface is correct but up to a minute stale,
-and should not pretend otherwise.
+**Read this before touching it. It is written and it builds, but it has never
+had two machines on it.**
+
+Done:
+
+- `internal/accountserver/events.go` — a per-account wake-up hub and
+  `GET /api/events`. Sends never block, so a device that stopped reading cannot
+  wedge the write path of whoever is signing it out. Pings every 30s.
+- `internal/accountserver/deviceapi.go` notifies at six points: the three device
+  operations wake that account, an invitation wakes the person it is addressed
+  to, an answer wakes both ends, a revocation wakes the invitee.
+  `Store.RevokeInvitation` now returns the invitee id for that reason.
+- `internal/accountclient/watch.go` — `Client.Watch`, with a 90-second read
+  deadline refreshed by the server's pings. That deadline is the point: a
+  half-open connection through a proxy or a sleeping laptop is the failure this
+  path will actually hit, and without it a device thinks it is live and hears
+  nothing ever again.
+- `Server.StartAccountWatch` on the node, with exponential backoff to two
+  minutes, called from `cmd/pscluster/main.go`.
+- The browser reloads Networks on `invitations.changed` and Devices on
+  `devices.changed`.
+
+**Left to do, in order:**
+
+1. **Two lines of Apache.** `clusteradmin.plainshow.se.conf` has no WebSocket
+   upgrade rule, so `/api/events` will 400 in production and the node will back
+   off forever — silently, because the fallback is the heartbeat. Copy from
+   `plainshow-cluster.plainshow.se.conf:29-30`, which already does this through
+   Cloudflare on the same box:
+
+   ```apache
+   RewriteCond %{HTTP:Upgrade} =websocket [NC]
+   RewriteRule ^/(.*) ws://127.0.0.1:10002/$1 [P,L]
+   ```
+
+   Put it above the existing `ProxyPass /`. `proxy_wstunnel_module` is already
+   loaded. `apache2ctl configtest` then `systemctl reload apache2`.
+2. **Verify with two nodes and an account server**, the way stages 1–3 were.
+   Sign a device out from another machine and time it: it should be immediate
+   rather than up to a minute. Then kill the account service mid-connection and
+   confirm the node backs off, reconnects, and never loses the heartbeat.
+3. **A test that the wake-up survives a reconnect.** The hub is covered
+   (`events_test.go`: per-account routing, non-blocking sends, double remove);
+   `Client.Watch` is not covered at all.
+
+**The boundary this sits next to.** Non-negotiable #4 says the management plane
+has no collaboration WebSocket and proxies no bulk bytes.
+`server_test.go` asserts `/ws` returns 404 and still does — this endpoint is
+`/api/events` and carries one word per message, never the change itself, so a
+woken device re-asks over its own authenticated call. Keep it that way. The
+moment something tries to send *content* down this channel, it has become the
+thing that rule forbids.
 
 ## Rules this plan does not get to break
 

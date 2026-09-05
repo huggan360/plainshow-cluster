@@ -38,6 +38,7 @@ func (s *Server) setDeviceNetwork(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, err.Error())
 	default:
+		s.watchers.notify(account.ID, TopicDevices)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "requested", "network_id": body.NetworkID,
 		})
@@ -55,6 +56,7 @@ func (s *Server) signOutDevice(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.watchers.notify(account.ID, TopicDevices)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "requested"})
 }
 
@@ -69,6 +71,7 @@ func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.watchers.notify(account.ID, TopicDevices)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
@@ -108,6 +111,7 @@ func (s *Server) createInvitation(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusBadRequest, err.Error())
 	default:
+		s.watchers.notify(invitation.AccountID, TopicInvitations)
 		writeJSON(w, http.StatusCreated, invitation)
 	}
 }
@@ -148,13 +152,17 @@ func (s *Server) respondToInvitation(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, err.Error())
 	default:
+		// Both ends: the answer changes what the invitee can reach, and it is
+		// what whoever asked has been waiting to see.
+		s.watchers.notify(account.ID, TopicInvitations)
+		s.watchers.notify(invitation.InvitedBy, TopicInvitations)
 		writeJSON(w, http.StatusOK, invitation)
 	}
 }
 
 func (s *Server) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	account, _ := s.currentAccount(r)
-	err := s.store.RevokeInvitation(account.ID, r.PathValue("id"))
+	invitee, err := s.store.RevokeInvitation(account.ID, r.PathValue("id"))
 	switch {
 	case errors.Is(err, ErrNotFound):
 		fail(w, http.StatusNotFound, "No such invitation.")
@@ -163,6 +171,7 @@ func (s *Server) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, err.Error())
 	default:
+		s.watchers.notify(invitee, TopicInvitations)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 	}
 }
