@@ -49,12 +49,12 @@ parts:
       - procps
     override-pull: |
       craftctl default
-      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.2-dev)"
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.3-dev)"
       craftctl set version="${version#v}"
     override-build: |
       set -eu
       commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.2-dev)"
+      version="$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.1-alpha.3-dev)"
       flags="-s -w -X github.com/huggan360/plainshow-cluster/internal/version.Version=${version#v} -X github.com/huggan360/plainshow-cluster/internal/version.Commit=$commit"
       go build -trimpath -ldflags "$flags" \
         -o "$CRAFT_PART_INSTALL/bin/pscluster" ./cmd/pscluster
@@ -86,6 +86,7 @@ parts:
       - libpython3.12-stdlib
       - python3-minimal
       - python3.12-minimal
+      - python3.12-venv
     python-packages:
       - ray[default]==2.58.0
 

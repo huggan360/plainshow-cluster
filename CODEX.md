@@ -1,6 +1,6 @@
 # Plainshow Cluster handover
 
-Last updated: 2026-09-05. Target release: `v0.1.1-alpha.2`.
+Last updated: 2026-09-05. Target release: `v0.1.1-alpha.3`.
 
 ## Current state
 
@@ -11,8 +11,9 @@ repository `../cluster-controller` at commit `2920a05`; never merge that relay
 back into the global account service.
 
 `v0.1.1-alpha.1` is already tagged at `b584647`. Main then received AMD/Intel
-telemetry commits `d0d477e` and `1d09b2b`. Do not move the alpha.1 tag. The next
-release is alpha.2 and includes these further fixes:
+telemetry commits `d0d477e` and `1d09b2b`. Alpha.2 at `f62e8e3` proved the
+desktop builds but exposed a missing `python3.12-venv` Snap dependency before
+publishing any assets. Do not move either tag. Alpha.3 includes the fix:
 
 - The Wails/GTK/WebKit application is named exactly **Plainshow Cluster** and
   uses the established Plainshow icon. Its bootstrap page now retries runtime
@@ -70,24 +71,24 @@ Run on this Pi with Go added to `PATH`:
 ```sh
 PATH=/usr/local/go/bin:$PATH make check
 PATH=/usr/local/go/bin:$PATH make smoke
-PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.2 dist
+PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.3 dist
 ```
 
-All three passed after the final alpha.2 changes; the smoke suite reports 71
+All three passed after the application changes; the smoke suite reports 71
 passed and 0 failed, and the distribution build produced both architectures.
 
 The Pi lacks GTK/WebKit development headers, Snapcraft/LXD and Arch `makepkg`.
 Do not install them on this production server merely for validation. Native
 desktop, Snap and Arch package builds run on native GitHub runners.
 
-Release without rewriting alpha.1:
+Release without rewriting alpha.1 or alpha.2:
 
 ```sh
 git add -A
 git commit -m "Fix desktop discovery and pool every GPU vendor"
 git push origin main
-git tag -a v0.1.1-alpha.2 -m "Plainshow Cluster v0.1.1-alpha.2"
-git push origin v0.1.1-alpha.2
+git tag -a v0.1.1-alpha.3 -m "Plainshow Cluster v0.1.1-alpha.3"
+git push origin v0.1.1-alpha.3
 ```
 
 The tag triggers `.github/workflows/release.yml`. Confirm both native desktop

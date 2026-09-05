@@ -27,8 +27,8 @@ sudo plainshow-cluster.pscluster status
 5. Download both `.snap` files from the GitHub release and upload them to edge:
 
    ```sh
-   snapcraft upload plainshow-cluster_0.1.1-alpha.2_amd64.snap --release=edge
-   snapcraft upload plainshow-cluster_0.1.1-alpha.2_arm64.snap --release=edge
+   snapcraft upload plainshow-cluster_0.1.1-alpha.3_amd64.snap --release=edge
+   snapcraft upload plainshow-cluster_0.1.1-alpha.3_arm64.snap --release=edge
    ```
 
 The uploads become architecture-specific revisions of the same release. Test

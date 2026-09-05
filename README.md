@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The `v0.1.1-alpha.2` release provides one complete archive for each supported
+The `v0.1.1-alpha.3` release provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`
@@ -67,7 +67,7 @@ The release also contains classic Snap packages for amd64 and arm64. Install
 the downloaded file matching your architecture:
 
 ```sh
-sudo snap install --dangerous --classic ./plainshow-cluster_0.1.1-alpha.2_amd64.snap
+sudo snap install --dangerous --classic ./plainshow-cluster_0.1.1-alpha.3_amd64.snap
 ```
 
 The host must already have Tailscale installed and `tailscaled` running. A Snap
