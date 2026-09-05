@@ -8,9 +8,12 @@ package sysinfo
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,12 +22,21 @@ import (
 
 // GPU is a single accelerator visible on the host.
 type GPU struct {
-	Index       int    `json:"index"`
-	Name        string `json:"name"`
-	VRAMTotalMB int    `json:"vram_total_mb"`
-	VRAMUsedMB  int    `json:"vram_used_mb"`
-	UtilPercent int    `json:"util_percent"`
-	TempC       int    `json:"temp_c"`
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+	// Vendor is "nvidia", "amd" or "intel". It decides more than a label:
+	// a job can only be placed on a GPU whose framework stack is present, and
+	// a single distributed run cannot span vendors, because the collective
+	// libraries are vendor-specific — NCCL is NVIDIA's, RCCL is AMD's.
+	Vendor string `json:"vendor"`
+	// Trainable reports whether this device is worth scheduling work on. An
+	// integrated display GPU is reported so the machine's hardware is visible,
+	// but it is not something to train on.
+	Trainable   bool `json:"trainable"`
+	VRAMTotalMB int  `json:"vram_total_mb"`
+	VRAMUsedMB  int  `json:"vram_used_mb"`
+	UtilPercent int  `json:"util_percent"`
+	TempC       int  `json:"temp_c"`
 }
 
 // Info is a snapshot of the host.
@@ -172,39 +184,155 @@ func uptime() int64 {
 
 // probeGPUs asks nvidia-smi for the accelerators on this host. A machine with
 // no NVIDIA driver simply has no GPUs, which is not an error.
+// probeGPUs reports every accelerator on the host.
+//
+// Each vendor is asked in its own way and none of them being present is an
+// ordinary answer: a machine with no GPU is still a useful CPU worker.
 func probeGPUs() []GPU {
 	out := []GPU{}
-	bin, err := exec.LookPath("nvidia-smi")
+	out = append(out, probeNVIDIA()...)
+	out = append(out, probeAMD()...)
+	out = append(out, probeIntel()...)
+	for i := range out {
+		out[i].Index = i
+	}
+	return out
+}
+
+// run executes a probe command. A variable so the parsing can be tested on a
+// machine that has none of these tools.
+var run = func(name string, args ...string) ([]byte, error) {
+	bin, err := exec.LookPath(name)
 	if err != nil {
-		return out
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
+	return exec.CommandContext(ctx, bin, args...).Output()
+}
 
-	cmd := exec.CommandContext(ctx, bin,
-		"--query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu",
+func atoi(s string) int { v, _ := strconv.Atoi(strings.TrimSpace(s)); return v }
+
+// probeNVIDIA reads nvidia-smi, which reports everything worth showing.
+func probeNVIDIA() []GPU {
+	out := []GPU{}
+	raw, err := run("nvidia-smi",
+		"--query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu",
 		"--format=csv,noheader,nounits")
-	raw, err := cmd.Output()
 	if err != nil {
 		return out
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 		parts := strings.Split(line, ",")
-		if len(parts) < 6 {
+		if len(parts) < 5 {
 			continue
 		}
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		atoi := func(s string) int { v, _ := strconv.Atoi(s); return v }
 		out = append(out, GPU{
-			Index:       atoi(parts[0]),
-			Name:        parts[1],
-			VRAMTotalMB: atoi(parts[2]),
-			VRAMUsedMB:  atoi(parts[3]),
-			UtilPercent: atoi(parts[4]),
-			TempC:       atoi(parts[5]),
+			Name: strings.TrimSpace(parts[0]), Vendor: "nvidia", Trainable: true,
+			VRAMTotalMB: atoi(parts[1]), VRAMUsedMB: atoi(parts[2]),
+			UtilPercent: atoi(parts[3]), TempC: atoi(parts[4]),
 		})
 	}
 	return out
+}
+
+// probeAMD reads rocm-smi when ROCm is installed, and falls back to the kernel
+// driver's own files otherwise, so a Radeon is at least visible without ROCm.
+func probeAMD() []GPU {
+	if found := probeROCm(); len(found) > 0 {
+		return found
+	}
+	return probeSysfsVendor("0x1002", "amd", true)
+}
+
+func probeROCm() []GPU {
+	out := []GPU{}
+	raw, err := run("rocm-smi", "--showproductname", "--showmeminfo", "vram",
+		"--showuse", "--showtemp", "--json")
+	if err != nil {
+		return out
+	}
+	var payload map[string]map[string]string
+	if json.Unmarshal(raw, &payload) != nil {
+		return out
+	}
+	cards := make([]string, 0, len(payload))
+	for card := range payload {
+		if strings.HasPrefix(card, "card") {
+			cards = append(cards, card)
+		}
+	}
+	sort.Strings(cards)
+	for _, card := range cards {
+		fields := payload[card]
+		gpu := GPU{Vendor: "amd", Trainable: true, Name: firstField(fields,
+			"Card Series", "Card Model", "Card SKU", "Card series")}
+		if gpu.Name == "" {
+			gpu.Name = "AMD GPU"
+		}
+		// rocm-smi reports VRAM in bytes.
+		gpu.VRAMTotalMB = atoi(firstField(fields, "VRAM Total Memory (B)")) / (1 << 20)
+		gpu.VRAMUsedMB = atoi(firstField(fields, "VRAM Total Used Memory (B)")) / (1 << 20)
+		gpu.UtilPercent = atoi(strings.TrimSuffix(
+			firstField(fields, "GPU use (%)"), "%"))
+		gpu.TempC = atoi(strings.SplitN(firstField(fields,
+			"Temperature (Sensor edge) (C)", "Temperature (Sensor junction) (C)"), ".", 2)[0])
+		out = append(out, gpu)
+	}
+	return out
+}
+
+func firstField(fields map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := fields[key]; ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// probeIntel finds Intel graphics. These are reported so a machine's hardware
+// is visible, but not marked trainable: an integrated display GPU is not
+// something to schedule training on.
+func probeIntel() []GPU { return probeSysfsVendor("0x8086", "intel", false) }
+
+// probeSysfsVendor reads the kernel's own view of the graphics devices, which
+// needs no vendor tooling installed.
+func probeSysfsVendor(vendorID, vendor string, trainable bool) []GPU {
+	out := []GPU{}
+	cards, err := filepath.Glob("/sys/class/drm/card[0-9]*")
+	if err != nil {
+		return out
+	}
+	sort.Strings(cards)
+	for _, card := range cards {
+		// Skip connectors such as card0-DP-1, which are outputs not devices.
+		if strings.Contains(filepath.Base(card), "-") {
+			continue
+		}
+		if strings.TrimSpace(firstLine(filepath.Join(card, "device/vendor"))) != vendorID {
+			continue
+		}
+		gpu := GPU{Vendor: vendor, Trainable: trainable}
+		gpu.Name = strings.TrimSpace(firstLine(filepath.Join(card, "device/product_name")))
+		if gpu.Name == "" {
+			gpu.Name = vendorName(vendor) + " graphics"
+		}
+		if total := atoi(firstLine(filepath.Join(card, "device/mem_info_vram_total"))); total > 0 {
+			gpu.VRAMTotalMB = total / (1 << 20)
+			gpu.VRAMUsedMB = atoi(firstLine(filepath.Join(card, "device/mem_info_vram_used"))) / (1 << 20)
+		}
+		out = append(out, gpu)
+	}
+	return out
+}
+
+func vendorName(vendor string) string {
+	switch vendor {
+	case "amd":
+		return "AMD"
+	case "intel":
+		return "Intel"
+	}
+	return vendor
 }
