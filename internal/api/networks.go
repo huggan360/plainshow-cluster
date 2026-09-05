@@ -475,6 +475,11 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 // a machine that had visibly switched while its compute had not, so the switch
 // starts the move itself.
 func (s *Server) activateNetwork(w http.ResponseWriter, r *http.Request) {
+	// The reconciler reads and acts on ActiveNetwork while holding this same
+	// lock. Serialising the assignment prevents a second request from rewriting
+	// it underneath a Ray move that the first request just started.
+	s.rayActionMu.Lock()
+	defer s.rayActionMu.Unlock()
 	id := r.PathValue("id")
 	previous := s.cfg.ActiveNetwork
 	if !s.cfg.SetActiveNetwork(id) {
