@@ -68,6 +68,12 @@ like any other file. You open it in your own editor.
 
 Seven pages: Home, Networks, Projects, Jobs, GitHub, How to, Settings.
 
+The top bar reports which network this machine works in, its tailnet address and
+Ray's state; it does not select. Selecting happens on Networks, because it moves
+the machine's one Ray process from one cluster to another. The power control
+beside it stops jobs, Ray and the node service — anything the interface can
+start, it must be able to stop from the same window.
+
 ### What we do not build
 
 No editor, no notebook, no dataset registry, no scheduler, no training launcher.
@@ -528,6 +534,18 @@ in to PlainShow, which is more useful than a timeout.
 - **The peer port only opens when a peer exists or a join code is outstanding**,
   and it is polled every two seconds rather than checked once, because an
   invite created on a running node has to open it.
+- **One machine can run two nodes.** The packaged service owns
+  `/opt/plainshow-cluster`; a node someone runs themselves owns
+  `~/.plainshow-cluster`. Separate databases, separate accounts, separate
+  networks. The desktop prefers the system root, so a person who set their
+  networks up under their own account sees an empty workspace and no error.
+  Anything that renders "you have nothing" must name the node and root it is
+  talking to.
+- **`systemctl is-enabled` reports through the exit code.** "disabled" exits
+  non-zero, so reading only the error turns a healthy answer into a failure.
+  Read the output. `internal/api/service.go` asks the kernel which unit owns
+  this process (`/proc/self/cgroup`) instead of assuming the packaged name,
+  because a hand-started node belongs to no unit and that is a normal answer.
 - **Release asset names are a contract with the updater.** It looks for
   `pscluster-<os>-<arch>` and reads `checksums.txt`. A release missing an asset
   for a platform is invisible to nodes on it — it looks like no release at all,
