@@ -222,6 +222,25 @@ func (s *Server) linkRepository(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// One repository, one project, one network. Two projects pointing at the
+	// same repository would give it two sets of collaborators and two answers
+	// to "who can see this", and GitHub would end up arbitrating between them.
+	if existing, lookupErr := s.store.ProjectsWithRepository(repoName); lookupErr == nil {
+		for _, other := range existing {
+			if other.ID == p.ID {
+				continue
+			}
+			where := "another network"
+			if other.NetworkID == p.NetworkID {
+				where = "this network"
+			}
+			fail(w, http.StatusConflict, fmt.Sprintf(
+				"%s is already connected to the project %q in %s. A repository belongs to one project.",
+				repoName, other.Name, where))
+			return
+		}
+	}
+
 	repo := gitrepo.Open(s.projectDir(p))
 	if err := repo.SetRemote(repoName); err != nil {
 		fail(w, 500, err.Error())

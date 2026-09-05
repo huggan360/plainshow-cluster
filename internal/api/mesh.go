@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -147,6 +148,8 @@ func (s *Server) MeshHandler() http.Handler {
 	authed := http.NewServeMux()
 	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
+	authed.HandleFunc("POST /mesh/v1/projects", s.acceptProject)
+	authed.HandleFunc("GET /mesh/v1/projects/{name}/archive", s.serveProject)
 	authed.HandleFunc("POST /mesh/v1/reach", s.acceptReachCheck)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}", s.remoteJob)
 	authed.HandleFunc("GET /mesh/v1/jobs/{id}/logs", s.remoteJobLogs)
@@ -373,11 +376,33 @@ func (s *Server) refreshLocalNodeSnapshot(ctx context.Context, networkID string)
 		Fingerprint: s.fingerprint,
 		Address:     advertisedEndpointFor(s.cfg, tailnet.Probe(ctx)),
 		Policy:      policyMap(membership.Policy), IsSelf: true, LastSeen: store.Now(),
+		Projects: s.projectsOnDisk(networkID),
 		Capacity: map[string]any{
 			"cpu_cores": info.CPUCores, "ram_total_mb": info.RAMTotalMB,
 			"disk_total_gb": info.DiskTotalGB, "gpus": info.GPUs,
 		},
 	})
+}
+
+// projectsOnDisk reads the directory rather than the database.
+//
+// The database says which projects a network has; the disk says which of them
+// this machine can actually run. Those differ constantly — a project is not
+// downloaded when you join a network — and the whole point of reporting this is
+// to tell the two apart.
+func (s *Server) projectsOnDisk(networkID string) []string {
+	entries, err := os.ReadDir(filepath.Join(s.layout.Projects(), networkID))
+	if err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			out = append(out, entry.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {

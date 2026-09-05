@@ -19,8 +19,8 @@ exists inside the binary; the user does not meet it.
 ## Unfinished work
 
 `PLAN.md` holds the staged rebuild in progress: the account, not the device,
-owns networks, memberships, invitations and project placement. Stages 0 to 3
-are done. Read it before starting anything in that area.
+owns networks, memberships, invitations and project placement. Stages 0 to 5
+are done; only Stage 6 (live sockets instead of a one-minute poll) is left. Read it before starting anything in that area.
 
 ## Non-negotiables
 
@@ -552,6 +552,16 @@ in to PlainShow, which is more useful than a timeout.
   Read the output. `internal/api/service.go` asks the kernel which unit owns
   this process (`/proc/self/cgroup`) instead of assuming the packaged name,
   because a hand-started node belongs to no unit and that is a normal answer.
+- **A new field inside `Memberships` cannot be defaulted.** `config.Load`
+  unmarshals onto `Defaults()`, so a missing top-level key keeps its default —
+  but every slice element is built from zero, so a membership written before the
+  field existed reads it as false. `Config.Version` and `upgradeFrom` exist for
+  exactly this, and the version must be read from the raw document *before* the
+  merge or an old file reports as current.
+- **Project membership is keyed by GitHub login**, or the node name when no
+  GitHub is connected — never the Plainshow account username. Checking one guess
+  refuses the owner their own project. `ownsProject` compares every name the
+  device answers to.
 - **Release asset names are a contract with the updater.** It looks for
   `pscluster-<os>-<arch>` and reads `checksums.txt`. A release missing an asset
   for a platform is invisible to nodes on it — it looks like no release at all,

@@ -426,6 +426,9 @@ function machineTab(data) {
         'Advertise this machine’s GPUs to Ray jobs in this network.', policy.allow_gpu);
     const terminal = toggleRow('Allow terminal tasks',
         'Permit interactive task execution requested by collaborators.', policy.allow_terminal);
+    const files = toggleRow('Accept project files',
+        'Let this network put project files on this machine. Without them it can ' +
+        'be online and still have nothing to run.', policy.allow_project_sync);
     const cpu = el('input', { class: 'input input--mono', type: 'number', min: '0', step: '1',
         value: policy.max_cpu || 0 });
     const ram = el('input', { class: 'input input--mono', type: 'number', min: '0', step: '256',
@@ -434,7 +437,7 @@ function machineTab(data) {
     return el('div', { class: 'detail-grid' },
         el('section', { class: 'panel' },
             el('div', { class: 'panel__head' }, 'My machine in this network'),
-            participation.node, worker.node, gpu.node, terminal.node,
+            participation.node, worker.node, gpu.node, terminal.node, files.node,
             el('div', { class: 'policy-grid', style: 'margin-top:18px' },
                 field('Maximum CPU cores', cpu, '0 means all available cores.'),
                 field('Maximum RAM (MB)', ram, '0 means all available memory.')),
@@ -443,6 +446,7 @@ function machineTab(data) {
                 const body = { enabled: participation.value(), policy: {
                     ...policy, enabled: accepting, allow_jobs: accepting,
                     allow_gpu: gpu.value(), allow_terminal: terminal.value(),
+                    allow_project_sync: files.value(),
                     max_cpu: Math.max(0, Number.parseInt(cpu.value, 10) || 0),
                     max_ram_mb: Math.max(0, Number.parseInt(ram.value, 10) || 0),
                 } };

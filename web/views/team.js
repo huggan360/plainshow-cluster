@@ -7,13 +7,38 @@ import { el, mount, ago, initials } from '../lib/ui.js';
 import { api, toast, modal } from '../lib/client.js';
 
 const CAPABILITIES = [
-    ['view', 'View', 'Open the project, read files, logs and job history'],
-    ['code', 'Code', 'Change files in the editor'],
-    ['push', 'Push', 'Fetch, pull, commit and push the repository'],
+    ['view', 'View', 'Open the project and read its status'],
+    ['code', 'Code', 'Change files in the browser'],
+    ['push', 'Git', 'Fetch, pull, commit and push'],
     ['run', 'Run', 'Start jobs and notebook kernels'],
     ['train', 'Train', 'Start distributed training runs'],
-    ['manage', 'Manage', 'Add people and change what they may do'],
+    ['manage', 'Manage', 'Add users and change permissions'],
 ];
+
+// The starting levels mirror GitHub's repository roles, exactly as the console
+// does, so an invitation means the same thing on both sides. Someone who has
+// granted access on plainshow.se should not have to learn a second vocabulary
+// here.
+const ACCESS_LEVELS = [
+    ['pull', 'Read', 'View only', ['view']],
+    ['triage', 'Triage', 'View and edit files', ['view', 'code']],
+    ['push', 'Write', 'Edit, commit, push and run', ['view', 'code', 'push', 'run']],
+    ['maintain', 'Maintain', 'Write plus training runs',
+        ['view', 'code', 'push', 'run', 'train']],
+    ['admin', 'Admin', 'Full control',
+        ['view', 'code', 'push', 'run', 'train', 'manage']],
+];
+
+// accessWord names a set of capabilities the way the console names it. The
+// order matters: it reads downwards and stops at the first thing held.
+function accessWord(capabilities) {
+    if (!capabilities.view) return 'no access';
+    if (capabilities.manage) return 'admin';
+    if (capabilities.train) return 'maintain';
+    if (capabilities.push) return 'write';
+    if (capabilities.code) return 'triage';
+    return 'read';
+}
 
 /** teamPanel renders the collaborator list for a project. */
 export function teamPanel(project, onChange) {
@@ -59,73 +84,83 @@ export function teamPanel(project, onChange) {
 }
 
 function memberRow(project, member, reload) {
-    const held = CAPABILITIES.filter(([key]) => member.capabilities[key]).map(([, label]) => label);
+    const capabilities = { ...member.capabilities };
 
-    return el('div', { class: 'row', style: 'cursor:default;align-items:flex-start' },
-        el('span', {
-            class: 'nodecard__avatar',
-            style: 'width:30px;height:30px;font-size:10px;border-radius:9px',
-        }, initials(member.username)),
-        el('span', { class: 'row__main' },
-            el('span', { class: 'row__title' },
-                member.github_login ? `@${member.github_login}` : member.username),
-            el('span', { class: 'row__meta' },
-                member.owner ? 'owner · everything' : held.join(' · ') || 'no access')),
-        el('span', { style: 'display:flex;align-items:center;gap:6px' },
-            el('span', {
-                class: `chip ${member.owner ? 'chip--good' : ''}`,
-            }, member.owner ? 'owner' : accessLabel(member)),
+    // One click, one permission. The console puts the grid on the row rather
+    // than behind a dialog, because the question people actually have is "what
+    // can this person do", and that should be readable without opening
+    // anything.
+    const toggle = async (capability, enabled) => {
+        const next = { ...capabilities, [capability]: !enabled };
+        if (next[capability] && capability !== 'view') next.view = true;
+        if (!next.view) Object.keys(next).forEach((key) => { next[key] = false; });
+        try {
+            const result = await api(
+                `/api/projects/${encodeURIComponent(project)}/members/` +
+                `${encodeURIComponent(member.username)}`,
+                { method: 'PUT', body: { capabilities: Object.keys(next).filter((k) => next[k]) } });
+            toast(result.github || `${member.username} · ${accessWord(next)}`);
+            await reload();
+        } catch (err) { toast(err.message, 'err'); }
+    };
+
+    return el('div', { class: 'panel member-card' },
+        el('div', { class: 'member-card__head' },
+            el('span', { class: 'avatar' }, initials(member.username)),
+            el('span', { class: 'row__main' },
+                el('span', { class: 'row__title' }, member.username,
+                    el('span', { class: 'member-card__word' },
+                        member.owner ? 'owner' : accessWord(member.capabilities))),
+                el('span', { class: 'row__meta' },
+                    member.owner
+                        ? 'Project owner · unrestricted'
+                        : member.github_login
+                            ? el('span', {},
+                                el('i', { class: 'bx bxl-github' }), ` ${member.github_login}`,
+                                member.github_role ? ` · ${member.github_role}` : '')
+                            : 'User')),
             !member.owner
                 ? el('button', {
-                    class: 'btn btn--sm btn--icon', title: 'Change access',
-                    onclick: () => editAccess(project, member, reload),
-                }, el('i', { class: 'bx bx-dots-horizontal-rounded' }))
-                : null));
+                    class: 'btn btn--sm btn--icon', title: 'Remove from project',
+                    onclick: () => removeMember(project, member, reload),
+                }, el('i', { class: 'bx bx-trash' }))
+                : null),
+        el('div', { class: 'member-card__grid' },
+            ...CAPABILITIES.map(([capability, label, description]) => {
+                const enabled = member.owner || Boolean(member.capabilities[capability]);
+                return el('button', {
+                    class: `cap ${enabled ? 'cap--on' : ''}`,
+                    disabled: member.owner,
+                    title: description,
+                    onclick: () => toggle(capability, enabled),
+                }, el('i', { class: `bx ${enabled ? 'bx-check' : 'bx-x'}` }), label);
+            })));
 }
 
-function accessLabel(member) {
-    const c = member.capabilities;
-    if (c.manage) return 'admin';
-    if (c.train) return 'maintainer';
-    if (c.push) return 'contributor';
-    if (c.code) return 'editor';
-    return 'viewer';
-}
-
-/** capabilityChecklist builds the toggle list shared by add and edit. */
-function capabilityChecklist(initial) {
-    const state = { ...initial };
-    const rows = CAPABILITIES.map(([key, label, description]) => {
-        const toggle = el('button', {
-            class: 'toggle', role: 'switch', 'aria-label': label,
-            'aria-checked': String(Boolean(state[key])),
-            onclick: () => {
-                state[key] = !state[key];
-                // Everything implies being able to open the project; granting
-                // code without view is a state nothing can express.
-                if (state[key] && key !== 'view') {
-                    state.view = true;
-                    viewToggle.setAttribute('aria-checked', 'true');
-                }
-                toggle.setAttribute('aria-checked', String(state[key]));
-            },
-        });
-        if (key === 'view') viewToggle = toggle;
-        return el('div', { class: 'switch' },
-            el('div', { class: 'switch__text' },
-                el('strong', {}, label), el('span', {}, description)),
-            toggle);
+function removeMember(project, member, reload) {
+    modal({
+        title: `Remove ${member.username}?`,
+        confirmLabel: 'Remove',
+        danger: true,
+        body: () => el('p', { style: 'margin:0;font-size:13px;color:#cbd5e1;line-height:1.6' },
+            'GitHub has no "no access" role, so withdrawing view withdraws the ' +
+            'collaborator entirely. Anything less would leave them read access ' +
+            'on the repository after being removed here.'),
+        onConfirm: async (close) => {
+            const result = await api(
+                `/api/projects/${encodeURIComponent(project)}/members/` +
+                `${encodeURIComponent(member.username)}`, { method: 'DELETE' });
+            close();
+            toast(result.github || 'Removed.');
+            await reload();
+        },
     });
-    let viewToggle = rows[0].querySelector('.toggle');
-    return {
-        node: el('div', {}, ...rows),
-        selected: () => Object.keys(state).filter((k) => state[k]),
-    };
 }
 
 function addPerson(project, reload) {
     const login = el('input', { class: 'input input--mono', placeholder: 'github-username' });
-    const list = capabilityChecklist({ view: true, code: true, push: true, run: true, train: true });
+    const level = el('select', { class: 'input' }, ...ACCESS_LEVELS.map(([id, label, note]) =>
+        el('option', { value: id, selected: id === 'push' }, `${label} — ${note}`)));
 
     modal({
         title: 'Add someone to this project',
@@ -133,52 +168,21 @@ function addPerson(project, reload) {
         body: () => el('div', {},
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, 'GitHub username'), login),
-            el('p', { class: 'field__label', style: 'margin:14px 0 2px' }, 'They may'),
-            list.node,
-            el('p', { class: 'muted', style: 'margin:14px 0 0;font-size:11.5px;line-height:1.55' },
-                'If this project is connected to a repository, they are invited to it with ' +
-                'the closest role GitHub can express.')),
+            el('div', { class: 'field' },
+                el('label', { class: 'field__label' }, 'Access'), level),
+            el('p', { class: 'muted', style: 'margin:6px 0 0;font-size:11.5px;line-height:1.55' },
+                'These are GitHub\u2019s repository roles, so the invitation means the ' +
+                'same thing on both sides. Fine-tune each permission on the row ' +
+                'afterwards.')),
         onConfirm: async (close) => {
             const value = login.value.trim().replace(/^@/, '');
             if (!value) throw new Error('Give a GitHub username.');
+            const chosen = ACCESS_LEVELS.find(([id]) => id === level.value);
             const result = await api(`/api/projects/${encodeURIComponent(project)}/members`, {
-                method: 'POST', body: { login: value, capabilities: list.selected() },
+                method: 'POST', body: { login: value, capabilities: chosen[3] },
             });
             close();
             toast(result.github || `Added ${value}.`);
-            await reload();
-        },
-    });
-}
-
-function editAccess(project, member, reload) {
-    const list = capabilityChecklist(member.capabilities);
-
-    modal({
-        title: `Access for ${member.github_login || member.username}`,
-        confirmLabel: 'Save',
-        body: () => el('div', {},
-            list.node,
-            el('div', { style: 'margin-top:16px' },
-                el('button', {
-                    class: 'btn btn--sm btn--danger',
-                    onclick: async (e) => {
-                        e.preventDefault();
-                        const result = await api(
-                            `/api/projects/${encodeURIComponent(project)}/members/` +
-                            `${encodeURIComponent(member.username)}`, { method: 'DELETE' });
-                        toast(result.github || 'Removed.');
-                        document.getElementById('modal').replaceChildren();
-                        await reload();
-                    },
-                }, 'Remove from project'))),
-        onConfirm: async (close) => {
-            const result = await api(
-                `/api/projects/${encodeURIComponent(project)}/members/` +
-                `${encodeURIComponent(member.username)}`,
-                { method: 'PUT', body: { capabilities: list.selected() } });
-            close();
-            toast(result.github || 'Access updated.');
             await reload();
         },
     });

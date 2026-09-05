@@ -288,3 +288,87 @@ func TestLoadNormalisesAnOldConfig(t *testing.T) {
 		t.Error("the machine is not a device at all")
 	}
 }
+
+// TestUpgradingFillsInPerNetworkProjectSync is the trap this version number
+// exists for.
+//
+// Load unmarshals onto Defaults(), so a missing top-level key keeps its
+// default. A slice element does not work that way: every membership is built
+// from zero, so a field added after those memberships were written reads as
+// false. For project sync that would silently take working machines out of
+// every network they belong to.
+func TestUpgradingFillsInPerNetworkProjectSync(t *testing.T) {
+	dir := t.TempDir()
+	layout, err := NewLayout(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	// A settings document as an older build wrote it: no version, no
+	// allow_project_sync anywhere.
+	old := `node:
+    id: node-1
+    name: box
+    roles: [worker]
+cluster: {id: c1, name: lab}
+active_network: net-1
+memberships:
+    - id: net-1
+      name: Lab
+      enabled: true
+      policy: {enabled: true, allow_jobs: true, allow_gpu: true, allow_terminal: false}
+worker: {enabled: true, allow_jobs: true, allow_gpu: true, allow_terminal: false}
+`
+	if err := os.WriteFile(layout.ConfigFile(), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Worker.AllowProjectSync {
+		t.Error("the device-wide setting did not survive the upgrade")
+	}
+	if len(cfg.Memberships) != 1 || !cfg.Memberships[0].Policy.AllowProjectSync {
+		t.Errorf("membership policy = %+v, want project sync on", cfg.Memberships)
+	}
+	if cfg.Version != CurrentVersion {
+		t.Errorf("version = %d, want %d", cfg.Version, CurrentVersion)
+	}
+}
+
+// TestAnExplicitNoIsKept: once the document carries the current version, a
+// machine owner who turned project files off keeps them off.
+func TestAnExplicitNoIsKept(t *testing.T) {
+	dir := t.TempDir()
+	layout, err := NewLayout(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	current := `version: 2
+node: {id: node-1, name: box, roles: [worker]}
+cluster: {id: c1, name: lab}
+memberships:
+    - id: net-1
+      name: Lab
+      enabled: true
+      policy: {enabled: true, allow_jobs: true, allow_project_sync: false}
+worker: {enabled: true, allow_jobs: true, allow_project_sync: false}
+`
+	if err := os.WriteFile(layout.ConfigFile(), []byte(current), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Worker.AllowProjectSync || cfg.Memberships[0].Policy.AllowProjectSync {
+		t.Error("an explicit refusal was overwritten on load")
+	}
+}

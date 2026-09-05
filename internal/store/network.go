@@ -225,9 +225,13 @@ type NetworkNode struct {
 	Address     string         `json:"address"`
 	Policy      map[string]any `json:"policy"`
 	Capacity    map[string]any `json:"capacity"`
-	IsSelf      bool           `json:"is_self"`
-	LastSeen    string         `json:"last_seen"`
-	Created     string         `json:"created_at"`
+	// Projects names what this machine has on disk for the network. Being
+	// online says a machine can be reached; this says it can actually run
+	// something, because a job needs the files and the data beside them.
+	Projects []string `json:"projects"`
+	IsSelf   bool     `json:"is_self"`
+	LastSeen string   `json:"last_seen"`
+	Created  string   `json:"created_at"`
 }
 
 // NetworkController is an optional always-reachable collaboration endpoint.
@@ -317,23 +321,31 @@ func (s *Store) UpsertNetworkNode(node NetworkNode) error {
 	if err != nil {
 		return err
 	}
+	if node.Projects == nil {
+		node.Projects = []string{}
+	}
+	projects, err := json.Marshal(node.Projects)
+	if err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`INSERT INTO network_node
-		(network_id,node_id,name,roles,os,arch,public_key,fingerprint,address,policy,capacity,is_self,last_seen,created_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		(network_id,node_id,name,roles,os,arch,public_key,fingerprint,address,policy,capacity,projects,is_self,last_seen,created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(network_id,node_id) DO UPDATE SET name=excluded.name,
 		  roles=excluded.roles, os=excluded.os, arch=excluded.arch,
 		  public_key=excluded.public_key, fingerprint=excluded.fingerprint, address=excluded.address,
-		  policy=excluded.policy, capacity=excluded.capacity,
+		  policy=excluded.policy, capacity=excluded.capacity, projects=excluded.projects,
 		  is_self=excluded.is_self, last_seen=excluded.last_seen`,
 		node.NetworkID, node.NodeID, node.Name, strings.Join(node.Roles, ","),
-		node.OS, node.Arch, node.PublicKey, node.Fingerprint, node.Address, string(policy), string(capacity),
+		node.OS, node.Arch, node.PublicKey, node.Fingerprint, node.Address,
+		string(policy), string(capacity), string(projects),
 		node.IsSelf, node.LastSeen, Now())
 	return err
 }
 
 func (s *Store) NetworkNodes(networkID string) ([]NetworkNode, error) {
 	rows, err := s.db.Query(`SELECT network_id,node_id,name,roles,os,arch,public_key,fingerprint,address,
-        policy,capacity,is_self,last_seen,created_at FROM network_node
+        policy,capacity,projects,is_self,last_seen,created_at FROM network_node
         WHERE network_id=? ORDER BY is_self DESC, lower(name)`, networkID)
 	if err != nil {
 		return nil, err
@@ -342,10 +354,10 @@ func (s *Store) NetworkNodes(networkID string) ([]NetworkNode, error) {
 	out := []NetworkNode{}
 	for rows.Next() {
 		var node NetworkNode
-		var roles, policy, capacity string
+		var roles, policy, capacity, projects string
 		if err := rows.Scan(&node.NetworkID, &node.NodeID, &node.Name, &roles,
-			&node.OS, &node.Arch, &node.PublicKey, &node.Fingerprint, &node.Address, &policy, &capacity, &node.IsSelf,
-			&node.LastSeen, &node.Created); err != nil {
+			&node.OS, &node.Arch, &node.PublicKey, &node.Fingerprint, &node.Address, &policy, &capacity,
+			&projects, &node.IsSelf, &node.LastSeen, &node.Created); err != nil {
 			return nil, err
 		}
 		node.Roles = normaliseStoredRoles(roles)
@@ -353,6 +365,8 @@ func (s *Store) NetworkNodes(networkID string) ([]NetworkNode, error) {
 		_ = json.Unmarshal([]byte(policy), &node.Policy)
 		node.Capacity = map[string]any{}
 		_ = json.Unmarshal([]byte(capacity), &node.Capacity)
+		node.Projects = []string{}
+		_ = json.Unmarshal([]byte(projects), &node.Projects)
 		out = append(out, node)
 	}
 	return out, rows.Err()

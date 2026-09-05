@@ -136,3 +136,94 @@ func TestUpsertMachineIsIdempotent(t *testing.T) {
 		t.Errorf("roles round-tripped wrongly: %v", machines[0].Roles)
 	}
 }
+
+// TestMovingAProjectBetweenNetworks: a project lives in exactly one network,
+// so this is a move. The unique index is what stops a clashing name in the
+// destination from producing two projects that look the same.
+func TestMovingAProjectBetweenNetworks(t *testing.T) {
+	st := open(t)
+	first := Project{ID: "p1", NetworkID: "net-a", Name: "vision"}
+	if err := st.CreateProject(&first); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MoveProjectToNetwork(first.ID, "net-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ProjectByNameInNetwork("net-a", "vision"); err == nil {
+		t.Error("the project is still visible in the network it left")
+	}
+	moved, err := st.ProjectByNameInNetwork("net-b", "vision")
+	if err != nil || moved.ID != first.ID {
+		t.Fatalf("project in net-b = %+v, %v", moved, err)
+	}
+
+	// A name already taken in the destination must fail rather than duplicate.
+	clash := Project{ID: "p2", NetworkID: "net-a", Name: "vision"}
+	if err := st.CreateProject(&clash); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MoveProjectToNetwork(clash.ID, "net-b"); err == nil {
+		t.Error("two projects with the same name landed in one network")
+	}
+}
+
+// TestFindingProjectsByRepository backs the rule that one GitHub repository
+// belongs to one project: two would give it two sets of collaborators and two
+// answers to who can see it.
+func TestFindingProjectsByRepository(t *testing.T) {
+	st := open(t)
+	one := Project{ID: "p1", NetworkID: "net-a", Name: "vision"}
+	if err := st.CreateProject(&one); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProjectRepositoryID(one.ID, "huggan360/vision"); err != nil {
+		t.Fatal(err)
+	}
+	two := Project{ID: "p2", NetworkID: "net-b", Name: "vision-again"}
+	if err := st.CreateProject(&two); err != nil {
+		t.Fatal(err)
+	}
+	found, err := st.ProjectsWithRepository("HUGGAN360/VISION")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || found[0].ID != one.ID {
+		t.Fatalf("lookup = %+v, want the one project that has it", found)
+	}
+	// An empty repository is not a repository, and must never match.
+	if empty, err := st.ProjectsWithRepository(""); err != nil || len(empty) != 0 {
+		t.Fatalf("empty lookup = %+v, %v", empty, err)
+	}
+}
+
+// TestNodeProjectsSurviveAWriteAndRead keeps the gossiped "has the files" list
+// honest across the storage boundary.
+func TestNodeProjectsSurviveAWriteAndRead(t *testing.T) {
+	st := open(t)
+	if err := st.UpsertNetworkNode(NetworkNode{
+		NetworkID: "net-a", NodeID: "n1", Name: "Stationary",
+		Projects: []string{"vision", "speech"}, LastSeen: Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := st.NetworkNodes("net-a")
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("nodes = %+v, %v", nodes, err)
+	}
+	if len(nodes[0].Projects) != 2 || nodes[0].Projects[0] != "vision" {
+		t.Fatalf("projects = %+v", nodes[0].Projects)
+	}
+	// A node that reports nothing must read back as an empty list, not null,
+	// or every caller has to guard against it.
+	if err := st.UpsertNetworkNode(NetworkNode{
+		NetworkID: "net-a", NodeID: "n2", Name: "Laptop", LastSeen: Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, _ = st.NetworkNodes("net-a")
+	for _, node := range nodes {
+		if node.Projects == nil {
+			t.Errorf("%s reported nil projects rather than none", node.Name)
+		}
+	}
+}

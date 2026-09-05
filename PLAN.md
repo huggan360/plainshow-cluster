@@ -91,23 +91,44 @@ who declined is ordinary rather than a conflict.
 Join codes remain for headless machines with no browser to sign in on, under
 "Create a machine code" in a network's settings.
 
-### Stage 4 — A project lives in one network, its files live per device
+### Stage 4 — A project lives in one network, its files live per device ✅
 
-- Project placement moves to the account server: project → network, owner,
-  members. The owner can move a project to another network.
-- Joining a network shows its projects. **Nothing is downloaded automatically** —
-  a machine only needs the files if work will run on it.
-- The project's device list shows, per machine: online, and **has the files**.
-  That is what tells you which machines are ready to run.
-- Download onto any connected machine, subject to that machine's own policy.
+A project belongs to exactly one network — that is what makes "who can see this"
+answerable, and what lets a repository's collaborator list mean one thing — so
+its owner can move it, and the files move with it. A row that moved without its
+directory is a project that has quietly stopped working.
 
-### Stage 5 — Permission parity with plainshow.se
+Files are a separate question from membership. Joining a network must not drag
+every repository and every dataset onto a laptop, so nothing is downloaded
+automatically; the files travel when somebody decides a machine should have
+them, in either direction, over the existing mesh archive.
 
-The capability model already matches (`internal/store/member.go`: view, code,
-push, run, train, manage, plus an owner flag and a GitHub role memo). What does
-not match is the presentation: the console offers a GitHub-shaped access level
-on invite and a capability grid per person. `web/views/team.js` uses a checklist
-in a dialog instead. Make it the console's layout.
+The project's Devices tab reads the disk rather than the database. Online and
+ready are different things, and conflating them is how somebody submits a run to
+a machine that has nothing to run.
+
+A new `allow_project_sync` policy governs receiving files, device-wide and per
+network, because a machine can be willing to run work and still not want
+somebody's training data written to its disk. Both ceilings apply and a network
+can only narrow the machine's own.
+
+Two traps worth keeping. `Config.Version` exists because a field added inside
+`Memberships` cannot be defaulted: `Load` merges onto `Defaults()`, so a missing
+top-level key keeps its default, but every slice element is built from zero. The
+version has to be read from the raw document *before* that merge, or a file
+written years ago reports as current. And project membership is keyed by GitHub
+login — or the node name when no GitHub is connected — never the Plainshow
+account username, so ownership is checked against every name the device answers
+to.
+
+### Stage 5 — Permission parity with plainshow.se ✅
+
+The capability model already matched. The presentation did not: the console
+offers a GitHub-shaped access level on invite and a capability grid on each
+person's row, while `team.js` hid everything behind a dialog. It is the
+console's layout now — the same five access levels, the same six capabilities,
+the same wording, and one click per permission, because "what can this person
+do" should be readable without opening anything.
 
 Cloning a repository is not push access. Push and pull require being a
 collaborator on GitHub, which already syncs both ways.

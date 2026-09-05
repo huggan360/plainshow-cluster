@@ -70,6 +70,10 @@ func (s *Store) migrate() error {
 		{"network_node", "arch", "TEXT NOT NULL DEFAULT ''"},
 		{"network_node", "capacity", "TEXT NOT NULL DEFAULT '{}'"},
 		{"network_node", "fingerprint", "TEXT NOT NULL DEFAULT ''"},
+		// Which projects this machine actually has on disk. A machine cannot
+		// run work on files it does not hold, so this is the difference
+		// between "online" and "ready".
+		{"network_node", "projects", "TEXT NOT NULL DEFAULT '[]'"},
 	}
 	for _, c := range columns {
 		has, err := s.hasColumn(c.table, c.column)
@@ -245,6 +249,51 @@ func (s *Store) CreateProject(p *Project) error {
         VALUES (?, ?, ?, ?, ?, ?)`,
 		p.ID, p.NetworkID, p.Name, p.Description, now, now)
 	return err
+}
+
+// MoveProjectToNetwork changes which network a project belongs to.
+//
+// A project lives in exactly one network — that is what makes "who can see this"
+// answerable — so moving it is a move, not a copy. The unique index on
+// (network_id, name) means a clashing name in the destination fails here rather
+// than producing two projects that look the same.
+func (s *Store) MoveProjectToNetwork(id, networkID string) error {
+	result, err := s.db.Exec(`UPDATE project SET network_id=?, updated_at=? WHERE id=?`,
+		networkID, Now(), id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ProjectsWithRepository finds every project pointing at one GitHub repository,
+// across all networks. A repository belongs to one project in one network, and
+// this is what catches the second one being made.
+func (s *Store) ProjectsWithRepository(repository string) ([]Project, error) {
+	rows, err := s.db.Query(`SELECT id,network_id,name,description,repository,created_at,updated_at
+        FROM project WHERE lower(repository)=lower(?) AND repository<>''`, repository)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Project{}
+	for rows.Next() {
+		var project Project
+		if err := rows.Scan(&project.ID, &project.NetworkID, &project.Name,
+			&project.Description, &project.Repository, &project.Created,
+			&project.Updated); err != nil {
+			return nil, err
+		}
+		out = append(out, project)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpdateProjectDescription(id, description string) error {

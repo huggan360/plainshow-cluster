@@ -10,7 +10,7 @@ import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
 import { newProject, renderProjects } from './views/projects.js';
 import { renderHowTo } from './views/howto.js';
-import { renderSettings } from './views/settings.js';
+import { renderSettings, renderDevicesPage } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
 import { renderGate } from './views/signin.js';
 import { renderNetworks } from './views/networks.js';
@@ -21,6 +21,7 @@ const ROUTES = [
     { id: 'projects', label: 'Projects', icon: 'bx-layer', render: renderProjects },
     { id: 'jobs', label: 'Jobs', icon: 'bx-task', render: renderJobs },
     { id: 'github', label: 'GitHub', icon: 'bxl-github', render: renderGitHub },
+    { id: 'devices', label: 'Devices', icon: 'bx-devices', render: renderDevicesPage },
     { id: 'howto', label: 'How to', icon: 'bx-help-circle', render: renderHowTo },
     { id: 'settings', label: 'Settings', icon: 'bx-cog', render: renderSettings },
 ];

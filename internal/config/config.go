@@ -33,6 +33,12 @@ const EnvAccountServer = "PSCLUSTER_ACCOUNT_SERVER"
 // desktop installations use an ephemeral loopback port published at runtime.
 const DefaultPort = 9999
 
+// CurrentVersion is the shape of the settings document this build writes.
+//
+//	1  everything before per-network project sync
+//	2  WorkerConfig.AllowProjectSync
+const CurrentVersion = 2
+
 // DefaultUpdateRepository is where a node looks for new releases until it is
 // told otherwise. It is a default, not a constant of the system: point
 // update.repository at a fork or a mirror and nothing else changes.
@@ -100,6 +106,13 @@ func Normalise(roles []Role) []Role {
 // Config is the full settings document for a node. Every field has a working
 // default; an empty file is a valid configuration.
 type Config struct {
+	// Version is the shape of this document, not the product's version. It
+	// exists for one reason: a new field inside Memberships cannot be given a
+	// default the way a top-level field can. Load unmarshals onto Defaults(),
+	// so a missing top-level key keeps its default — but a slice element is
+	// built from zero, so every membership written before a field existed would
+	// read it as false. Bumping this is how those get filled in instead.
+	Version       int                `yaml:"version" json:"version"`
 	Node          NodeConfig         `yaml:"node" json:"node"`
 	Cluster       ClusterConfig      `yaml:"cluster" json:"cluster"` // legacy primary network
 	Memberships   []MembershipConfig `yaml:"memberships" json:"memberships"`
@@ -222,8 +235,17 @@ type WorkerConfig struct {
 	AllowJobs     bool `yaml:"allow_jobs" json:"allow_jobs"`
 	AllowGPU      bool `yaml:"allow_gpu" json:"allow_gpu"`
 	AllowTerminal bool `yaml:"allow_terminal" json:"allow_terminal"`
-	MaxCPU        int  `yaml:"max_cpu" json:"max_cpu"`
-	MaxRAMMB      int  `yaml:"max_ram_mb" json:"max_ram_mb"`
+	// AllowProjectSync lets other machines in the network put a project's files
+	// on this one, and read them back off it.
+	//
+	// It is separate from AllowJobs because it is a different question. A
+	// machine can be perfectly willing to run work and still not want somebody
+	// else's training data written to its disk — and a machine cannot run
+	// anything useful without the files, so refusing this is the honest way to
+	// say "count me out" without pretending to be available.
+	AllowProjectSync bool `yaml:"allow_project_sync" json:"allow_project_sync"`
+	MaxCPU           int  `yaml:"max_cpu" json:"max_cpu"`
+	MaxRAMMB         int  `yaml:"max_ram_mb" json:"max_ram_mb"`
 }
 
 // HasRole reports whether the node carries role r.
@@ -333,6 +355,7 @@ func Defaults() *Config {
 		host = "plainshow-node"
 	}
 	return &Config{
+		Version: CurrentVersion,
 		Node: NodeConfig{
 			ID:    NewID(),
 			Name:  host,
@@ -343,12 +366,13 @@ func Defaults() *Config {
 		Account: AccountConfig{Server: strings.TrimRight(
 			strings.TrimSpace(os.Getenv(EnvAccountServer)), "/")},
 		Worker: WorkerConfig{
-			Enabled:       true,
-			AllowJobs:     true,
-			AllowGPU:      true,
-			AllowTerminal: false,
-			MaxCPU:        0,
-			MaxRAMMB:      0,
+			Enabled:          true,
+			AllowJobs:        true,
+			AllowGPU:         true,
+			AllowTerminal:    false,
+			AllowProjectSync: true,
+			MaxCPU:           0,
+			MaxRAMMB:         0,
 		},
 		Update: UpdateConfig{
 			Enabled:    true,
@@ -505,12 +529,43 @@ func Load(l Layout) (*Config, error) {
 		}
 		return nil, err
 	}
+	// The version has to be read from the document itself, before the merge.
+	// Unmarshalling onto Defaults() keeps a default for every absent key —
+	// which is exactly the behaviour being worked around here, and would make
+	// a file written years ago report the current version.
+	var probe struct {
+		Version int `yaml:"version"`
+	}
+	_ = yaml.Unmarshal(raw, &probe)
+
 	cfg := Defaults()
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", l.ConfigFile(), err)
 	}
+	cfg.upgradeFrom(probe.Version)
 	cfg.applyFallbacks()
 	return cfg, nil
+}
+
+// upgradeFrom fills in fields that did not exist when this document was
+// written.
+//
+// It exists for one shape of problem: a field inside Memberships. A top-level
+// field gets its default from the merge onto Defaults(), but every slice
+// element is built from zero, so a membership written before a field existed
+// reads it as false no matter what the default says.
+func (c *Config) upgradeFrom(version int) {
+	// A node that predates per-network project sync was, in effect, willing to
+	// receive project files — that is how every remote job has always worked.
+	// Reading the absent field as "no" would silently take working machines out
+	// of every network they belong to.
+	if version < 2 {
+		c.Worker.AllowProjectSync = true
+		for index := range c.Memberships {
+			c.Memberships[index].Policy.AllowProjectSync = true
+		}
+	}
+	c.Version = CurrentVersion
 }
 
 // applyFallbacks fills in anything a hand-edited file left empty.

@@ -728,3 +728,31 @@ td:first-child { color: #e2e8f0; }
     .netpill { max-width: 190px; }
     .netpill__chev { display: none; }
 }
+
+/* ------------------------------------------------------------ project team */
+
+/* The console puts each person's permissions on their row rather than behind a
+ * dialog: "what can this person do" is the question people actually have, and
+ * it should be readable without opening anything. */
+.member-card { padding: 14px 16px; }
+.member-card + .member-card { margin-top: 10px; }
+.member-card__head { display: flex; align-items: flex-start; gap: 12px; }
+.member-card__word {
+    margin-left: 9px; border-radius: 999px; background: rgba(255,255,255,.05);
+    padding: 2px 8px; font-family: var(--mono); font-size: 9px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--tx-3);
+}
+.member-card__grid {
+    display: grid; margin-top: 13px; gap: 7px;
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+.cap {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 9px; background: transparent;
+    padding: 7px 10px; color: var(--tx-4); cursor: pointer;
+    font-family: var(--sans); font-size: 11.5px; text-align: left;
+    transition: border-color .16s ease, color .16s ease, background .16s ease;
+}
+.cap:hover:not(:disabled) { border-color: var(--line-2); color: var(--tx-2); }
+.cap--on { border-color: rgba(52,211,153,.34); background: rgba(52,211,153,.07); color: #6ee7b7; }
+.cap:disabled { cursor: default; opacity: .75; }

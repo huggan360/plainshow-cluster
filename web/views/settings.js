@@ -6,11 +6,20 @@ import { api, toast, modal, state } from '../lib/client.js';
 import { confirmShutdown } from '../lib/statusbar.js';
 
 const TABS = [
-    ['general', 'General', 'bx-slider-alt'],
-    ['devices', 'Devices', 'bx-devices'],
-    ['updates', 'Updates', 'bx-refresh'],
-    ['about', 'About', 'bx-info-circle'],
+    ['general', 'General', 'bx-slider-alt', '#/settings/general'],
+    ['devices', 'Devices', 'bx-devices', '#/devices'],
+    ['updates', 'Updates', 'bx-refresh', '#/settings/updates'],
+    ['about', 'About', 'bx-info-circle', '#/settings/about'],
 ];
+
+/** renderDevicesPage is the sidebar entry. Devices has its own place in the
+ *  navigation because the other machines are the point of the product, but it
+ *  keeps the Settings tab bar so it still reads as part of Settings. */
+export async function renderDevicesPage(host) {
+    const page = el('div', { class: 'page' });
+    mount(host, page);
+    return renderDevices(page, 'devices');
+}
 
 export async function renderSettings(host, args = []) {
     const page = el('div', { class: 'page' });
@@ -18,6 +27,7 @@ export async function renderSettings(host, args = []) {
 
     const requested = args[0];
     const tab = TABS.some(([id]) => id === requested) ? requested : 'general';
+    // An older link to the tab still works; the page itself lives at #/devices.
     if (tab === 'devices') return renderDevices(page, tab);
 
     // The service state is a nice-to-have: a node started from a terminal has
@@ -78,6 +88,9 @@ export async function renderSettings(host, args = []) {
                     'Let jobs use the accelerators on this machine.'),
                 toggle(worker, 'allow_terminal', 'Terminal access',
                     'An interactive shell. Off by default, and worth keeping that way.'),
+                toggle(worker, 'allow_project_sync', 'Project files',
+                    'Let other machines in your networks put a project’s files here, ' +
+                    'and read them back. A machine cannot run anything without them.'),
                 el('div', { style: 'display:flex;justify-content:flex-end;margin-top:16px' },
                     saveBtn)),
 
@@ -131,8 +144,8 @@ function settingsHead(active) {
                 'cluster can widen them — which is what makes it reasonable to lend ' +
                 'someone else your computer.')),
         el('nav', { class: 'tabs', 'aria-label': 'Settings sections' },
-            ...TABS.map(([id, label, icon]) => el('a', {
-                class: `tab ${active === id ? 'tab--on' : ''}`, href: `#/settings/${id}`,
+            ...TABS.map(([id, label, icon, href]) => el('a', {
+                class: `tab ${active === id ? 'tab--on' : ''}`, href,
             }, el('i', { class: `bx ${icon}` }), label))));
 }
 

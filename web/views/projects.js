@@ -1,6 +1,6 @@
 // Projects — branches, files, the editor, and running what you just wrote.
 
-import { el, mount, ago, bytes, fileIcon, stateDot } from '../lib/ui.js';
+import { el, mount, ago, bytes, megabytes, fileIcon, stateDot } from '../lib/ui.js';
 import { api, on, onConnection, send, isLive, toast, modal, navigate, refresh, state } from '../lib/client.js';
 import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
@@ -589,15 +589,17 @@ async function renderProject(host, name, routeParts) {
 	const teamPane = el('div', { class: 'panel' },
 		el('div', { class: 'panel__head' }, 'Project team'), team.node);
 	const settingsPane = projectSettingsPane(projectSummary);
+	const devicesPane = projectDevicesPane(projectSummary);
 	const raySnapshot = activeTab === 'overview'
 		? await api('/api/ray').catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const panes = { overview: overviewPane, branch: branchPane, run: runPane,
-		git: gitPane, team: teamPane, settings: settingsPane };
+		git: gitPane, devices: devicesPane, team: teamPane, settings: settingsPane };
 
 	const tabs = [
 		['overview', 'Overview', 'bx-grid-alt'], ['branch', branch, 'bx-git-branch'],
 		['run', 'Run', 'bx-play'], ['git', 'Git', 'bx-git-commit'],
+		['devices', 'Devices', 'bx-devices'],
 		['team', 'Team', 'bx-group'], ['settings', 'Settings', 'bx-slider-alt'],
 	];
 	// bx-grid-alt is included below as an alias to the Boxicons grid glyph.
@@ -750,6 +752,89 @@ function projectStatusMetric(tone, icon, title, detail) {
 			el('span', { class: 'mono muted', style: 'margin-top:4px;font-size:9px' }, detail)));
 }
 
+// projectDevicesPane answers the question that decides where a job can run:
+// which machines have this project's files.
+//
+// Online and ready are different things, and conflating them is how somebody
+// ends up submitting a run to a machine that has nothing to run. Nothing is
+// downloaded when you join a network — a laptop should not receive somebody's
+// eighteen gigabytes of training data because it was in the room — so the files
+// travel when a person decides they should.
+function projectDevicesPane(project) {
+	const box = el('div', {});
+	const pane = el('div', {}, box);
+
+	const load = async () => {
+		let data;
+		try {
+			data = await api(`/api/projects/${encodeURIComponent(project.name)}/devices`);
+		} catch (err) {
+			mount(box, el('div', { class: 'panel' },
+				el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message)));
+			return;
+		}
+		const devices = data.devices || [];
+		const ready = devices.filter((device) => device.online && device.has_files).length;
+		mount(box,
+			el('div', { class: 'panel ps-toolbar' },
+				el('span', { class: 'grow' },
+					el('strong', { style: 'font-size:13px' }, 'Where this project can run'),
+					el('span', { class: 'muted', style: 'display:block;margin-top:3px;font-size:12px' },
+						'A machine needs the files before it can run anything. Send them ' +
+						'to whichever machines should do the work.')),
+				el('span', { class: `chip ${ready ? 'chip--good' : 'chip--warn'}` },
+					`${ready} ready`),
+				el('button', { class: 'btn btn--sm', onclick: load },
+					el('i', { class: 'bx bx-refresh' }), 'Refresh')),
+			el('div', { class: 'rows' },
+				...devices.map((device) => deviceReadinessRow(project, device, load))));
+	};
+	load();
+	return pane;
+}
+
+function deviceReadinessRow(project, device, reload) {
+	const transfer = async (direction) => {
+		const label = direction === 'send' ? 'Sending' : 'Fetching';
+		toast(`${label} ${project.name}…`);
+		try {
+			const result = await api(
+				`/api/projects/${encodeURIComponent(project.name)}/${direction}`,
+				{ method: 'POST', body: { node_id: device.node_id } });
+			toast(`${project.name} · ${megabytes(Math.round((result.bytes || 0) / 1048576))} transferred.`);
+			await reload();
+		} catch (err) { toast(err.message, 'err'); }
+	};
+
+	// Four states, and each leads somewhere different: ready, needs the files,
+	// refuses files, or is not here to receive them.
+	let action = null;
+	if (device.is_self && !device.has_files) {
+		action = el('button', { class: 'btn btn--sm btn--primary', onclick: () => transfer('fetch') },
+			el('i', { class: 'bx bx-download' }), 'Get it here');
+	} else if (!device.is_self && !device.has_files && device.online && device.accepts_files) {
+		action = el('button', { class: 'btn btn--sm', onclick: () => transfer('send') },
+			el('i', { class: 'bx bx-upload' }), 'Send files');
+	}
+
+	const status = device.has_files
+		? el('span', { class: 'chip chip--good' }, el('i', { class: 'bx bx-check' }), ' has files')
+		: !device.accepts_files
+			? el('span', { class: 'chip' }, 'refuses files')
+			: el('span', { class: 'chip chip--warn' }, 'no files');
+
+	return el('div', { class: 'row', style: 'cursor:default;align-items:center' },
+		el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
+		el('span', { class: 'row__main' },
+			el('span', { class: 'row__title' }, device.name,
+				device.is_self ? el('span', { class: 'chip chip--cyan', style: 'margin-left:8px' },
+					'this machine') : null),
+			el('span', { class: 'row__meta' },
+				device.online ? 'online' : `last seen ${ago(device.last_seen)}`)),
+		status,
+		action);
+}
+
 function projectSettingsPane(project) {
 	const description = el('textarea', { class: 'textarea', rows: '4', maxlength: '500',
 		placeholder: 'What is this project for?' }, project.description || '');
@@ -766,12 +851,63 @@ function projectSettingsPane(project) {
 				project.description = updated.description;
 				toast('Project details saved.');
 			} }, el('i', { class: 'bx bx-save' }), 'Save details')),
-		el('aside', { class: 'panel' },
-			el('div', { class: 'panel__head' }, 'Delete project'),
-			el('p', { class: 'muted', style: 'font-size:12px;line-height:1.6' },
-				'Deleting removes the local folder and its complete Git history from this machine.'),
-			el('button', { class: 'btn btn--danger', onclick: () => removeProject(project.name) },
-				el('i', { class: 'bx bx-trash' }), 'Delete permanently')));
+		el('aside', {},
+			networkPanel(project),
+			el('section', { class: 'panel', style: 'margin-top:14px' },
+				el('div', { class: 'panel__head' }, 'Delete project'),
+				el('p', { class: 'muted', style: 'font-size:12px;line-height:1.6' },
+					'Deleting removes the local folder and its complete Git history from this machine.'),
+				el('button', { class: 'btn btn--danger', onclick: () => removeProject(project.name) },
+					el('i', { class: 'bx bx-trash' }), 'Delete permanently'))));
+}
+
+// networkPanel moves a project from one network to another.
+//
+// A project lives in exactly one network. That is what makes "who can see this"
+// answerable, and what lets a repository's collaborator list mean one thing. So
+// this is a move, not a copy, and the files go with it.
+function networkPanel(project) {
+	const networks = (state.overview.networks || [])
+		.filter((network) => network.id !== project.network_id);
+	const picker = el('select', { class: 'input' },
+		...networks.map((network) => el('option', { value: network.id }, network.name)));
+	const current = (state.overview.networks || [])
+		.find((network) => network.id === project.network_id);
+
+	return el('section', { class: 'panel' },
+		el('div', { class: 'panel__head' }, 'Network'),
+		el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12px;line-height:1.6' },
+			'This project belongs to ', el('strong', {}, current ? current.name : 'this network'),
+			'. Moving it takes its files with it and changes who can see it. ' +
+			'Only the project owner can.'),
+		networks.length
+			? el('div', {},
+				el('label', { class: 'field' },
+					el('span', { class: 'field__label' }, 'Move to'), picker),
+				el('button', { class: 'btn', onclick: () => moveProject(project, picker) },
+					el('i', { class: 'bx bx-transfer' }), 'Move project'))
+			: el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
+				'There is no other network to move it to.'));
+}
+
+function moveProject(project, picker) {
+	const target = picker.value;
+	const name = picker.options[picker.selectedIndex]?.text || 'that network';
+	modal({
+		title: `Move ${project.name} to ${name}?`,
+		confirmLabel: 'Move',
+		body: () => el('p', { style: 'margin:0;font-size:13px;color:#cbd5e1;line-height:1.6' },
+			'The project and its files move together. People in the network it is ' +
+			'leaving stop seeing it, and people in ' + name + ' start. Its Git ' +
+			'history and its GitHub repository are untouched.'),
+		onConfirm: async (close) => {
+			await api(`/api/projects/${encodeURIComponent(project.name)}/network`,
+				{ method: 'PUT', body: { network_id: target } });
+			close();
+			toast(`${project.name} moved to ${name}.`);
+			location.reload();
+		},
+	});
 }
 
 function textEdit(before, after) {
