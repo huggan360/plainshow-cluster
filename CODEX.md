@@ -232,6 +232,9 @@ PATH=/usr/local/go/bin:$PATH make smoke       # 73 passed, 0 failed
 PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.5 dist  # amd64 + arm64 pass
 ```
 
-The native GTK desktop and Arch package still belong to release CI; do not
-install their build dependencies on this production Pi. The intended next tag
-is `v0.1.1-alpha.5`; never move alpha.1 through alpha.4.
+`v0.1.1-alpha.5` is published at `7585cd4`. Release workflow `33975646309`
+completed successfully: amd64 and arm64 native desktops, release bundles and
+the x86_64 Arch package all passed and are attached to the prerelease. Never
+move alpha.1 through alpha.5. The native GTK desktop and Arch package continue
+to belong to release CI; do not install their build dependencies on this
+production Pi.
