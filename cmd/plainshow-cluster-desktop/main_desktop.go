@@ -98,18 +98,11 @@ func unavailablePage(detail string) string {
 		"</head><body><main class=\"card\">" + desktopBrand() +
 		"<h1>Connecting to your node</h1><p id=\"detail\">" + html.EscapeString(detail) + "</p>" +
 		"<p>This window reconnects automatically as soon as the local service is ready.</p>" +
-		"<div class=\"cmd\">" + html.EscapeString(restartCommand()) + "</div>" +
+		"<div class=\"cmd\">sudo systemctl restart plainshow-cluster</div>" +
 		"<script>(function poll(){fetch('/node',{cache:'no-store'}).then(function(r){return r.json()})" +
 		".then(function(v){if(v.url){location.replace(v.url);return}" +
 		"if(v.detail){document.getElementById('detail').textContent=v.detail}})" +
 		".catch(function(){}).finally(function(){setTimeout(poll,750)})})()</script></main></body></html>"
-}
-
-func restartCommand() string {
-	if os.Getenv("SNAP") != "" {
-		return "sudo snap restart plainshow-cluster.node"
-	}
-	return "sudo systemctl restart plainshow-cluster"
 }
 
 func desktopBrand() string {

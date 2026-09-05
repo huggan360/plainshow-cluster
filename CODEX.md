@@ -12,8 +12,9 @@ back into the global account service.
 
 `v0.1.1-alpha.1` is already tagged at `b584647`. Main then received AMD/Intel
 telemetry commits `d0d477e` and `1d09b2b`. Alpha.2 at `f62e8e3` proved the
-desktop builds but exposed a missing `python3.12-venv` Snap dependency before
-publishing any assets. Do not move either tag. Alpha.3 includes the fix:
+desktop builds but its packaging workflow failed before publishing any assets.
+Do not move either tag. Alpha.3 includes the functional fixes and removes Snap
+distribution by explicit product decision:
 
 - The Wails/GTK/WebKit application is named exactly **Plainshow Cluster** and
   uses the established Plainshow icon. Its bootstrap page now retries runtime
@@ -58,11 +59,8 @@ publishing any assets. Do not move either tag. Alpha.3 includes the fix:
 - The portable installer covers pacman, apt, dnf and zypper and installs Git,
   Tailscale, Python/venv, GTK/WebKit and pinned Ray. Release CI builds static
   node/admin binaries, native desktop binaries and full tarballs for amd64 and
-  arm64, an x86_64 Arch package, and classic Snaps for amd64 and arm64.
-- The classic Snap bundles the desktop, node, Git, GTK/WebKit, Python and Ray,
-  keeps its node in `$SNAP_COMMON`, and delegates updates to snapd. Tailscale is
-  still a host service. Store distribution requires separate name registration
-  and classic-confinement approval.
+  arm64, plus an x86_64 Arch package. Snap packaging and publication have been
+  removed; do not restore them unless that product decision changes.
 
 ## Verification and release
 
@@ -77,9 +75,9 @@ PATH=/usr/local/go/bin:$PATH make VERSION=v0.1.1-alpha.3 dist
 All three passed after the application changes; the smoke suite reports 71
 passed and 0 failed, and the distribution build produced both architectures.
 
-The Pi lacks GTK/WebKit development headers, Snapcraft/LXD and Arch `makepkg`.
+The Pi lacks GTK/WebKit development headers and Arch `makepkg`.
 Do not install them on this production server merely for validation. Native
-desktop, Snap and Arch package builds run on native GitHub runners.
+desktop and Arch package builds run on native GitHub runners.
 
 Release without rewriting alpha.1 or alpha.2:
 
@@ -92,9 +90,9 @@ git push origin v0.1.1-alpha.3
 ```
 
 The tag triggers `.github/workflows/release.yml`. Confirm both native desktop
-builds, both Snap builds, the release-assets job, and the Arch package job.
-Expected downloads include complete amd64/arm64 tarballs, matching `.snap`
-files, raw node/admin/desktop binaries, checksums, installer and Arch package.
+builds, the release-assets job, and the Arch package job. Expected downloads
+include complete amd64/arm64 tarballs, raw node/admin/desktop binaries,
+checksums, installer and Arch package.
 
 ## Architecture map
 
@@ -106,7 +104,7 @@ files, raw node/admin/desktop binaries, checksums, installer and Arch package.
 - `internal/sysinfo`: CPU, memory, disk and multi-vendor accelerator discovery.
 - `internal/collab`, `internal/store/collab_ops.go`: OT and durable operations.
 - `web`: dependency-free UI embedded into the node.
-- `install.sh`, `packaging/arch`, `packaging/desktop`, `snap`: distribution.
+- `install.sh`, `packaging/arch`, `packaging/desktop`: distribution.
 - `deploy`: account and Headscale reference configuration. Do not alter this
   Pi's services, Apache, firewall or Headscale merely to build a release.
 
@@ -125,8 +123,8 @@ files, raw node/admin/desktop binaries, checksums, installer and Arch package.
 - The old local job supervisor remains for compatibility tests. New features
   and the shipped UI/CLI use Ray Jobs.
 - The built-in updater atomically replaces the static node binary. Re-running
-  a portable installer also refreshes the desktop/dependencies while preserving
-  data. Snap installs disable that updater because snapd owns refresh/rollback.
+  a portable installer also refreshes the desktop and dependencies while
+  preserving data.
 - CUDA, ROCm, oneAPI/OpenCL, PyTorch and other project-specific GPU frameworks
   are not installed globally. Every target machine needs the vendor runtime
   required by its workload. Mixed-vendor distributed work is possible when the
@@ -137,10 +135,8 @@ files, raw node/admin/desktop binaries, checksums, installer and Arch package.
 
 Test two real Arch machines, then Debian/Ubuntu: login, join one network, start
 Ray, observe automatic attachment, run CPU and each available GPU workload,
-stop, reboot and repeat. Register `plainshow-cluster` in the Snap Store, request
-classic-confinement approval, then upload both architectures to edge using
-`snap/README.md`. Add generated Headscale ACLs and automatic rotation if future
-networks must be mutually hostile rather than trusted.
+stop, reboot and repeat. Add generated Headscale ACLs and automatic rotation if
+future networks must be mutually hostile rather than trusted.
 
 `CLAUDE.md` is historical planning context and includes stale pre-Ray details.
 Use this file and the current code as the authoritative handover.

@@ -61,29 +61,6 @@ sudo pacman -U ./plainshow-cluster-*.pkg.tar.zst
 `pacman -S plainshow-cluster` will become possible after the package is placed
 in a signed public repository. For this alpha, use `pacman -U`.
 
-### Snap
-
-The release also contains classic Snap packages for amd64 and arm64. Install
-the downloaded file matching your architecture:
-
-```sh
-sudo snap install --dangerous --classic ./plainshow-cluster_0.1.1-alpha.3_amd64.snap
-```
-
-The host must already have Tailscale installed and `tailscaled` running. A Snap
-cannot install or enable that host-level VPN daemon, so the portable installer
-is the fully automatic option. After the Snap Store package receives classic-
-confinement approval, install the published alpha with:
-
-```sh
-sudo snap install plainshow-cluster --classic --edge
-```
-
-Store-installed snaps refresh automatically through snapd. The Snap therefore
-disables the app's separate binary updater. System-node CLI commands use the
-namespaced command, for example `sudo plainshow-cluster.pscluster status`.
-
-
 ## First use
 
 Open **Plainshow Cluster** from your application menu. The native app discovers
