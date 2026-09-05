@@ -16,6 +16,12 @@ design decision is allowed to exploit that. We are not building for datacentres.
 Guiding principle: *simple by default, powerful when needed.* The complexity
 exists inside the binary; the user does not meet it.
 
+## Unfinished work
+
+`PLAN.md` holds the staged rebuild in progress: the account, not the device,
+owns networks, memberships, invitations and project placement. Stages 0 and 1
+are done. Read it before starting anything in that area.
+
 ## Non-negotiables
 
 These are settled. Do not quietly reverse them.
