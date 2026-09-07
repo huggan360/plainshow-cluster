@@ -61,6 +61,11 @@ func (c *Client) RemoveNetworkMember(ctx context.Context, token, networkID,
 		map[string]string{"management_key": managementKey}, nil)
 }
 
+func (c *Client) DeleteNetwork(ctx context.Context, token, networkID, managementKey string) error {
+	return c.call(ctx, http.MethodDelete, "/api/networks/"+url.PathEscape(networkID), token,
+		map[string]string{"management_key": managementKey}, nil)
+}
+
 // New validates a configured account-server URL. Plain HTTP is accepted only
 // on loopback so development does not weaken production credentials.
 func New(endpoint string) (*Client, error) {
@@ -228,11 +233,22 @@ func (c *Client) SyncNetwork(ctx context.Context, token string,
 // device has ever heard of them. It is the read that lets a machine somebody
 // has just signed in on show the networks they already have elsewhere.
 func (c *Client) MyNetworks(ctx context.Context, token string) ([]accountserver.AccountNetwork, error) {
-	var out struct {
-		Networks []accountserver.AccountNetwork `json:"networks"`
-	}
+	state, err := c.MyNetworkState(ctx, token)
+	return state.Networks, err
+}
+
+type NetworkState struct {
+	Networks          []accountserver.AccountNetwork `json:"networks"`
+	DeletedNetworkIDs []string                       `json:"deleted_network_ids"`
+}
+
+// MyNetworkState includes explicit deletion tombstones. Absence alone cannot
+// delete a local network because it may be waiting for its first successful
+// registration while the account service is temporarily unavailable.
+func (c *Client) MyNetworkState(ctx context.Context, token string) (NetworkState, error) {
+	var out NetworkState
 	err := c.call(ctx, http.MethodGet, "/api/networks/mine", token, nil, &out)
-	return out.Networks, err
+	return out, err
 }
 
 // GrantNetworkMember records the account authenticated by a consumed peer

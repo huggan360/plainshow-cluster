@@ -117,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/networks", s.listNetworks)
 	mux.HandleFunc("POST /api/networks", s.createNetwork)
 	mux.HandleFunc("GET /api/networks/{id}", s.networkDetail)
+	mux.HandleFunc("DELETE /api/networks/{id}", s.deleteNetwork)
 	mux.HandleFunc("PUT /api/networks/{id}/active", s.activateNetwork)
 	mux.HandleFunc("GET /api/networks/{id}/nodes", s.networkNodes)
 	mux.HandleFunc("GET /api/networks/{id}/members", s.networkMembers)

@@ -237,3 +237,27 @@ desktop bundles and Arch package. Never move alpha.1 through alpha.6. Alpha.5's
 release workflow `33975646309` completed successfully. Native GTK and Arch builds continue
 to belong to release CI; do not install their build dependencies on this
 production Pi.
+
+## Handover addendum — 2026-09-07 lifecycle repair
+
+The previous account sync was additive only. Directly deleting the eight
+registry rows proved the flaw: alpha.4 and alpha.7 clients recreated every row
+from local configuration. The repaired contract is implemented for alpha.8:
+
+- zero networks is a valid config state (schema version 3);
+- create is synchronously accepted by the account authority before local save;
+- owner deletion writes scoped tombstones and wakes every affected account;
+- devices prune only explicit tombstones, never mere absence during an outage;
+- stale clients cannot recreate a tombstoned id;
+- adoption seeds peer private endpoints and pinned identities so same-account
+  computers have a first mesh edge instead of sharing a decorative membership;
+- `/api/auth/status` restores the remembered desktop session before the gate;
+- the General settings Save control now sits after the remember toggle;
+- Networks → Settings has the owner-only Delete network action. Project folders
+  stay on disk, while network-scoped metadata is removed.
+
+The full project check passed and the smoke suite reports 79/79. At audit time
+the live registry had eight recreated networks, `hugo-stationary` reported
+alpha.7 and `hugo-cachyos` alpha.4. Both clients must update to alpha.8 before
+their local lists will consume tombstones; the new server prevents older
+clients from recreating the global rows in the meantime.

@@ -74,7 +74,8 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 		t.Fatalf("network registration = %+v, %v", registered, err)
 	}
 	checkIn := NodeCheckIn{ID: "node", Name: "Pi", GPUCount: 1, ProjectCount: 3,
-		RunningJobs: 2, Networks: []NetworkRef{{ID: "network", Name: "Lab"}}}
+		RunningJobs: 2, Networks: []NetworkRef{{ID: "network", Name: "Lab"}},
+		Address: "https://100.64.0.1:10000", PublicKey: "public", Fingerprint: "fingerprint"}
 	if _, err := store.CheckIn("a1", checkIn); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +89,11 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	if stats.Accounts != 2 || stats.Nodes != 1 || stats.OnlineNodes != 1 ||
 		stats.Networks != 1 || stats.GPUs != 1 || stats.Projects != 3 || stats.RunningJobs != 2 {
 		t.Fatalf("stats = %#v", stats)
+	}
+	mine, err := store.NetworksForAccount("a1")
+	if err != nil || len(mine) != 1 || len(mine[0].Devices) != 1 ||
+		mine[0].Devices[0].Address != "https://100.64.0.1:10000" {
+		t.Fatalf("bootstrap devices = %+v, %v", mine, err)
 	}
 }
 
@@ -115,6 +121,28 @@ func TestNetworkRegistryRequiresKeyAndRecordsMembers(t *testing.T) {
 	networks, err := store.Networks()
 	if err != nil || len(networks) != 1 || networks[0].Members != 2 || networks[0].ManagementKey != key {
 		t.Fatalf("networks = %+v, %v", networks, err)
+	}
+}
+
+func TestDeletedNetworkCannotBeRecreatedByAStaleDevice(t *testing.T) {
+	store := openTestStore(t)
+	_ = store.InitialiseBootstrap(TokenHash("secret"))
+	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("secret"), true)
+	key := "0123456789012345678901234567890123456789"
+	registration := NetworkRegistration{ID: "old-network", Name: "Old", ManagementKey: key, Role: "owner"}
+	if _, err := store.RegisterNetwork("owner", registration); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := store.DeleteNetwork("owner", "old-network", key)
+	if err != nil || len(accounts) != 1 || accounts[0] != "owner" {
+		t.Fatalf("delete returned %v, %v", accounts, err)
+	}
+	if _, err := store.RegisterNetwork("owner", registration); !errors.Is(err, ErrNetworkDeleted) {
+		t.Fatalf("stale registration recreated deleted network: %v", err)
+	}
+	deleted, err := store.DeletedNetworksForAccount("owner")
+	if err != nil || len(deleted) != 1 || deleted[0] != "old-network" {
+		t.Fatalf("deleted ids = %v, %v", deleted, err)
 	}
 }
 

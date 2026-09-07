@@ -135,6 +135,38 @@ func (s *Store) RemoveNetworkMember(networkID, accountID string) error {
 	return err
 }
 
+// DeleteNetwork removes all database state scoped to a network. Project
+// folders are deliberately left on disk so deleting a network never destroys
+// source code or datasets that cannot be recovered.
+func (s *Store) DeleteNetwork(networkID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`DELETE FROM job WHERE project_id IN (SELECT id FROM project WHERE network_id=?)`,
+		`DELETE FROM member WHERE project_id IN (SELECT id FROM project WHERE network_id=?)`,
+		`DELETE FROM collab_operation WHERE network_id=?`,
+		`DELETE FROM collab_document WHERE network_id=?`,
+		`DELETE FROM training_run WHERE network_id=?`,
+		`DELETE FROM dataset_placement WHERE dataset_id IN (SELECT id FROM dataset WHERE network_id=?)`,
+		`DELETE FROM dataset WHERE network_id=?`,
+		`DELETE FROM project WHERE network_id=?`,
+		`DELETE FROM invitation WHERE network_id=?`,
+		`DELETE FROM network_controller WHERE network_id=?`,
+		`DELETE FROM network_node WHERE network_id=?`,
+		`DELETE FROM network_member WHERE network_id=?`,
+		`DELETE FROM network WHERE id=?`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(statement, networkID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // NetworkMember returns one account's durable role in a network.
 func (s *Store) NetworkMember(networkID, accountID string) (NetworkMemberRow, error) {
 	var member NetworkMemberRow
@@ -340,6 +372,24 @@ func (s *Store) UpsertNetworkNode(node NetworkNode) error {
 		node.OS, node.Arch, node.PublicKey, node.Fingerprint, node.Address,
 		string(policy), string(capacity), string(projects),
 		node.IsSelf, node.LastSeen, Now())
+	return err
+}
+
+// UpsertNetworkBootstrap records the first reachable edge supplied by the
+// account directory without overwriting richer policy/capacity learned from
+// the peer itself.
+func (s *Store) UpsertNetworkBootstrap(node NetworkNode) error {
+	_, err := s.db.Exec(`INSERT INTO network_node
+		(network_id,node_id,name,roles,os,arch,public_key,fingerprint,address,policy,capacity,projects,is_self,last_seen,created_at)
+		VALUES (?,?,?,?,?,?,?,?,?,'{}','{}','[]',0,?,?)
+		ON CONFLICT(network_id,node_id) DO UPDATE SET
+		name=excluded.name,os=excluded.os,arch=excluded.arch,
+		public_key=excluded.public_key,fingerprint=excluded.fingerprint,
+		address=excluded.address,last_seen=excluded.last_seen
+		WHERE excluded.last_seen > network_node.last_seen`,
+		node.NetworkID, node.NodeID, node.Name, strings.Join(node.Roles, ","),
+		node.OS, node.Arch, node.PublicKey, node.Fingerprint, node.Address,
+		node.LastSeen, Now())
 	return err
 }
 

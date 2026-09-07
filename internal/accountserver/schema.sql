@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS node (
     gpu_count        INTEGER NOT NULL DEFAULT 0,
     project_count    INTEGER NOT NULL DEFAULT 0,
     running_jobs     INTEGER NOT NULL DEFAULT 0,
+    address          TEXT NOT NULL DEFAULT '',
+    public_key       TEXT NOT NULL DEFAULT '',
+    fingerprint      TEXT NOT NULL DEFAULT '',
     last_seen        TEXT NOT NULL,
     created_at       TEXT NOT NULL
 );
@@ -42,6 +45,21 @@ CREATE TABLE IF NOT EXISTS network (
     management_key   TEXT NOT NULL DEFAULT '',
     last_seen        TEXT NOT NULL,
     created_at       TEXT NOT NULL
+);
+
+-- Deleted network ids are retained so an older device cannot recreate a
+-- network from stale local configuration on its next heartbeat.
+CREATE TABLE IF NOT EXISTS network_tombstone (
+    network_id TEXT PRIMARY KEY,
+    deleted_at TEXT NOT NULL
+);
+
+-- Devices only receive tombstones for accounts that actually belonged to the
+-- deleted network.
+CREATE TABLE IF NOT EXISTS network_tombstone_member (
+    network_id TEXT NOT NULL REFERENCES network_tombstone(network_id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    PRIMARY KEY (network_id, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS network_member (
@@ -101,3 +119,4 @@ CREATE INDEX IF NOT EXISTS session_expiry_idx ON login_session(expires_at);
 CREATE INDEX IF NOT EXISTS node_seen_idx ON node(last_seen DESC);
 CREATE INDEX IF NOT EXISTS controller_seen_idx ON controller_server(last_seen DESC);
 CREATE INDEX IF NOT EXISTS controller_network_network_idx ON controller_network(network_id);
+CREATE INDEX IF NOT EXISTS network_tombstone_account_idx ON network_tombstone_member(account_id);

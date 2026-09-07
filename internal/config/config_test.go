@@ -55,7 +55,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 	want := Defaults()
 	want.Node.Name = "fredrik-pc"
-	want.Cluster.Name = "HomeLab"
+	want.Memberships = []MembershipConfig{{
+		ID: "home", Name: "HomeLab", Roles: []Role{RoleWorker},
+		AccountRole: "owner", ManagementKey: NewSecret(), Enabled: true, Policy: want.Worker,
+	}}
+	want.SetActiveNetwork("home")
 	want.Node.Roles = []Role{RoleWorker}
 	want.Network.Port = 9999
 	want.Worker.AllowTerminal = true
@@ -84,7 +88,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestMultipleNetworkMemberships(t *testing.T) {
 	cfg := Defaults()
-	cfg.EnsureMemberships()
+	cfg.Memberships = []MembershipConfig{{
+		ID: "first", Name: "First", Roles: []Role{RoleWorker},
+		AccountRole: "owner", ManagementKey: NewSecret(), Enabled: true, Policy: cfg.Worker,
+	}}
+	cfg.SetActiveNetwork("first")
 	first := cfg.Memberships[0]
 	second := MembershipConfig{
 		ID: "friends", Name: "Friends", Roles: []Role{RoleWorker},
@@ -100,6 +108,29 @@ func TestMultipleNetworkMemberships(t *testing.T) {
 	cfg.UpdateActiveMembership(func(m *MembershipConfig) { m.Name = "Lab" })
 	if cfg.ActiveMembership().Name != "Lab" || cfg.Memberships[0].ID != first.ID {
 		t.Fatalf("membership update escaped its network: %+v", cfg.Memberships)
+	}
+}
+
+func TestNoNetworksSurvivesSaveAndLoad(t *testing.T) {
+	l, err := NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Defaults()
+	cfg.Memberships = nil
+	cfg.ActiveNetwork = ""
+	if err := Save(l, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Memberships) != 0 || loaded.ActiveNetwork != "" || loaded.Cluster.ID != "" {
+		t.Fatalf("empty network state was regenerated: %+v", loaded)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
+	"github.com/huggan360/plainshow-cluster/internal/accountserver"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/identity"
@@ -442,28 +443,132 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "A network name must be between 1 and 64 characters.")
 		return
 	}
+	existing, err := s.store.Networks(s.cfg.AccountID())
+	if err != nil {
+		fail(w, 500, err.Error())
+		return
+	}
+	for _, network := range existing {
+		if strings.EqualFold(network.Name, body.Name) {
+			fail(w, http.StatusConflict, "You already have a network with that name.")
+			return
+		}
+	}
 	membership := config.MembershipConfig{
 		ID: config.NewID(), Name: body.Name,
 		Roles: []config.Role{config.RoleWorker}, AccountRole: store.NetworkOwner,
 		ManagementKey: config.NewSecret(), Enabled: true, Policy: s.cfg.Worker,
+	}
+	var central *accountclient.Client
+	var accountToken string
+	if s.usesCentralAccounts() {
+		accountToken, err = config.LoadAccountToken(s.layout)
+		if err != nil || accountToken == "" {
+			fail(w, http.StatusConflict, "Sign in again before creating a network.")
+			return
+		}
+		central, err = accountclient.New(s.cfg.Account.Server)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if _, err = central.SyncNetwork(r.Context(), accountToken, accountserver.NetworkRegistration{
+			ID: membership.ID, Name: membership.Name, ManagementKey: membership.ManagementKey,
+			Role: store.NetworkOwner,
+		}); err != nil {
+			fail(w, http.StatusBadGateway, "The account server could not create the network: "+err.Error())
+			return
+		}
 	}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	if s.cfg.ActiveNetwork == "" {
 		s.cfg.SetActiveNetwork(membership.ID)
 	}
 	if err := config.Save(s.layout, s.cfg); err != nil {
+		s.cfg.Memberships = s.cfg.Memberships[:len(s.cfg.Memberships)-1]
+		if central != nil {
+			_ = central.DeleteNetwork(context.Background(), accountToken, membership.ID, membership.ManagementKey)
+		}
 		fail(w, 500, err.Error())
 		return
 	}
 	if err := s.recordLocalMembership(membership, store.Network{
 		ID: membership.ID, Name: membership.Name, OwnerAccountID: s.cfg.AccountID(),
 	}); err != nil {
+		s.cfg.Memberships = s.cfg.Memberships[:len(s.cfg.Memberships)-1]
+		if s.cfg.ActiveNetwork == membership.ID {
+			s.cfg.ActiveNetwork = ""
+		}
+		_ = config.Save(s.layout, s.cfg)
+		_ = s.store.DeleteNetwork(membership.ID)
+		if central != nil {
+			_ = central.DeleteNetwork(context.Background(), accountToken, membership.ID, membership.ManagementKey)
+		}
 		fail(w, 500, err.Error())
 		return
 	}
 	s.hub.Publish("networks.changed", membership)
 	go s.checkInAccountServer(context.Background())
 	writeJSON(w, 201, membership)
+}
+
+// deleteNetwork removes an owner-created network everywhere. The account
+// server writes a tombstone first; local project folders stay on disk while
+// their now-unreachable metadata is removed.
+func (s *Server) deleteNetwork(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.membershipMu.Lock()
+	defer s.membershipMu.Unlock()
+	index := -1
+	var membership config.MembershipConfig
+	for i, item := range s.cfg.Memberships {
+		if item.ID == id {
+			index, membership = i, item
+			break
+		}
+	}
+	if index < 0 {
+		fail(w, http.StatusNotFound, "This machine does not belong to that network.")
+		return
+	}
+	if membership.AccountRole != store.NetworkOwner {
+		fail(w, http.StatusForbidden, "Only the network owner can delete it.")
+		return
+	}
+	if s.usesCentralAccounts() {
+		token, err := config.LoadAccountToken(s.layout)
+		if err != nil || token == "" {
+			fail(w, http.StatusConflict, "Sign in again before deleting the network.")
+			return
+		}
+		client, err := accountclient.New(s.cfg.Account.Server)
+		if err != nil {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if err := client.DeleteNetwork(r.Context(), token, id, membership.ManagementKey); err != nil {
+			fail(w, http.StatusBadGateway, "The account server could not delete the network: "+err.Error())
+			return
+		}
+	}
+	if err := s.store.DeleteNetwork(id); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.cfg.Memberships = append(s.cfg.Memberships[:index], s.cfg.Memberships[index+1:]...)
+	if s.cfg.ActiveNetwork == id {
+		s.cfg.ActiveNetwork = ""
+		if len(s.cfg.Memberships) > 0 {
+			s.cfg.SetActiveNetwork(s.cfg.Memberships[0].ID)
+		}
+	}
+	if err := config.Save(s.layout, s.cfg); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.hub.Publish("networks.changed", map[string]string{"deleted": id})
+	go s.reconcileRay(context.Background())
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "project_files_preserved": true})
 }
 
 // activateNetwork selects the network this machine works in.

@@ -15,13 +15,17 @@ import (
 
 // fakeAuthority serves the one endpoint adoption depends on.
 func fakeAuthority(t *testing.T, networks []accountserver.AccountNetwork) *accountclient.Client {
+	return fakeAuthorityState(t, networks, nil)
+}
+
+func fakeAuthorityState(t *testing.T, networks []accountserver.AccountNetwork, deleted []string) *accountclient.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/networks/mine" {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
+		writeJSON(w, http.StatusOK, map[string]any{"networks": networks, "deleted_network_ids": deleted})
 	}))
 	t.Cleanup(server.Close)
 
@@ -30,6 +34,31 @@ func fakeAuthority(t *testing.T, networks []accountserver.AccountNetwork) *accou
 		t.Fatal(err)
 	}
 	return client
+}
+
+func TestDeletedNetworkIsPrunedFromTheDevice(t *testing.T) {
+	srv := adoptingNode(t)
+	srv.cfg.Memberships = []config.MembershipConfig{{
+		ID: "deleted", Name: "Deleted", AccountRole: store.NetworkOwner,
+		ManagementKey: goodKey, Enabled: true,
+	}}
+	srv.cfg.ActiveNetwork = "deleted"
+	if err := srv.recordLocalMembership(srv.cfg.Memberships[0], store.Network{
+		ID: "deleted", Name: "Deleted", OwnerAccountID: "acct-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := fakeAuthorityState(t, nil, []string{"deleted"})
+	if _, err := srv.AdoptAccountNetworks(context.Background(), client, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if len(srv.cfg.Memberships) != 0 || srv.cfg.ActiveNetwork != "" {
+		t.Fatalf("deleted membership remains: %+v", srv.cfg.Memberships)
+	}
+	networks, err := srv.store.Networks("acct-1")
+	if err != nil || len(networks) != 0 {
+		t.Fatalf("deleted network remains in local store: %v, %v", networks, err)
+	}
 }
 
 func adoptingNode(t *testing.T) *Server {
@@ -81,6 +110,28 @@ func TestSigningInOnANewMachineBringsYourNetworks(t *testing.T) {
 	}
 	if len(networks) != 2 {
 		t.Fatalf("the store lists %d networks, want 2", len(networks))
+	}
+}
+
+func TestAdoptionSeedsTheFirstPeerConnection(t *testing.T) {
+	srv := adoptingNode(t)
+	client := fakeAuthority(t, []accountserver.AccountNetwork{{
+		ID: "net-lab", Name: "Research lab", Role: "owner", ManagementKey: goodKey, Owner: true,
+		Devices: []accountserver.NetworkBootstrapNode{{
+			ID: "peer", Name: "Other PC", OS: "linux", Arch: "amd64",
+			Address: "https://100.64.0.2:10000", PublicKey: "public",
+			Fingerprint: "fingerprint", LastSeen: store.Now(),
+		}},
+	}})
+	if _, err := srv.AdoptAccountNetworks(context.Background(), client, "token"); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := srv.store.NetworkNode("net-lab", "peer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peer.Address != "https://100.64.0.2:10000" || peer.Fingerprint != "fingerprint" {
+		t.Fatalf("peer bootstrap = %+v", peer)
 	}
 }
 

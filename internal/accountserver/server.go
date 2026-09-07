@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/networks/{id}/invitations", s.requireAccount(http.HandlerFunc(s.networkInvitations)))
 	mux.Handle("POST /api/networks/{id}/invitations", s.requireAccount(http.HandlerFunc(s.createInvitation)))
 	mux.Handle("POST /api/networks/sync", s.requireAccount(http.HandlerFunc(s.syncNetwork)))
+	mux.Handle("DELETE /api/networks/{id}", s.requireAccount(http.HandlerFunc(s.deleteNetwork)))
 	mux.Handle("POST /api/networks/{id}/members", s.requireAccount(http.HandlerFunc(s.grantNetworkMember)))
 	mux.Handle("PUT /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.updateNetworkMember)))
 	mux.Handle("DELETE /api/networks/{id}/members/{account}", s.requireAccount(http.HandlerFunc(s.removeNetworkMember)))
@@ -294,7 +295,12 @@ func (s *Server) myNetworks(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
+	deleted, err := s.store.DeletedNetworksForAccount(account.ID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"networks": networks, "deleted_network_ids": deleted})
 }
 
 func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
@@ -306,7 +312,9 @@ func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	network, err := s.store.RegisterNetwork(account.ID, input)
 	if err != nil {
-		if errors.Is(err, ErrNetworkKey) || errors.Is(err, ErrNetworkMember) {
+		if errors.Is(err, ErrNetworkDeleted) {
+			fail(w, http.StatusGone, "This network was deleted.")
+		} else if errors.Is(err, ErrNetworkKey) || errors.Is(err, ErrNetworkMember) {
 			fail(w, http.StatusForbidden, "This account is not registered for that network or its management key is incorrect.")
 		} else {
 			fail(w, http.StatusBadRequest, err.Error())
@@ -326,6 +334,33 @@ func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"network": network, "controller": controller, "members": members,
 	})
+}
+
+func (s *Server) deleteNetwork(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var body struct {
+		ManagementKey string `json:"management_key"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	affected, err := s.store.DeleteNetwork(account.ID, r.PathValue("id"), body.ManagementKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			fail(w, http.StatusNotFound, "No such network.")
+		case errors.Is(err, ErrNetworkKey):
+			fail(w, http.StatusForbidden, "The network management key is incorrect.")
+		default:
+			fail(w, http.StatusForbidden, err.Error())
+		}
+		return
+	}
+	for _, accountID := range affected {
+		s.watchers.notify(accountID, TopicNetworks)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "affected_accounts": len(affected)})
 }
 
 func (s *Server) updateNetworkMember(w http.ResponseWriter, r *http.Request) {

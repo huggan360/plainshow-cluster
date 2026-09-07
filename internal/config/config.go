@@ -37,7 +37,9 @@ const DefaultPort = 9999
 //
 //	1  everything before per-network project sync
 //	2  WorkerConfig.AllowProjectSync
-const CurrentVersion = 2
+//	3  an empty membership list means "no networks" instead of recreating the
+//	   retired implicit cluster
+const CurrentVersion = 3
 
 // DefaultUpdateRepository is where a node looks for new releases until it is
 // told otherwise. It is a default, not a constant of the system: point
@@ -288,20 +290,16 @@ func (c *Config) ActiveMembership() MembershipConfig {
 	if len(c.Memberships) > 0 {
 		return c.Memberships[0]
 	}
-	return MembershipConfig{
-		ID: c.Cluster.ID, Name: c.Cluster.Name, Roles: c.Node.Roles,
-		AccountRole: "owner", Enabled: true, Policy: c.Worker,
-	}
+	return MembershipConfig{}
 }
 
-// EnsureMemberships migrates the original single-cluster configuration.
+// EnsureMemberships normalises the explicit memberships. Legacy migration is
+// handled once in upgradeFrom; an empty list is now a durable, valid state.
 func (c *Config) EnsureMemberships() {
 	if len(c.Memberships) == 0 {
-		c.Memberships = []MembershipConfig{{
-			ID: c.Cluster.ID, Name: c.Cluster.Name,
-			Roles: append([]Role(nil), c.Node.Roles...), AccountRole: "owner",
-			Enabled: true, Policy: c.Worker,
-		}}
+		c.ActiveNetwork = ""
+		c.Cluster = ClusterConfig{}
+		return
 	}
 	for i := range c.Memberships {
 		if c.Memberships[i].AccountRole == "" {
@@ -555,6 +553,16 @@ func Load(l Layout) (*Config, error) {
 // element is built from zero, so a membership written before a field existed
 // reads it as false no matter what the default says.
 func (c *Config) upgradeFrom(version int) {
+	// Before version 3 Cluster was the only source of network identity. Import
+	// it once, but never regenerate it after a modern device removes its last
+	// network.
+	if version < 3 && len(c.Memberships) == 0 && c.Cluster.ID != "" {
+		c.Memberships = []MembershipConfig{{
+			ID: c.Cluster.ID, Name: c.Cluster.Name,
+			Roles: append([]Role(nil), c.Node.Roles...), AccountRole: "owner",
+			Enabled: true, Policy: c.Worker,
+		}}
+	}
 	// A node that predates per-network project sync was, in effect, willing to
 	// receive project files — that is how every remote job has always worked.
 	// Reading the absent field as "no" would silently take working machines out
@@ -580,12 +588,6 @@ func (c *Config) applyFallbacks() {
 	c.Node.Roles = Normalise(c.Node.Roles)
 	for i := range c.Memberships {
 		c.Memberships[i].Roles = Normalise(c.Memberships[i].Roles)
-	}
-	if c.Cluster.ID == "" {
-		c.Cluster.ID = d.Cluster.ID
-	}
-	if c.Cluster.Name == "" {
-		c.Cluster.Name = d.Cluster.Name
 	}
 	if c.Network.Bind == "" {
 		c.Network.Bind = d.Network.Bind

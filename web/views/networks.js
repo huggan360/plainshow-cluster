@@ -280,6 +280,7 @@ function projectCard(project, data) {
 
 function settingsTab(data) {
     const canManage = ['owner', 'admin'].includes(data.network.role || data.membership.account_role);
+    const isOwner = (data.network.role || data.membership.account_role) === 'owner';
     const pending = el('div', {});
     // Outstanding invitations are loaded after the page rather than blocking
     // it: a node with no account authority has nowhere to ask, and that is not
@@ -319,7 +320,24 @@ function settingsTab(data) {
                     'invitation. Give it a single-use code instead and run ' +
                     'pscluster join there.'),
                 el('button', { class: 'btn btn--sm', onclick: () => createJoinCode(data.network) },
-                    el('i', { class: 'bx bx-key' }), 'Create a machine code')) : null));
+                    el('i', { class: 'bx bx-key' }), 'Create a machine code')) : null,
+            isOwner ? el('section', { class: 'panel', style: 'border-color:rgba(255,83,112,.3)' },
+                el('div', { class: 'panel__head bad-text' }, 'Delete network'),
+                el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12px;line-height:1.6' },
+                    'Removes this network from every account and machine. Local project folders are preserved.'),
+                el('button', { class: 'btn btn--sm btn--danger', onclick: () => deleteNetwork(data.network) },
+                    el('i', { class: 'bx bx-trash' }), 'Delete network')) : null));
+}
+
+async function deleteNetwork(network) {
+    if (!window.confirm(`Delete ${network.name} from every machine? Project folders stay on disk.`)) return;
+    try {
+        await api(`/api/networks/${encodeURIComponent(network.id)}`, { method: 'DELETE', body: {} });
+        toast(`${network.name} was deleted.`);
+        navigate('networks');
+    } catch (error) {
+        toast(error.message, 'err');
+    }
 }
 
 function pendingPanel(invitations, canManage) {

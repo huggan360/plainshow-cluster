@@ -24,6 +24,7 @@ import (
 const (
 	TopicDevices     = "devices"
 	TopicInvitations = "invitations"
+	TopicNetworks    = "networks"
 )
 
 // pingEvery keeps the connection alive through the reverse proxy. Cloudflare

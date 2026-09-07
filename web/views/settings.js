@@ -90,9 +90,7 @@ export async function renderSettings(host, args = []) {
                     'An interactive shell. Off by default, and worth keeping that way.'),
                 toggle(worker, 'allow_project_sync', 'Project files',
                     'Let other machines in your networks put a project’s files here, ' +
-                    'and read them back. A machine cannot run anything without them.'),
-                el('div', { style: 'display:flex;justify-content:flex-end;margin-top:16px' },
-                    saveBtn)),
+                    'and read them back. A machine cannot run anything without them.')),
 
             el('div', {},
                 el('div', { class: 'panel', style: 'margin-bottom:14px' },
@@ -125,6 +123,9 @@ export async function renderSettings(host, args = []) {
                 'The desktop window cannot keep a cookie, so without this you are ' +
                 'signed out every time you close it. Turn it off on a computer other ' +
                 'people can log in to.')),
+        tab !== 'general' ? null : el('div', {
+            style: 'display:flex;justify-content:flex-end;margin-top:14px',
+        }, saveBtn),
         tab !== 'updates' ? null : updatePanel(update, updateStatus, toggle),
         tab !== 'updates' ? null : el('div', {
             style: 'display:flex;justify-content:flex-end;margin-top:14px',

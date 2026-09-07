@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"log"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
+	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 	"github.com/huggan360/plainshow-cluster/internal/version"
 )
 
@@ -92,11 +94,15 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		_ = s.store.SetNetworkController(membership.ID, selected)
 	}
 	info := sysinfo.Probe(s.layout.Root)
+	tailnetStatus := tailnet.Probe(ctx)
 	checkIn := accountserver.NodeCheckIn{
 		ID: s.cfg.Node.ID, Name: s.cfg.Node.Name, Version: version.Version,
 		OS: info.OS, Arch: info.Arch, GPUCount: len(info.GPUs),
 		ProjectCount: len(projects), RunningJobs: len(jobs), Networks: refs,
 		ActiveNetwork: s.cfg.ActiveNetwork,
+		Address:       advertisedEndpointFor(s.cfg, tailnetStatus),
+		PublicKey:     base64.RawURLEncoding.EncodeToString(s.device.Public),
+		Fingerprint:   s.fingerprint,
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	instructions, err := client.CheckIn(requestCtx, token, checkIn)
@@ -168,10 +174,11 @@ func (s *Server) signOutThisMachine() {
 // it does not widen what this machine will do. The device-wide policy in
 // Settings still decides whether any network gets to run anything here.
 func (s *Server) AdoptAccountNetworks(ctx context.Context, client *accountclient.Client, token string) (int, error) {
-	remote, err := client.MyNetworks(ctx, token)
+	state, err := client.MyNetworkState(ctx, token)
 	if err != nil {
 		return 0, err
 	}
+	remote := state.Networks
 
 	s.membershipMu.Lock()
 	defer s.membershipMu.Unlock()
@@ -213,7 +220,47 @@ func (s *Server) AdoptAccountNetworks(ctx context.Context, client *accountclient
 		known[network.ID] = true
 		adopted++
 	}
-	if adopted == 0 {
+	// Membership alone is not connectivity. Seed each local directory with the
+	// private address and pinned identity of the other devices so the first mesh
+	// exchange can happen; subsequent state travels directly peer-to-peer.
+	for _, network := range remote {
+		for _, device := range network.Devices {
+			if device.ID == "" || device.ID == s.cfg.Node.ID || device.Address == "" || device.Fingerprint == "" {
+				continue
+			}
+			_ = s.store.UpsertNetworkBootstrap(store.NetworkNode{
+				NetworkID: network.ID, NodeID: device.ID, Name: device.Name,
+				Roles: []string{"worker"}, OS: device.OS, Arch: device.Arch,
+				Address: device.Address, PublicKey: device.PublicKey,
+				Fingerprint: device.Fingerprint, LastSeen: device.LastSeen,
+			})
+		}
+	}
+	deleted := make(map[string]bool, len(state.DeletedNetworkIDs))
+	for _, id := range state.DeletedNetworkIDs {
+		deleted[id] = true
+	}
+	removed := 0
+	kept := make([]config.MembershipConfig, 0, len(s.cfg.Memberships))
+	for _, membership := range s.cfg.Memberships {
+		if !deleted[membership.ID] {
+			kept = append(kept, membership)
+			continue
+		}
+		if err := s.store.DeleteNetwork(membership.ID); err != nil {
+			kept = append(kept, membership)
+			continue
+		}
+		removed++
+	}
+	s.cfg.Memberships = kept
+	if deleted[s.cfg.ActiveNetwork] {
+		s.cfg.ActiveNetwork = ""
+		if len(kept) > 0 {
+			s.cfg.SetActiveNetwork(kept[0].ID)
+		}
+	}
+	if adopted == 0 && removed == 0 {
 		return 0, nil
 	}
 	// A machine with no network selected should land in one rather than in an
@@ -224,7 +271,10 @@ func (s *Server) AdoptAccountNetworks(ctx context.Context, client *accountclient
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		return adopted, err
 	}
-	s.hub.Publish("networks.changed", map[string]any{"adopted": adopted})
+	s.hub.Publish("networks.changed", map[string]any{"adopted": adopted, "removed": removed})
+	if removed > 0 {
+		go s.reconcileRay(context.Background())
+	}
 	return adopted, nil
 }
 
@@ -346,5 +396,8 @@ func (s *Server) handleAccountEvent(ctx context.Context, topic string) {
 		s.hub.Publish("devices.changed", map[string]string{"reason": "account"})
 	case accountserver.TopicInvitations:
 		s.hub.Publish("invitations.changed", map[string]string{"reason": "account"})
+	case accountserver.TopicNetworks:
+		s.checkInAccountServer(ctx)
+		s.hub.Publish("networks.changed", map[string]string{"reason": "account"})
 	}
 }

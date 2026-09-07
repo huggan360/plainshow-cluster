@@ -197,6 +197,29 @@ woken device re-asks over its own authenticated call. Keep it that way. The
 moment something tries to send *content* down this channel, it has become the
 thing that rule forbids.
 
+### Stage 8 — Authoritative network lifecycle and peer bootstrap ✅
+
+The global account service is authoritative for creation and deletion. A
+network is created there before it is committed locally; deletion writes a
+per-member tombstone before removing the registry row. Updated devices consume
+those tombstones and remove the matching local membership, while an old device
+is refused if it tries to recreate the deleted id. An empty membership list is
+now a valid durable state rather than a trigger that regenerates the retired
+implicit cluster.
+
+Account adoption also carries the minimal bootstrap directory needed to make
+the first peer-to-peer connection: private endpoint, public key and certificate
+fingerprint. Project names, code, commands, logs and traffic remain outside the
+management plane; after the first edge, ordinary mesh gossip carries live state.
+
+The desktop startup status endpoint now re-establishes its WebKitGTK session
+from the remembered machine credential. Previously that logic existed only
+behind protected endpoints, which the login gate never called.
+
+Verification on 2026-09-07: `make check` passed and `make smoke` reported
+79 passed, 0 failed, including explicit first creation and deletion down to
+zero networks.
+
 ## Rules this plan does not get to break
 
 - Bulk bytes never pass through the account service. It carries membership,

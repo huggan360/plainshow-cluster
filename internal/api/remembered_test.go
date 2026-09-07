@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -47,6 +48,27 @@ func TestClosingTheWindowDoesNotSignYouOut(t *testing.T) {
 	}
 	if account.Username != "huggan360" {
 		t.Fatalf("re-established as %q, want huggan360", account.Username)
+	}
+}
+
+func TestAuthStatusRestoresRememberedDesktopSession(t *testing.T) {
+	srv := signedInMachine(t)
+	recorder := httptest.NewRecorder()
+	srv.authStatus(recorder, loopbackRequest())
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("auth status returned %d", recorder.Code)
+	}
+	var response struct {
+		Authenticated bool `json:"authenticated"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Authenticated {
+		t.Fatal("startup status did not restore the remembered session")
+	}
+	if recorder.Header().Get("Set-Cookie") == "" {
+		t.Fatal("startup status restored no browser cookie")
 	}
 }
 

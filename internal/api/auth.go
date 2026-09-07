@@ -223,6 +223,16 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 			response["authenticated"] = true
 			response["account"] = account
 		}
+	} else if account, ok := s.rememberedAccount(r); ok {
+		// Startup asks this public endpoint before it tries any protected API.
+		// Recreate WebKitGTK's memory-only cookie here or the login gate appears
+		// before rememberedAccount can ever be reached by authenticate.
+		if err := s.issueSession(w, r, account); err != nil {
+			fail(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response["authenticated"] = true
+		response["account"] = account
 	}
 	writeJSON(w, http.StatusOK, response)
 }

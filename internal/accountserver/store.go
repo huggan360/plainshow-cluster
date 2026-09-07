@@ -32,6 +32,8 @@ var (
 	// ErrNetworkMember means a valid network key was presented by an account
 	// that has not been invited by a network administrator.
 	ErrNetworkMember = errors.New("account is not a member of the network")
+	// ErrNetworkDeleted prevents stale devices from resurrecting a network.
+	ErrNetworkDeleted = errors.New("network was deleted")
 	// ErrControllerOwner prevents another account from taking over a controller.
 	ErrControllerOwner = errors.New("controller belongs to another account")
 	// ErrControllerAccess means the account cannot use or configure a controller.
@@ -89,8 +91,9 @@ type EnterpriseMember struct {
 	Joined      string `json:"joined_at"`
 }
 
-// NodeCheckIn is aggregate metadata only. It intentionally has no project
-// names, commands, logs, addresses, keys, datasets or artifacts.
+// NodeCheckIn is aggregate metadata plus the private endpoint and public
+// identity needed for peers in the same network to make their first direct
+// connection. It has no project names, commands, logs, datasets or artifacts.
 type NodeCheckIn struct {
 	ID           string       `json:"id"`
 	Name         string       `json:"name"`
@@ -101,6 +104,9 @@ type NodeCheckIn struct {
 	ProjectCount int          `json:"project_count"`
 	RunningJobs  int          `json:"running_jobs"`
 	Networks     []NetworkRef `json:"networks"`
+	Address      string       `json:"address"`
+	PublicKey    string       `json:"public_key"`
+	Fingerprint  string       `json:"fingerprint"`
 	// ActiveNetwork is the network this device is working in right now. It is
 	// also the acknowledgement of a move somebody asked for from elsewhere.
 	ActiveNetwork string `json:"active_network"`
@@ -130,6 +136,20 @@ type Node struct {
 	RunningJobs    int    `json:"running_jobs"`
 	LastSeen       string `json:"last_seen"`
 	Created        string `json:"created_at"`
+}
+
+// NetworkBootstrapNode is enough for one peer-to-peer connection. Once that
+// edge exists the mesh exchanges richer policy, capacity and project state
+// directly without sending it through the account service.
+type NetworkBootstrapNode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	OS          string `json:"os"`
+	Arch        string `json:"arch"`
+	Address     string `json:"address"`
+	PublicKey   string `json:"public_key"`
+	Fingerprint string `json:"fingerprint"`
+	LastSeen    string `json:"last_seen"`
 }
 
 // Stats is the intentionally small global overview.
@@ -181,6 +201,9 @@ func (s *Store) migrate() error {
 		// Set when somebody signs a device out from another machine. The device
 		// clears it on its next check-in, which is also the acknowledgement.
 		{"node", "sign_out_at", "TEXT NOT NULL DEFAULT ''"},
+		{"node", "address", "TEXT NOT NULL DEFAULT ''"},
+		{"node", "public_key", "TEXT NOT NULL DEFAULT ''"},
+		{"node", "fingerprint", "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range columns {
 		has, err := s.hasColumn(column.table, column.name)
@@ -385,15 +408,16 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) (NodeInstructions, 
 	seen := now()
 	_, err = tx.Exec(`INSERT INTO node
         (id,owner_account_id,name,version,os,arch,gpu_count,project_count,running_jobs,
-         active_network,last_seen,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+         active_network,address,public_key,fingerprint,last_seen,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,
           os=excluded.os,arch=excluded.arch,gpu_count=excluded.gpu_count,
           project_count=excluded.project_count,running_jobs=excluded.running_jobs,
-          active_network=excluded.active_network,
+          active_network=excluded.active_network,address=excluded.address,
+          public_key=excluded.public_key,fingerprint=excluded.fingerprint,
           last_seen=excluded.last_seen`, input.ID, accountID, input.Name, input.Version,
 		input.OS, input.Arch, input.GPUCount, input.ProjectCount, input.RunningJobs,
-		input.ActiveNetwork, seen, seen)
+		input.ActiveNetwork, input.Address, input.PublicKey, input.Fingerprint, seen, seen)
 	if err != nil {
 		return instructions, err
 	}
@@ -476,6 +500,13 @@ func (s *Store) RegisterNetwork(accountID string, input NetworkRegistration) (En
 		return EnterpriseNetwork{}, err
 	}
 	defer tx.Rollback()
+	var deleted int
+	if err := tx.QueryRow(`SELECT count(*) FROM network_tombstone WHERE network_id=?`, input.ID).Scan(&deleted); err != nil {
+		return EnterpriseNetwork{}, err
+	}
+	if deleted != 0 {
+		return EnterpriseNetwork{}, ErrNetworkDeleted
+	}
 	var network EnterpriseNetwork
 	err = tx.QueryRow(`SELECT id,name,owner_account_id,management_key,last_seen,created_at
         FROM network WHERE id=?`, input.ID).Scan(&network.ID, &network.Name,
@@ -532,6 +563,82 @@ func (s *Store) RegisterNetwork(accountID string, input NetworkRegistration) (En
 		return network, err
 	}
 	return network, nil
+}
+
+// DeleteNetwork permanently removes a network owned by actor and records a
+// tombstone for every member so stale device configurations cannot recreate it.
+func (s *Store) DeleteNetwork(actorID, networkID, managementKey string) ([]string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var owner, key string
+	if err := tx.QueryRow(`SELECT owner_account_id,management_key FROM network WHERE id=?`, networkID).Scan(&owner, &key); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if owner != actorID {
+		return nil, errors.New("only the network owner can delete the network")
+	}
+	if subtle.ConstantTimeCompare([]byte(key), []byte(managementKey)) != 1 {
+		return nil, ErrNetworkKey
+	}
+	rows, err := tx.Query(`SELECT account_id FROM network_member WHERE network_id=?`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	accounts := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		accounts = append(accounts, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO network_tombstone(network_id,deleted_at) VALUES(?,?)
+		ON CONFLICT(network_id) DO UPDATE SET deleted_at=excluded.deleted_at`, networkID, now()); err != nil {
+		return nil, err
+	}
+	for _, accountID := range accounts {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO network_tombstone_member(network_id,account_id) VALUES(?,?)`, networkID, accountID); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE node SET active_network='',desired_network=''
+		WHERE active_network=? OR desired_network=?`, networkID, networkID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM network WHERE id=?`, networkID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
+func (s *Store) DeletedNetworksForAccount(accountID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT network_id FROM network_tombstone_member WHERE account_id=?`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // GrantNetworkMember is called by the inviting peer after it has authenticated
@@ -747,15 +854,16 @@ func (s *Store) Stats() (Stats, error) {
 // device the account owns take part in the network, and an account that is
 // already a member has it anyway on every other machine it has signed in on.
 type AccountNetwork struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Role          string `json:"role"`
-	ManagementKey string `json:"management_key"`
-	Owner         bool   `json:"owner"`
-	Members       int    `json:"members"`
-	Nodes         int    `json:"nodes"`
-	LastSeen      string `json:"last_seen"`
-	Joined        string `json:"joined_at"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Role          string                 `json:"role"`
+	ManagementKey string                 `json:"management_key"`
+	Owner         bool                   `json:"owner"`
+	Members       int                    `json:"members"`
+	Nodes         int                    `json:"nodes"`
+	LastSeen      string                 `json:"last_seen"`
+	Joined        string                 `json:"joined_at"`
+	Devices       []NetworkBootstrapNode `json:"devices"`
 }
 
 // NetworksForAccount lists every network this account is a member of.
@@ -774,7 +882,6 @@ func (s *Store) NetworksForAccount(accountID string) ([]AccountNetwork, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := []AccountNetwork{}
 	for rows.Next() {
 		var item AccountNetwork
@@ -785,6 +892,41 @@ func (s *Store) NetworksForAccount(accountID string) ([]AccountNetwork, error) {
 		}
 		item.Owner = owner == accountID
 		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range out {
+		devices, err := s.bootstrapNodes(out[index].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[index].Devices = devices
+	}
+	return out, nil
+}
+
+func (s *Store) bootstrapNodes(networkID string) ([]NetworkBootstrapNode, error) {
+	rows, err := s.db.Query(`SELECT n.id,n.name,n.os,n.arch,n.address,n.public_key,n.fingerprint,n.last_seen
+		FROM node n JOIN node_network nn ON nn.node_id=n.id
+		WHERE nn.network_id=? AND n.address<>'' AND n.fingerprint<>''
+		ORDER BY n.last_seen DESC`, networkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []NetworkBootstrapNode{}
+	for rows.Next() {
+		var node NetworkBootstrapNode
+		if err := rows.Scan(&node.ID, &node.Name, &node.OS, &node.Arch, &node.Address,
+			&node.PublicKey, &node.Fingerprint, &node.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, node)
 	}
 	return out, rows.Err()
 }

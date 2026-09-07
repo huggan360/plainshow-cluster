@@ -43,6 +43,13 @@ ok('SPA fallback for unknown route', (await fetch(B + '/anything')).ok);
 ok('unknown API endpoint 404s', (await j('/api/nope')).status === 404);
 
 console.log('\nOVERVIEW');
+const emptyOverview = (await j('/api/overview')).body;
+ok('new installation starts with no invented network',
+   emptyOverview.networks.length === 0 && emptyOverview.active_network === '');
+const firstNetwork = await j('/api/networks', {
+  method: 'POST', body: { name: 'Smoke lab' },
+});
+ok('first network is created explicitly', firstNetwork.status === 201, JSON.stringify(firstNetwork.body));
 const ov = (await j('/api/overview')).body;
 const defaultNetwork = ov.active_network;
 ok('cluster named', typeof ov.cluster.name === 'string' && ov.cluster.name.length > 0);
@@ -207,6 +214,17 @@ ok('network workspace has projects, devices and policy', networkDetail.status ==
 ok('device compute assignment can switch independently',
   (await j(`/api/networks/${defaultNetwork}/active`, { method: 'PUT' })).status === 200);
 ok('switching device compute does not hide projects', (await j('/api/projects')).body.length === 2);
+
+console.log('\nDELETE NETWORKS');
+ok('owner can delete a network',
+  (await j(`/api/networks/${secondNetwork.body.id}`, { method: 'DELETE' })).status === 200);
+ok('deleting a network removes its project metadata only',
+  (await j('/api/projects')).body.length === 1);
+ok('owner can delete the final network',
+  (await j(`/api/networks/${defaultNetwork}`, { method: 'DELETE' })).status === 200);
+const emptyNetworks = (await j('/api/networks')).body;
+ok('zero networks remains a valid state',
+  emptyNetworks.networks.length === 0 && emptyNetworks.active === '');
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
