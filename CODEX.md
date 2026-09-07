@@ -261,3 +261,13 @@ the live registry had eight recreated networks, `hugo-stationary` reported
 alpha.7 and `hugo-cachyos` alpha.4. Both clients must update to alpha.8 before
 their local lists will consume tombstones; the new server prevents older
 clients from recreating the global rows in the meantime.
+
+Production deployment completed the same day. The Pi is running
+`pscluster-admin v0.1.1-alpha.8 (0f2d683, linux/arm64)`. The eight recreated
+network IDs were recorded as eight account-scoped tombstones and the live
+network count is zero; two accounts and two device registrations were kept.
+The pre-change database backup is
+`/opt/plainshow-cluster-admin/accounts.db.before-tombstone-delete-20260907` and
+the previous executable is
+`/opt/plainshow-cluster-admin/bin/pscluster-admin.before-alpha8`.
+Tag `v0.1.1-alpha.8` points at `0f2d683` and was pushed with `main`.
