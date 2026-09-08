@@ -84,7 +84,11 @@ open or configure.
 Presets discover live resources at execution and respect Ray's device limits.
 Mixed mode uses GPUs on GPU machines and CPUs on CPU-only machines. These are
 independent tasks, not a ready-made synchronous training loop across unlike GPUs.
-The Test tab checks Ray execution, not your GPU drivers or training framework.
+The Test tab keeps connectivity separate from CPU/GPU diagnostics. It runs a
+small CPU calculation, reports CUDA/ROCm/Intel tooling, and tries one available
+Ray-allocated GPU per device using PyTorch. Missing software or busy GPUs show
+warnings without failing connectivity. It checks the Ray Python environment,
+not a separate project virtual environment, and installs nothing.
 
 One account can browse, edit and run projects across several networks at once;
 there is no global selected network. Every project routes its run to the Ray

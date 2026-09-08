@@ -416,3 +416,31 @@ network/account deletion was requested in this session.
 
 Physical multi-machine GPU training and native UI interaction remain user-side
 integration checks, not claims established by successful release builds.
+
+## Post-release — GPU software diagnostics (not released)
+
+The requested Test extension keeps the existing connectivity pass/fail result.
+Each reachable worker now reports a Python CPU arithmetic check and read-only
+GPU tooling inventory (NVIDIA driver/CUDA, ROCm/HIP, Intel SYCL/OpenCL, PyTorch).
+Missing command-line tools are explicitly not proof that a runtime is absent.
+
+A separate Ray task reserves one GPU per device and attempts a tiny PyTorch
+matrix calculation using CUDA, ROCm's torch.cuda API, or Intel torch.xpu.
+This samples one allocated GPU, not every GPU. It honors Ray visibility and
+skips unknown/mixed-vendor hosts, fractional/no GPU allocations, and busy GPUs.
+Missing/incompatible frameworks, driver failures and timeouts are informational
+warnings: they do not turn a reachable worker red. Native GPU checks run under
+an external 12-second timeout, with no installations or configuration changes.
+The existing 75-second HTTP deadline remains. The UI shows CPU/GPU results and
+expandable software details under each device. All checks use the Ray worker's
+Python environment; project-specific virtual environments are not inspected.
+
+Focused diagnostic regression checks execute the Python with a Ray/PyTorch API
+double for CPU, NVIDIA, AMD, Intel, missing frameworks and busy GPU allocations;
+the HTTP fixture checks that software details survive JSON decoding. These are
+not physical GPU validation. No new release, tag, or service deployment follows
+this addition; the already published Alpha 0.1.2 remains unchanged.
+
+Backend references: https://docs.pytorch.org/docs/stable/notes/hip.html,
+https://docs.pytorch.org/docs/stable/xpu.html,
+https://docs.ray.io/en/latest/ray-core/scheduling/accelerators.html.

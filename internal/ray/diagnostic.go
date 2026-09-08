@@ -23,6 +23,16 @@ type CheckResult struct {
 	OK        bool               `json:"ok"`
 	Error     string             `json:"error,omitempty"`
 	Resources map[string]float64 `json:"resources"`
+	CPU       *SoftwareCheck     `json:"cpu,omitempty"`
+	GPU       *SoftwareCheck     `json:"gpu,omitempty"`
+	Software  []SoftwareCheck    `json:"software,omitempty"`
+}
+
+// Software checks are informational and never change worker reachability.
+type SoftwareCheck struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
 }
 
 func jobRequest(ctx context.Context, dashboard, method, path string, body any, result any) error {

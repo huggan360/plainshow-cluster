@@ -777,6 +777,14 @@ td:first-child { color: #e2e8f0; }
 .ray-result--error > .bx { color:#fb7185; }
 .ray-check { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
 .ray-check small { display:block; margin-top:4px; color:var(--muted); }
+.ray-check__body { flex:1; min-width:0; text-align:left; overflow-wrap:anywhere; }
+.ray-software-check { margin-top:10px; padding:10px 12px; border-radius:9px; background:rgba(148,163,184,.07); }
+.ray-software-check__title { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; }
+.ray-software-check--ok .ray-software-check__title { color:#86efac; }
+.ray-software-check--warn .ray-software-check__title { color:#fcd34d; }
+.ray-software-check--skip .ray-software-check__title { color:var(--muted); }
+.ray-software { margin-top:12px; }
+.ray-software summary { cursor:pointer; font-size:12px; color:var(--muted); }
 .ray-preset-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin:20px 0; }
 .ray-preset-choice { cursor:pointer; text-align:left; color:inherit; font:inherit; padding:0; }
 .ray-preset-choice .ps-metric-card__surface { display:flex; flex-direction:column; justify-content:center; gap:12px; min-height:110px; }

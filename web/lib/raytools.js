@@ -10,6 +10,16 @@ const modes = [
     ['intel', 'Intel GPU', 'bx-chip', 'projects'],
 ];
 
+function softwareCheck(check) {
+    const good = check.status === 'passed' || check.status === 'available';
+    const skipped = check.status === 'skipped';
+    return el('div', { class: `ray-software-check ray-software-check--${good ? 'ok' : skipped ? 'skip' : 'warn'}` },
+        el('span', { class: 'ray-software-check__title' },
+            el('i', { class: `bx ${good ? 'bx-check-circle' : skipped ? 'bx-chip' : 'bx-error-circle'}` }),
+            `${check.name} · ${check.status}`),
+        el('small', {}, check.detail));
+}
+
 /** Project-scoped helpers. Nothing changes another device's worker policy. */
 export function rayTools(project, activeTab) {
     const test = el('section', { class: 'panel ray-tool' });
@@ -19,7 +29,7 @@ export function rayTools(project, activeTab) {
     const result = el('div', { class: 'ray-result', role: 'status', 'aria-live': 'polite' },
         el('i', { class: 'bx bx-network-chart' }),
         el('strong', {}, 'Ready to test'),
-        el('p', {}, 'Run a small task on each Ray worker and compare it with the online devices in this network.'));
+        el('p', {}, 'Check each online worker, run a CPU calculation, inspect GPU software and try one available GPU per device.'));
     let disposed = false, abort;
     const button = el('button', { class: 'btn btn--primary', onclick: async () => {
         button.disabled = true;
@@ -33,11 +43,16 @@ export function rayTools(project, activeTab) {
             result.className = `ray-result ray-result--${data.ok ? 'ok' : 'error'}`;
             mount(result,
                 el('i', { class: `bx ${data.ok ? 'bx-check-circle' : 'bx-error-circle'}` }),
-                el('strong', {}, data.ok ? 'All online devices passed' : 'Some devices need attention'),
+                el('strong', {}, data.ok ? 'All online devices passed · connectivity' : 'Some devices need attention'),
                 el('div', { class: 'ray-checks' }, ...data.devices.map((device) =>
                     el('div', { class: 'ray-check' },
                         el('i', { class: `bx ${!device.online ? 'bx-wifi-off' : device.ok ? 'bx-check-circle' : 'bx-error-circle'}` }),
-                        el('span', {}, el('strong', {}, device.name), el('small', {}, device.detail))))),
+                        el('div', { class: 'ray-check__body' }, el('strong', {}, device.name), el('small', {}, device.detail),
+                            device.cpu ? softwareCheck(device.cpu) : null,
+                            device.gpu ? softwareCheck(device.gpu) : null,
+                            device.software?.length ? el('details', { class: 'ray-software' },
+                                el('summary', {}, 'GPU software & framework'),
+                                ...device.software.map(softwareCheck)) : null)))),
                 el('p', {}, data.detail));
         } catch (error) {
             if (disposed) return;

@@ -2,6 +2,7 @@ package ray
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -19,7 +20,7 @@ func TestDiagnosticReturnsWorkerProofAndCleansUp(t *testing.T) {
 		case "/api/jobs/test":
 			w.Write([]byte(`{"status":"SUCCEEDED"}`))
 		case "/api/jobs/test/logs":
-			w.Write([]byte(`{"logs":"PLAINSHOW_TEST=[{\"address\":\"100.64.0.2\",\"hostname\":\"worker\",\"ok\":true,\"resources\":{\"CPU\":4}}]\n"}`))
+			json.NewEncoder(w).Encode(map[string]string{"logs": `PLAINSHOW_TEST=[{"address":"100.64.0.2","hostname":"worker","ok":true,"resources":{"CPU":4},"cpu":{"name":"CPU","status":"passed","detail":"Arithmetic passed"},"gpu":{"name":"GPU","status":"missing","detail":"PyTorch missing"},"software":[{"name":"CUDA toolkit","status":"available","detail":"12.8"}]}]` + "\n"})
 		case "/api/jobs/test/stop":
 			stopped.Store(true)
 			w.Write([]byte(`{}`))
@@ -36,5 +37,8 @@ func TestDiagnosticReturnsWorkerProofAndCleansUp(t *testing.T) {
 	}
 	if !stopped.Load() {
 		t.Fatal("job was not cleaned up")
+	}
+	if results[0].CPU == nil || results[0].CPU.Status != "passed" || results[0].GPU == nil || results[0].GPU.Status != "missing" || len(results[0].Software) != 1 {
+		t.Fatalf("lost informational software checks: %+v", results[0])
 	}
 }

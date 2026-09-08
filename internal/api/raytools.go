@@ -37,11 +37,14 @@ func (s *Server) testProjectRay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type deviceCheck struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Online bool   `json:"online"`
-		OK     bool   `json:"ok"`
-		Detail string `json:"detail"`
+		ID       string              `json:"id"`
+		Name     string              `json:"name"`
+		Online   bool                `json:"online"`
+		OK       bool                `json:"ok"`
+		Detail   string              `json:"detail"`
+		CPU      *ray.SoftwareCheck  `json:"cpu,omitempty"`
+		GPU      *ray.SoftwareCheck  `json:"gpu,omitempty"`
+		Software []ray.SoftwareCheck `json:"software,omitempty"`
 	}
 	checks := []deviceCheck{}
 	ok := len(results) > 0
@@ -63,6 +66,7 @@ func (s *Server) testProjectRay(w http.ResponseWriter, r *http.Request) {
 				if result.Address == endpoint.Hostname() {
 					check.OK = result.OK
 					check.Detail = result.Error
+					check.CPU, check.GPU, check.Software = result.CPU, result.GPU, result.Software
 					break
 				}
 			}
@@ -77,7 +81,7 @@ func (s *Server) testProjectRay(w http.ResponseWriter, r *http.Request) {
 		}
 		checks = append(checks, check)
 	}
-	writeJSON(w, 200, map[string]any{"ok": ok, "devices": checks, "workers": results, "checked_at": time.Now().UTC(), "detail": "Checks Ray task execution; GPU drivers and your training code are not exercised."})
+	writeJSON(w, 200, map[string]any{"ok": ok, "devices": checks, "workers": results, "checked_at": time.Now().UTC(), "detail": "Pass means online workers executed a Ray task. CPU and GPU software results are separate. GPU checks sample one Ray-allocated GPU per device using PyTorch in the Ray environment, not every GPU or your project's custom environment. Missing tools do not necessarily mean missing runtimes. Nothing is installed."})
 }
 
 func (s *Server) createRayPreset(w http.ResponseWriter, r *http.Request) {
