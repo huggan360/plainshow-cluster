@@ -186,16 +186,8 @@ function disconnect(control) {
 
 /** cloneForm creates a project from an existing repository. */
 export function cloneForm(after) {
-    const networks = state.overview.networks || [];
-    if (!networks.length) {
-        toast('Create or join a network before cloning a project.', 'err');
-        navigate('networks');
-        return;
-    }
     const repo = el('input', { class: 'input input--mono', placeholder: 'owner/repository' });
     const name = el('input', { class: 'input', placeholder: 'Leave empty to use the repo name' });
-    const network = el('select', { class: 'input' }, ...networks.map((item) =>
-        el('option', { value: item.id }, item.name)));
     const list = el('div', {
         class: 'rows',
         style: 'max-height:190px;overflow-y:auto;margin-top:10px',
@@ -223,14 +215,12 @@ export function cloneForm(after) {
                 el('label', { class: 'field__label' }, 'Repository'), repo),
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, 'Project name'), name),
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Network'), network),
             el('p', { class: 'field__label', style: 'margin:6px 0 0' }, 'Your repositories'),
             list),
         onConfirm: async (close) => {
             const project = await api('/api/github/clone', {
                 method: 'POST',
-                body: { repository: repo.value.trim(), name: name.value.trim(), network_id: network.value },
+                body: { repository: repo.value.trim(), name: name.value.trim() },
             });
             close();
             toast(`Cloned into ${project.name}.`);

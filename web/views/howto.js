@@ -99,14 +99,13 @@ results = ray.get([train.remote(s) for s in shards])`),
 
         explainer('Using several networks at once',
             'Your account, projects and jobs are available across all networks at ' +
-            'the same time. A project always chooses its own network. One physical ' +
+            'the same time. Select a run target on Networks. One physical ' +
             'machine contributes its CPU and GPUs to one Ray cluster at a time:',
             [
-                ['There is no selected workspace',
-                 'Open, edit and run projects from different networks without ' +
-                 'changing a global selector.'],
-                ['The project routes the run',
-                 'Run submits to the Ray head recorded for that project’s network.'],
+                ['Projects are independent',
+                 'Create and edit projects without a network. Files stay local.'],
+                ['Choose where the next run goes',
+                 'Networks → Use for runs selects the target for Run, Test and Preset. Existing jobs retain their original target.'],
                 ['The machine avoids double-counting',
                  'Starting or attaching Ray for another network moves this machine’s ' +
                  'one raylet there, so the same hardware is never advertised twice.'],

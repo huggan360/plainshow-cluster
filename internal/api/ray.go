@@ -162,8 +162,8 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 }
 
 // rayNetworkID scopes Ray operations to the network named by the caller. The
-// legacy working-network fallback keeps older CLIs compatible; the web app and
-// project Run path always name their network explicitly.
+// selected-network fallback is used for new runs. Logs and stop requests retain
+// the original job's explicit network even after the user's selection changes.
 func (s *Server) rayNetworkID(r *http.Request) string {
 	if id := strings.TrimSpace(r.URL.Query().Get("network_id")); id != "" {
 		return id
@@ -522,20 +522,21 @@ func (s *Server) submitRayJob(w http.ResponseWriter, r *http.Request) {
 	}
 	var project store.Project
 	var err error
-	if strings.TrimSpace(body.ProjectID) == "" && strings.TrimSpace(body.NetworkID) != "" {
-		project, err = s.store.ProjectByNameInNetwork(strings.TrimSpace(body.NetworkID), reference)
-	} else {
-		project, _, err = s.project(reference)
-	}
+	project, _, err = s.project(reference)
 	if err != nil {
 		if errors.Is(err, store.ErrAmbiguous) {
-			fail(w, http.StatusConflict, "More than one network has that project name. Add --network ID or use the project id.")
+			fail(w, http.StatusConflict, "More than one project has that name. Use its project id.")
 			return
 		}
 		fail(w, http.StatusNotFound, "No such project.")
 		return
 	}
-	head := s.rayHead(project.NetworkID)
+	networkID, err := s.executionNetwork(strings.TrimSpace(body.NetworkID))
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	head := s.rayHead(networkID)
 	if head == "" {
 		fail(w, http.StatusConflict, "Start Ray for this network before running a project.")
 		return
@@ -550,7 +551,7 @@ func (s *Server) submitRayJob(w http.ResponseWriter, r *http.Request) {
 	s.hub.Publish("ray.changed", map[string]any{"head": head})
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"id": jobID, "status": "submitted", "detail": output,
-		"network_id": project.NetworkID,
+		"network_id": networkID,
 	})
 }
 

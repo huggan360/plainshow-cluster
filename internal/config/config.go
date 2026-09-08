@@ -279,16 +279,13 @@ func (c *Config) AccountID() string {
 	return c.Node.ID
 }
 
-// ActiveMembership returns the selected network membership. Legacy configs
-// appear as one implicit membership until they are next saved.
+// ActiveMembership returns only the selected compute network. No selection is
+// a durable state, not permission to execute on the first available membership.
 func (c *Config) ActiveMembership() MembershipConfig {
 	for _, membership := range c.Memberships {
 		if membership.ID == c.ActiveNetwork {
 			return membership
 		}
-	}
-	if len(c.Memberships) > 0 {
-		return c.Memberships[0]
 	}
 	return MembershipConfig{}
 }
@@ -309,10 +306,8 @@ func (c *Config) EnsureMemberships() {
 			c.Memberships[i].ManagementKey = NewSecret()
 		}
 	}
-	if c.ActiveNetwork == "" {
-		c.ActiveNetwork = c.Memberships[0].ID
-	}
 	active := c.ActiveMembership()
+	c.ActiveNetwork = active.ID
 	c.Cluster = ClusterConfig{ID: active.ID, Name: active.Name}
 	c.Node.Roles = append([]Role(nil), active.Roles...)
 }
@@ -568,6 +563,9 @@ func (c *Config) upgradeFrom(version int) {
 			Roles: append([]Role(nil), c.Node.Roles...), AccountRole: "owner",
 			Enabled: true, Policy: c.Worker,
 		}}
+	}
+	if version < 3 && c.ActiveNetwork == "" && len(c.Memberships) > 0 {
+		c.ActiveNetwork = c.Memberships[0].ID
 	}
 	// A node that predates per-network project sync was, in effect, willing to
 	// receive project files — that is how every remote job has always worked.

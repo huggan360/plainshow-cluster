@@ -1,5 +1,5 @@
 import { el, mount } from './ui.js';
-import { api, toast, navigate, watchRefresh } from './client.js';
+import { api, toast, navigate, watchRefresh, state, on } from './client.js';
 
 const modes = [
     ['cpu', 'All CPUs', 'bx-chip', 'projects'],
@@ -24,8 +24,14 @@ function softwareCheck(check) {
 export function rayTools(project, activeTab) {
     const test = el('section', { class: 'panel ray-tool' });
     const preset = el('section', { class: 'panel ray-tool' });
+    const testTarget = el('a', { class: 'btn btn--sm', href: '#/networks' });
+    const presetTarget = el('a', { class: 'btn btn--sm', href: '#/networks' });
+    const showTarget = () => {
+        const name = state.overview.networks.find(n => n.id === state.overview.active_network)?.name;
+        for (const link of [testTarget, presetTarget]) link.textContent = `Run network: ${name || 'choose a network'}`;
+    };
+    showTarget();
     const base = `/api/projects/${encodeURIComponent(project.id)}/ray`;
-    const network = encodeURIComponent(project.network_id);
     const result = el('div', { class: 'ray-result', role: 'status', 'aria-live': 'polite' },
         el('i', { class: 'bx bx-network-chart' }),
         el('strong', {}, 'Ready to test'),
@@ -59,13 +65,13 @@ export function rayTools(project, activeTab) {
             result.className = 'ray-result ray-result--error';
             mount(result, el('i', { class: 'bx bx-error-circle' }), el('strong', {}, 'Could not complete the test'),
                 el('p', {}, error.message),
-                el('a', { class: 'btn', href: `#/networks/${network}` }, 'Open network'));
+                el('a', { class: 'btn', href: '#/networks' }, 'Choose network'));
         } finally { button.disabled = false; }
     } }, el('i', { class: 'bx bx-check-circle' }), 'Test cluster');
     const start = el('button', { class: 'btn', onclick: async () => {
         start.disabled = true;
         try {
-            await api('/api/ray/start', { method: 'POST', body: { network_id: project.network_id } });
+            await api('/api/ray/start', { method: 'POST', body: {} });
             if (disposed) return;
             toast('Ray started. Other devices attach when assigned to this network.');
         } catch (error) { if (!disposed) toast(error.message, 'err'); }
@@ -73,7 +79,8 @@ export function rayTools(project, activeTab) {
     } }, el('i', { class: 'bx bx-play' }), 'Start / attach this device');
     mount(test, el('div', { class: 'panel__head' }, 'Test your cluster'), result,
         el('div', { class: 'ray-tool-actions' }, button, start),
-        el('p', { class: 'muted' }, 'Starting Ray assigns this machine’s compute to this project’s network. Test does not install frameworks or run training.'));
+        testTarget,
+        el('p', { class: 'muted' }, 'Test and presets use the active network selected on Networks. Starting Ray contributes this machine’s compute there. Nothing is installed automatically.'));
 
     let mode = 'cpu';
     const inventory = el('div', { class: 'ray-inventory muted', 'aria-live': 'polite' }, 'Reading network hardware…');
@@ -102,14 +109,15 @@ export function rayTools(project, activeTab) {
     } }, el('i', { class: 'bx bx-file-blank' }), 'Create preset file');
     mount(preset, el('div', { class: 'panel__head' }, 'Ray presets'),
         el('p', { class: 'muted' }, 'Choose the hardware to use. The generated file discovers live Ray workers each time you run it.'),
-        inventory, options,
+        presetTarget, inventory, options,
         el('div', { class: 'grid grid--2' },
             el('label', { class: 'field' }, el('span', { class: 'field__label' }, 'Filename'), filename),
             el('label', { class: 'field' }, el('span', { class: 'field__label' }, 'Workers per device · 0 = all allowed'), limit)),
         create,
         el('p', { class: 'muted' }, 'GPU + CPU uses GPUs on GPU machines and CPUs on CPU-only machines. Each worker runs an independent task. Install the matching CUDA, ROCm or XPU framework yourself; this does not combine unlike GPUs into one training device.'));
     const updateInventory = async () => {
-        const data = await api(`/api/networks/${network}`);
+        if (!state.overview.active_network) { inventory.textContent = 'Choose an active network on Networks first.'; return; }
+        const data = await api(`/api/networks/${encodeURIComponent(state.overview.active_network)}`);
         if (disposed) return;
         const nodes = (data.nodes || []).filter((n) => n.online ?? (n.is_self || Date.now() - Date.parse(n.last_seen) < 120000));
         const cpu = nodes.reduce((n, device) => n + Number(device.capacity?.cpu_cores || 0), 0);
@@ -122,9 +130,11 @@ export function rayTools(project, activeTab) {
             el('small', {}, 'Actual workers follow Ray assignments and each device’s resource limits.'));
     };
     let off = () => {};
+    const offTarget = on('network.active', showTarget);
+    const offTargets = on('networks.changed', showTarget);
     if (activeTab === 'preset') {
         updateInventory().catch((err) => { inventory.textContent = err.message; });
-        off = watchRefresh(['peers.changed', 'connection.restored'], updateInventory);
+        off = watchRefresh(['peers.changed', 'network.active', 'networks.changed', 'connection.restored'], updateInventory);
     }
-    return { test, preset, close: () => { disposed = true; abort?.abort(); off(); } };
+    return { test, preset, close: () => { disposed = true; abort?.abort(); off(); offTarget(); offTargets(); } };
 }

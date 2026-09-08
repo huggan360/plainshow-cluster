@@ -444,3 +444,46 @@ this addition; the already published Alpha 0.1.2 remains unchanged.
 Backend references: https://docs.pytorch.org/docs/stable/notes/hip.html,
 https://docs.pytorch.org/docs/stable/xpu.html,
 https://docs.ray.io/en/latest/ray-core/scheduling/accelerators.html.
+
+## Independent projects and selected run network (unreleased)
+
+User changed the model: projects need not belong to networks. Implemented:
+
+- New project/clone forms require no network, and the corresponding APIs allow
+  empty network_id. New projects use a flat repository-name folder under the
+  user's Projects root. Startup no longer assigns unscoped projects to whichever
+  network happens to be active. Existing scoped folders/IDs are left intact.
+- Networks has “Use for runs” and an active badge. ActiveNetwork controls new
+  file runs, Test and Preset; an explicit CLI --network overrides it. Missing,
+  paused or unauthorized selections fail clearly. Selecting compute does not
+  hide projects, move files or grant editor-sharing access.
+- The full Ray metric card is a keyboard-accessible button labeled Ray on/off
+  **for this device**. Starting attaches/starts here; stopping confirms because
+  it can interrupt this machine's tasks. It does not stop every peer remotely.
+- Owners can delete directly from network cards or the detail header, with
+  confirmation. Network deletion/tombstone adoption preserve local project
+  records, member/job history, collaboration history, folders and Git history.
+  If the selected network disappears, no replacement target is silently chosen.
+  A deliberately blank selection survives config save/load, even with other
+  memberships. Pre-v3 config migration retains its historical selection.
+- Running jobs retain the submission response's network_id for logs/status/Stop,
+  independent of subsequent selection. The branch editor shows its run target.
+- Legacy network_id still locates old folders and scopes optional existing
+  transfers/Cowork sharing. It no longer routes Ray jobs. Local document changes
+  are not queued to a controller with an empty network id. Document resolution
+  prefers exact project id, with only a scoped-name fallback for remote clones.
+- Legacy folder fallback/migration cannot claim a new independent project's
+  same-named flat folder. Creation refuses existing untracked directories.
+- Network detail lists local projects as runnable choices, not network-owned
+  projects. README, CLAUDE.md and PLAN.md document the changed product model.
+
+Regression coverage: local creation without networks, selected/explicit run
+targets, viewer/paused refusal, preset targeting a different network from the
+legacy project scope, preserved projects/files after network deletion, durable
+blank selection, local edits alongside same-named legacy projects, and safe
+legacy folder resolution. Smoke expectations were updated to preserve projects.
+No release/tag/deployment or live network deletion is part of this change.
+
+Verification completed: full offline `make check` passed after the backend and
+config changes; the web module check also passed after the final UI copy/live
+target updates. Updated smoke expectations were not run in this session.

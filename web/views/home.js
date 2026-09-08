@@ -52,7 +52,7 @@ function content(rayJobs) {
                     ? el('div', { class: 'ps-card-grid' },
                         ...overview.networks.slice(0, 9).map(networkPreview))
                     : emptyPanel('bx-network-chart', 'No networks yet',
-                        'Create or join a network to connect machines and projects.'))),
+                        'Create or join a network to connect machines for project runs.'))),
     ];
 }
 
@@ -79,7 +79,7 @@ function networkMetric(overview) {
                         el('span', { class: 'ps-status-row__main' },
                             el('span', { class: 'ps-status-row__title' }, network.name),
                             el('span', { class: 'ps-status-row__meta' },
-                                `${network.node_count} devices · ${network.project_count} projects`)),
+                                `${network.node_count} devices · ${network.gpu_count} GPUs`)),
                         el('i', { class: 'bx bx-right-arrow-alt muted' }))),
                 overview.networks.length === 0
                     ? el('div', { class: 'ps-status-empty' }, el('i', { class: 'bx bx-network-chart' }))
@@ -185,7 +185,7 @@ function networkPreview(network) {
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count}`),
             el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count}`),
-            el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`),
+            network.active ? el('span', { class: 'chip chip--good push' }, 'Active for runs') : null,
             el('i', { class: 'bx bx-right-arrow-alt' })));
 }
 

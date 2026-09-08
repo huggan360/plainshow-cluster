@@ -132,6 +132,9 @@ function queueForController(message) {
 
 function deliverToController(message, durable = true) {
     const networkID = message.data && message.data.network_id;
+    // Local-only documents have no relay scope. Do not accumulate an outbox
+    // that could later be sent merely because a compute network was selected.
+    if (!networkID) return;
     const target = controllerSockets.get(networkID);
     if (target && target.readyState === WebSocket.OPEN) {
         target.send(JSON.stringify(message));
@@ -177,6 +180,11 @@ export function connect() {
         // Telemetry is shared state, so keep it current for every view whether
         // or not anything is listening for the topic right now.
         if (msg.topic === 'system') state.system = msg.data;
+        if (msg.topic === 'network.active' && state.overview) state.overview.active_network = msg.data?.id || '';
+        if (msg.topic === 'networks.changed') {
+            refresh().then(() => emit(msg.topic, msg.data)).catch(() => emit(msg.topic, msg.data));
+            return;
+        }
         emit(msg.topic, msg.data);
     };
     socket.onclose = () => {

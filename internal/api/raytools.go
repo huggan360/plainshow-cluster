@@ -14,17 +14,22 @@ import (
 )
 
 func (s *Server) testProjectRay(w http.ResponseWriter, r *http.Request) {
-	p, _, err := s.project(r.PathValue("name"))
+	_, _, err := s.project(r.PathValue("name"))
 	if err != nil {
 		fail(w, 404, "No such project.")
 		return
 	}
-	head := s.rayHead(p.NetworkID)
-	if head == "" {
-		fail(w, 409, "Start Ray from this project's network, then test again.")
+	networkID, err := s.executionNetwork("")
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
 		return
 	}
-	nodes, err := s.liveNodes(p.NetworkID)
+	head := s.rayHead(networkID)
+	if head == "" {
+		fail(w, 409, "Start Ray for the active network, then test again.")
+		return
+	}
+	nodes, err := s.liveNodes(networkID)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -109,7 +114,12 @@ func (s *Server) createRayPreset(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	head := s.rayHead(p.NetworkID)
+	networkID, networkErr := s.executionNetwork("")
+	if networkErr != nil {
+		fail(w, http.StatusConflict, networkErr.Error())
+		return
+	}
+	head := s.rayHead(networkID)
 	dashboard := ray.DashboardURL(hostOf(head), ray.DefaultDashboard)
 	if head == "" {
 		dashboard = "http://YOUR_RAY_HEAD:8265"

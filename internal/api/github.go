@@ -391,8 +391,8 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.NetworkID = strings.TrimSpace(body.NetworkID)
-	if !hasMembership(s.cfg, body.NetworkID) {
-		fail(w, http.StatusBadRequest, "Choose a network for this project.")
+	if body.NetworkID != "" && !hasMembership(s.cfg, body.NetworkID) {
+		fail(w, http.StatusBadRequest, "That optional sharing network is not available.")
 		return
 	}
 	if _, err := s.store.ProjectByNameInNetwork(body.NetworkID, name); err == nil {

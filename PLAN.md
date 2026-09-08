@@ -1,5 +1,20 @@
 # Plan: the account owns the network, the device only participates
 
+## Current product override — independent projects (September 8)
+
+The user superseded Stage 4's required project/network binding. Projects are
+local; creating/cloning requires no network. Networks → Use for runs selects
+the active target for file runs, Test and Preset. The Ray card is a full-button
+on/off control for this device. Network deletion is owner-only and preserves
+project records, files, Git history and local edit history. Losing a network
+does not silently select another execution target. Existing scoped folders
+and optional legacy collaboration scopes remain for compatibility, not for
+run routing. New local projects do not automatically share editor operations
+with the active compute network. This section overrides older descriptions
+below that say projects must belong to a network or that there is no selection.
+
+Implementation is unreleased after Alpha 0.1.2. See CODEX.md's latest addendum.
+
 Status of each stage is kept current here. `CLAUDE.md` holds the settled rules;
 this file holds the work that is not finished yet.
 

@@ -7,7 +7,22 @@ import (
 	"strings"
 
 	"github.com/huggan360/plainshow-cluster/internal/collab"
+	"github.com/huggan360/plainshow-cluster/internal/projectfs"
+	"github.com/huggan360/plainshow-cluster/internal/store"
 )
+
+func (s *Server) collabProject(networkID, projectID, name string) (store.Project, projectfs.Project, error) {
+	p, err := s.store.ProjectByID(projectID)
+	if err != nil || p.NetworkID != networkID || p.Name != name {
+		// A relayed clone can have a different local id. Match only inside its
+		// explicit sharing scope, never a same-named local project elsewhere.
+		p, err = s.store.ProjectByNameInNetwork(networkID, name)
+	}
+	if err != nil {
+		return p, projectfs.Project{}, err
+	}
+	return p, projectfs.New(s.projectDir(p)), nil
+}
 
 func (s *Server) openCollabDocument(w http.ResponseWriter, r *http.Request) {
 	p, fsys, err := s.project(r.PathValue("name"))
@@ -49,7 +64,7 @@ func (s *Server) handleClientEvent(raw []byte) {
 		if json.Unmarshal(message.Data, &op) != nil {
 			return
 		}
-		p, fsys, err := s.project(op.Project)
+		p, fsys, err := s.collabProject(op.NetworkID, op.ProjectID, op.Project)
 		if err != nil || p.NetworkID != op.NetworkID {
 			return
 		}
@@ -96,7 +111,7 @@ func (s *Server) handleClientEvent(raw []byte) {
 		if json.Unmarshal(message.Data, &presence) != nil {
 			return
 		}
-		p, _, err := s.project(presence.Project)
+		p, _, err := s.collabProject(presence.NetworkID, presence.ProjectID, presence.Project)
 		if err == nil && p.NetworkID == presence.NetworkID {
 			presence.ProjectID = p.ID
 			s.hub.Publish("collab.presence", presence)

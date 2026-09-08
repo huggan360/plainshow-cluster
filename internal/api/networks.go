@@ -26,6 +26,7 @@ type networkSummary struct {
 	NodeCount    int  `json:"node_count"`
 	GPUCount     int  `json:"gpu_count"`
 	Enabled      bool `json:"enabled"`
+	Active       bool `json:"active"`
 }
 
 func (s *Server) networkSummaries() ([]networkSummary, error) {
@@ -44,6 +45,7 @@ func (s *Server) networkSummaries() ([]networkSummary, error) {
 			return nil, nodeErr
 		}
 		summary := networkSummary{Network: network, ProjectCount: len(projects), NodeCount: len(nodes)}
+		summary.Active = network.ID == s.cfg.ActiveNetwork
 		for _, membership := range s.cfg.Memberships {
 			if membership.ID == network.ID {
 				summary.Enabled = membership.Enabled
@@ -142,7 +144,7 @@ func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "No such network.")
 		return
 	}
-	projects, err := s.store.ProjectsInNetwork(id)
+	projects, err := s.store.Projects()
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -173,7 +175,7 @@ func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	summary := networkSummary{Network: network, ProjectCount: len(projects), NodeCount: len(nodes),
-		Enabled: membership.Enabled}
+		Enabled: membership.Enabled, Active: id == s.cfg.ActiveNetwork}
 	for _, node := range nodes {
 		if nodeCapacityOnline(node, time.Now()) {
 			summary.GPUCount += capacityGPUCount(node.Capacity)
@@ -517,8 +519,7 @@ func (s *Server) createNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteNetwork removes an owner-created network everywhere. The account
-// server writes a tombstone first; local project folders stay on disk while
-// their now-unreachable metadata is removed.
+// server writes a tombstone first; local projects, history and files survive.
 func (s *Server) deleteNetwork(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.membershipMu.Lock()
@@ -562,9 +563,6 @@ func (s *Server) deleteNetwork(w http.ResponseWriter, r *http.Request) {
 	s.cfg.Memberships = append(s.cfg.Memberships[:index], s.cfg.Memberships[index+1:]...)
 	if s.cfg.ActiveNetwork == id {
 		s.cfg.ActiveNetwork = ""
-		if len(s.cfg.Memberships) > 0 {
-			s.cfg.SetActiveNetwork(s.cfg.Memberships[0].ID)
-		}
 	}
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -590,6 +588,10 @@ func (s *Server) activateNetwork(w http.ResponseWriter, r *http.Request) {
 	s.rayActionMu.Lock()
 	defer s.rayActionMu.Unlock()
 	id := r.PathValue("id")
+	if _, err := s.executionNetwork(id); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	previous := s.cfg.ActiveNetwork
 	if !s.cfg.SetActiveNetwork(id) {
 		fail(w, 404, "This device does not belong to that network.")

@@ -256,18 +256,11 @@ func (s *Server) AdoptAccountNetworks(ctx context.Context, client *accountclient
 	s.cfg.Memberships = kept
 	if deleted[s.cfg.ActiveNetwork] {
 		s.cfg.ActiveNetwork = ""
-		if len(kept) > 0 {
-			s.cfg.SetActiveNetwork(kept[0].ID)
-		}
 	}
 	if adopted == 0 && removed == 0 {
 		return 0, nil
 	}
-	// A machine with no network selected should land in one rather than in an
-	// empty workspace it has to fix by hand.
-	if s.cfg.ActiveNetwork == "" && len(s.cfg.Memberships) > 0 {
-		s.cfg.SetActiveNetwork(s.cfg.Memberships[0].ID)
-	}
+	// Never choose a different run target implicitly after deletion/adoption.
 	if err := config.Save(s.layout, s.cfg); err != nil {
 		return adopted, err
 	}

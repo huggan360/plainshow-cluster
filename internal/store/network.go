@@ -135,9 +135,9 @@ func (s *Store) RemoveNetworkMember(networkID, accountID string) error {
 	return err
 }
 
-// DeleteNetwork removes all database state scoped to a network. Project
-// folders are deliberately left on disk so deleting a network never destroys
-// source code or datasets that cannot be recovered.
+// DeleteNetwork removes network membership and compute state, not local
+// projects, their history, or files. Legacy project network_id values also
+// locate existing folders and are retained even after the network is gone.
 func (s *Store) DeleteNetwork(networkID string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -145,14 +145,9 @@ func (s *Store) DeleteNetwork(networkID string) error {
 	}
 	defer tx.Rollback()
 	statements := []string{
-		`DELETE FROM job WHERE project_id IN (SELECT id FROM project WHERE network_id=?)`,
-		`DELETE FROM member WHERE project_id IN (SELECT id FROM project WHERE network_id=?)`,
-		`DELETE FROM collab_operation WHERE network_id=?`,
-		`DELETE FROM collab_document WHERE network_id=?`,
 		`DELETE FROM training_run WHERE network_id=?`,
 		`DELETE FROM dataset_placement WHERE dataset_id IN (SELECT id FROM dataset WHERE network_id=?)`,
 		`DELETE FROM dataset WHERE network_id=?`,
-		`DELETE FROM project WHERE network_id=?`,
 		`DELETE FROM invitation WHERE network_id=?`,
 		`DELETE FROM network_controller WHERE network_id=?`,
 		`DELETE FROM network_node WHERE network_id=?`,
@@ -470,11 +465,6 @@ func (s *Store) TouchNetworkNode(networkID, nodeID, seen string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-func (s *Store) AssignProjectsToNetwork(networkID string) error {
-	_, err := s.db.Exec(`UPDATE project SET network_id=? WHERE network_id=''`, networkID)
-	return err
 }
 
 type Invitation struct {

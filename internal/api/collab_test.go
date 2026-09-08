@@ -57,3 +57,31 @@ func TestRelayedEditMapsOntoLocalProjectIdentity(t *testing.T) {
 		t.Fatal("mapped operation was not published")
 	}
 }
+
+func TestLocalDocumentEditsIgnoreSameNamedLegacyProject(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.collab = collab.New(s.store)
+	for _, p := range []store.Project{{ID: "local", Name: "same"}, {ID: "shared", Name: "same", NetworkID: "old-network"}} {
+		if err := s.store.CreateProject(&p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, fsys, err := s.collabProject("", "local", "same")
+	if err != nil || p.ID != "local" {
+		t.Fatalf("local resolution: %+v %v", p, err)
+	}
+	if err := os.MkdirAll(fsys.Root, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsys.WriteFile("main.py", "ab"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"topic": "collab.op", "data": collab.Operation{
+		ProjectID: "local", Project: "same", Path: "main.py", ClientID: "local-browser",
+		Sequence: 1, From: 1, To: 1, Insert: "X",
+	}})
+	s.handleClientEvent(raw)
+	if content, err := fsys.ReadFile("main.py"); err != nil || content != "aXb" {
+		t.Fatalf("local edit: %q %v", content, err)
+	}
+}

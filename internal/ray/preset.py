@@ -2,8 +2,8 @@
 
 Run from your project folder:
   ray job submit --address __DASHBOARD__ --working-dir . -- python __FILENAME__
-Or use your IDE on a machine contributing to this project's Ray network.
-Set RAY_ADDRESS to the project's Ray head when it is not your local cluster.
+Or use the branch editor's Run button to use the currently active network.
+For an external IDE, set RAY_ADDRESS to the desired network's Ray head.
 Install your own framework/data dependencies on every participating worker.
 This distributes independent tasks; it is NOT cross-vendor synchronous DDP.
 """
@@ -30,11 +30,11 @@ def work(shard, backend):
 
 
 def main():
-    # Never attach to an unrelated local cluster when this project's head was
-    # not configured at generation time. Ray Jobs supplies its own RAY_ADDRESS.
+    # The default is the active head when this file was created. The branch
+    # editor submits to the current active network; Ray Jobs supplies RAY_ADDRESS.
     address = os.environ.get("RAY_ADDRESS", "__HEAD__").strip()
     if not address:
-        raise RuntimeError("Start Ray for this project's network, then set RAY_ADDRESS to its head or run this file through the Plainshow branch editor.")
+        raise RuntimeError("Select a network and start Ray, then set RAY_ADDRESS to its head or run this file through the Plainshow branch editor.")
     ray.init(address=address)
     pending = []
     try:

@@ -69,7 +69,8 @@ open or configure.
 
 1. Create or sign in to your Plainshow account.
 2. Create a network, or paste a single-use invitation from its owner.
-3. Open the network under **Networks** and press **Start** in its Ray card.
+3. On **Networks**, choose **Use for runs** on the network you want. Open it
+   and click the **Ray off** card to start or attach this machine.
    Repeat on each machine that should contribute compute; the first becomes the
    head and the others attach automatically.
 4. Create or clone a project. The Projects view supports folders, file uploads,
@@ -90,12 +91,16 @@ Ray-allocated GPU per device using PyTorch. Missing software or busy GPUs show
 warnings without failing connectivity. It checks the Ray Python environment,
 not a separate project virtual environment, and installs nothing.
 
-One account can browse, edit and run projects across several networks at once;
-there is no global selected network. Every project routes its run to the Ray
-head for the network it belongs to. One physical machine still runs one local
-Ray process so its CPU and GPUs cannot be advertised twice. Starting Ray for a
-different network moves that machine's compute contribution without hiding or
-changing any projects.
+Projects are local and independent of networks. Create or clone them without
+joining any network. **Networks → Use for runs** selects the target for all
+project file runs, tests and presets on this machine. Existing jobs keep their
+original network for logs and stopping; changing selection affects future runs.
+Selecting a network does not automatically share or mirror project files.
+
+One physical machine runs one local Ray process so its CPU and GPUs cannot be
+advertised twice. Changing its active network can move its compute contribution.
+Network owners can delete a network directly from its card; local projects,
+files and Git history are preserved. Choose another run network afterwards.
 
 ## Services
 
@@ -151,8 +156,11 @@ Device keys and service state live below `/opt/plainshow-cluster`. Installing
 with `sudo` from your desktop account attempts to place projects in:
 
 ```text
-/home/YOUR_USERNAME/Plainshow/Projects/<network-id>/<repository-name>/
+/home/YOUR_USERNAME/Plainshow/Projects/<repository-name>/
 ```
+
+Existing network-scoped project folders stay in their original locations for
+compatibility; changing the run network never moves them.
 
 The project header shows the exact path. Unlinked projects use their project
 name. Files created in the app remain editable by your desktop user.

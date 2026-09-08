@@ -1,7 +1,7 @@
 // Networks — Plainshow-style network cards and one focused network workspace.
 
 import { el, mount, initials, megabytes, ago } from '../lib/ui.js';
-import { api, modal, toast, navigate, state, watchRefresh } from '../lib/client.js';
+import { api, modal, toast, navigate, state, watchRefresh, refresh } from '../lib/client.js';
 
 export async function renderNetworks(host, args = []) {
     if (args.length) return renderNetwork(host, args[0], args[1] || 'connected');
@@ -36,8 +36,7 @@ async function renderNetworkList(host, subscribe = true) {
             el('div', { class: 'detail-head__copy' },
                 el('h1', { class: 'page__title' }, 'Networks'),
                 el('p', { class: 'page__sub' },
-                    'Your networks are available together. Projects choose where work runs; ' +
-                    'each machine controls which network receives its compute resources.')),
+                    'Choose the active network for project runs, tests and presets. Projects stay on your machine.')),
             el('button', { class: 'btn', onclick: joinNetwork },
                 el('i', { class: 'bx bx-link' }), 'Join by code'),
             el('button', { class: 'btn btn--primary', onclick: createNetwork },
@@ -50,7 +49,7 @@ async function renderNetworkList(host, subscribe = true) {
     mount(host, page);
     // An invitation is the one thing on this page that arrives while you are
     // looking at it, so it should not wait for a reload.
-    return subscribe ? watchRefresh(['invitations.changed', 'networks.changed', 'connection.restored'],
+    return subscribe ? watchRefresh(['invitations.changed', 'network.active', 'networks.changed', 'connection.restored'],
         () => renderNetworkList(host, false)) : null;
 }
 
@@ -97,7 +96,7 @@ function networkCard(network) {
         class: 'panel ps-project-card',
         role: 'link', tabindex: '0', onclick: open,
         onkeydown: (event) => {
-            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+            if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open(); }
         },
     },
         el('div', { class: 'ps-project-card__top' },
@@ -107,17 +106,33 @@ function networkCard(network) {
                 el('span', {}, network.role || 'member')),
             el('span', { class: 'ps-project-card__status' },
                 el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
-                network.enabled ? 'Ready' : 'Paused')),
+                network.active ? 'Active for runs' : network.enabled ? 'Ready' : 'Paused')),
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count} devices`),
             el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count} GPUs`),
-            el('span', { class: 'push' }, el('i', { class: 'bx bx-layer' }), ` ${network.project_count}`)),
+            network.active ? el('span', { class: 'chip chip--good push' }, 'Active') : null),
         el('div', { class: 'ps-card-actions' },
+            el('button', { class: `btn btn--sm ${network.active ? 'btn--primary' : ''}`,
+                disabled: network.active || !network.enabled,
+                onclick: (event) => { event.stopPropagation(); selectNetwork(network); } },
+                el('i', { class: 'bx bx-check-circle' }), network.active ? 'Active network' : 'Use for runs'),
+            network.role === 'owner' ? el('button', { class: 'btn btn--sm btn--danger',
+                onclick: (event) => { event.stopPropagation(); deleteNetwork(network); } },
+                el('i', { class: 'bx bx-trash' }), 'Delete') : null,
             el('span', { class: 'push' }),
             el('button', {
                 class: 'btn btn--sm',
                 onclick: (event) => { event.stopPropagation(); open(); },
             }, 'Open', el('i', { class: 'bx bx-right-arrow-alt' }))));
+}
+
+async function selectNetwork(network) {
+    try {
+        await api(`/api/networks/${encodeURIComponent(network.id)}/active`, { method: 'PUT', body: {} });
+        await refresh();
+        toast(`Project runs now use ${network.name}. Files stay on this machine.`);
+        navigate('networks');
+    } catch (error) { toast(error.message, 'err'); }
 }
 
 async function renderNetwork(host, id, requestedTab, subscribe = true) {
@@ -137,6 +152,11 @@ async function renderNetwork(host, id, requestedTab, subscribe = true) {
                     el('span', { class: `chip ${network.enabled ? 'chip--good' : 'chip--warn'}` },
                         network.enabled ? 'participating' : 'paused'),
                     el('span', { class: 'mono dim', style: 'font-size:10px' }, network.id))),
+            el('button', { class: 'btn btn--primary', disabled: network.active || !network.enabled,
+                onclick: () => selectNetwork(network) },
+                network.active ? 'Active for runs' : 'Use for runs'),
+            (network.role || data.membership.account_role) === 'owner' ? el('button', { class: 'btn btn--danger', onclick: () => deleteNetwork(network) },
+                el('i', { class: 'bx bx-trash' }), 'Delete network') : null,
             el('button', { class: 'btn', onclick: () => navigate('networks') },
                 el('i', { class: 'bx bx-left-arrow-alt' }), 'All networks')),
         tabBar(id, activeTab),
@@ -145,7 +165,7 @@ async function renderNetwork(host, id, requestedTab, subscribe = true) {
         activeTab === 'machine' ? machineTab(data) : null);
     mount(host, page);
     return subscribe && activeTab === 'connected'
-        ? watchRefresh(['peers.changed', 'ray.changed', 'networks.changed', 'connection.restored'],
+        ? watchRefresh(['peers.changed', 'ray.changed', 'network.active', 'networks.changed', 'connection.restored'],
             () => renderNetwork(host, id, requestedTab, false)) : null;
 }
 
@@ -184,11 +204,11 @@ async function connectedTab(data) {
                     : emptyBlock('bx-chip', 'No graphics cards are connected to this network.'))),
         el('section', { style: 'margin-top:28px' },
             el('div', { class: 'section-heading' },
-                el('strong', {}, 'Projects connected to this network'),
+                el('strong', {}, 'Local projects you can run'),
                 el('a', { href: '#/projects' }, 'View all ', el('i', { class: 'bx bx-right-arrow-alt' }))),
             data.projects.length
                 ? el('div', { class: 'ps-card-grid' }, ...data.projects.map((project) => projectCard(project, data)))
-                : emptyBlock('bx-layer', 'This network has no projects yet.')));
+                : emptyBlock('bx-layer', 'Create a local project under Projects.')));
 }
 
 function signalMetric(data) {
@@ -215,30 +235,34 @@ function rayMetric(data, ray) {
     const running = Boolean(ray?.running);
     const localRunning = Boolean(ray?.local_running);
     const networkID = encodeURIComponent(data.network.id);
-    const action = async (actionName) => {
+    const action = async () => {
+        const actionName = localRunning ? 'stop' : 'start';
+        if (localRunning && !window.confirm('Stop Ray on this device? Running work here may be interrupted.')) return;
+        card.disabled = true;
         try {
             await api(`/api/ray/${actionName}?network_id=${networkID}`, {
                 method: 'POST', body: { network_id: data.network.id },
             });
             toast(actionName === 'stop' ? 'Ray stopped on this machine.' : 'Ray is starting.');
-            location.reload();
+            await refresh();
+            navigate(`networks/${networkID}`);
         } catch (error) { toast(error.message, 'err'); }
+        finally { card.disabled = false; }
     };
-    return el('div', { class: `ps-metric-card ${running ? 'ps-metric-card--projects' : 'ps-metric-card--system'}` },
+    const unavailable = !localRunning && (!ray?.installed || !ray?.eligible);
+    const card = el('button', { type: 'button', onclick: action, disabled: unavailable,
+        'aria-pressed': String(localRunning),
+        class: `ps-metric-card ray-toggle ${localRunning ? 'ps-metric-card--networks' : 'ps-metric-card--system'}` },
         el('div', { class: 'ps-metric-card__surface' },
             el('div', { class: 'ps-metric-head' },
                 el('span', { class: 'ps-metric-card__icon' }, el('i', { class: 'bx bx-broadcast' })),
-                el('span', { class: `chip ${running ? 'chip--good' : 'chip--warn'}` }, running ? 'running' : 'stopped')),
+                el('strong', {}, localRunning ? 'Ray on' : 'Ray off')),
             el('p', { class: 'ps-status-row__title', style: 'margin:10px 6px 3px' },
                 running ? `${ray.total_gpu || 0} GPU · ${ray.total_cpu || 0} CPU`
                     : ray?.advice || 'Ray is not running.'),
-            el('div', { style: 'display:flex;gap:6px;margin:6px' },
-                ray?.installed && ray?.eligible && !localRunning
-                    ? el('button', { class: 'btn btn--sm btn--primary', onclick: () => action('start') },
-                        el('i', { class: 'bx bx-play' }), ray.head ? 'Attach' : 'Start') : null,
-                localRunning
-                    ? el('button', { class: 'btn btn--sm', onclick: () => action('stop') },
-                        el('i', { class: 'bx bx-stop-circle' }), 'Stop') : null)));
+            el('small', { class: 'muted' }, unavailable ? (ray?.detail || ray?.advice || 'Enable this machine’s worker policy and install Ray first.')
+                : localRunning ? 'This device · click to turn off' : 'This device · click to start / attach')));
+    return card;
 }
 
 function deviceCard(node) {
@@ -333,10 +357,11 @@ function settingsTab(data) {
 }
 
 async function deleteNetwork(network) {
-    if (!window.confirm(`Delete ${network.name} from every machine? Project folders stay on disk.`)) return;
+    if (!window.confirm(`Delete ${network.name} from every machine? Projects, files and Git history will be kept. Running work on this network may be interrupted.`)) return;
     try {
         await api(`/api/networks/${encodeURIComponent(network.id)}`, { method: 'DELETE', body: {} });
         toast(`${network.name} was deleted.`);
+        await refresh();
         navigate('networks');
     } catch (error) {
         toast(error.message, 'err');

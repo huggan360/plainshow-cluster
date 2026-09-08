@@ -4,6 +4,15 @@ Shared context for anyone (Claude, Codex, a person) picking this up. Read this
 before changing anything. Keep it current: if you change a decision here, edit
 this file in the same commit.
 
+Latest product decision (September 8, after Alpha 0.1.2): projects are local
+and no longer require a network. Select a compute target on Networks with
+“Use for runs”; file runs, Test and Preset use that selection. Existing jobs
+retain their original network for log/stop requests. The whole Ray card toggles
+this device's participation. Owner deletion preserves local projects and files.
+Legacy network_id values remain solely for folder/sharing compatibility, not
+execution routing. No automatic editor sharing follows compute selection.
+This supersedes older required-project-network statements in this file/PLAN.
+
 ## What this is
 
 A self-hosted workspace that turns a few ordinary computers into one
@@ -79,8 +88,9 @@ like any other file. You open it in your own editor.
 Eight pages: Home, Networks, Projects, Jobs, GitHub, Devices, How to, Settings.
 
 There is no account-wide active-network selector or status in the top bar.
-Accounts browse, edit and run projects across every network concurrently, and a
-project's own `network_id` routes its Ray job and Cowork traffic. A physical
+Projects stay visible regardless of network selection. Networks has the active
+compute selector; new runs use it, while existing jobs retain their own target.
+Legacy `network_id` values scope existing folders/Cowork sharing only. A physical
 machine still contributes its finite CPU and GPUs to one Ray cluster at a time;
 starting Ray from a different network moves that machine's one raylet without
 hiding or changing the account's other networks. The power control stops jobs,

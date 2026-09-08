@@ -98,10 +98,9 @@ func TestSigningInOnANewMachineBringsYourNetworks(t *testing.T) {
 	if len(srv.cfg.Memberships) != 2 {
 		t.Fatalf("config carries %d memberships, want 2", len(srv.cfg.Memberships))
 	}
-	// A machine with nothing selected has to land somewhere, or the workspace
-	// is still empty after a successful adoption.
-	if srv.cfg.ActiveNetwork == "" {
-		t.Error("no network was selected on a machine that had none")
+	// Membership discovery must not choose where local project code executes.
+	if srv.cfg.ActiveNetwork != "" {
+		t.Error("adoption silently selected a compute network")
 	}
 	// The interface reads the database, not the config, so both have to agree.
 	networks, err := srv.store.Networks("acct-1")

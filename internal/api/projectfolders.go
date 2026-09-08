@@ -18,6 +18,24 @@ func projectFolder(p store.Project) string {
 	return p.Name
 }
 
+// A newly independent project may own a flat directory that an old scoped
+// project once used as a migration fallback. Never resolve/share its files as
+// the old project merely because both have the same display name.
+func (s *Server) legacyProjectDir(p store.Project) string {
+	if p.NetworkID != "" {
+		local, err := s.store.ProjectsInNetwork("")
+		if err != nil {
+			return ""
+		}
+		for _, other := range local {
+			if other.ID != p.ID && (other.Name == p.Name || projectFolder(other) == p.Name) {
+				return ""
+			}
+		}
+	}
+	return filepath.Join(s.layout.Projects(), p.Name)
+}
+
 // MigrateProjectFolders runs before the node accepts requests. Renames never
 // merge directories or discard an existing destination.
 func (s *Server) MigrateProjectFolders() error {
@@ -30,7 +48,10 @@ func (s *Server) MigrateProjectFolders() error {
 		desired := filepath.Join(s.layout.Projects(), p.NetworkID, projectFolder(p))
 		old := filepath.Join(s.layout.Projects(), p.NetworkID, p.Name)
 		if _, err := os.Stat(old); os.IsNotExist(err) {
-			old = filepath.Join(s.layout.Projects(), p.Name)
+			old = s.legacyProjectDir(p)
+			if old == "" {
+				continue
+			}
 		}
 		if old == desired {
 			continue

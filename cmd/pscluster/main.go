@@ -359,7 +359,8 @@ func syncNetworks(st *store.Store, cfg *config.Config, device *identity.Device, 
 			return err
 		}
 	}
-	return st.AssignProjectsToNetwork(cfg.ActiveNetwork)
+	// Local projects remain independent when a compute network is selected.
+	return nil
 }
 
 func meshEndpoint(cfg *config.Config) string {

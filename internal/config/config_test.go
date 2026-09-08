@@ -134,6 +134,29 @@ func TestNoNetworksSurvivesSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestUnselectedNetworksSurviveSaveAndLoad(t *testing.T) {
+	l, err := NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Defaults()
+	cfg.Memberships = []MembershipConfig{{ID: "not-selected", Name: "Network", Enabled: true}}
+	cfg.ActiveNetwork = ""
+	if err := Save(l, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ActiveNetwork != "" || loaded.ActiveMembership().ID != "" || loaded.Cluster.ID != "" || len(loaded.Memberships) != 1 {
+		t.Fatalf("saving silently selected a compute network: %+v", loaded)
+	}
+}
+
 // TestLoadAppliesDefaults covers a hand-edited config that omits fields.
 func TestLoadAppliesDefaults(t *testing.T) {
 	l, err := NewLayout(t.TempDir())

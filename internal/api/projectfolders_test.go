@@ -71,3 +71,27 @@ func TestRepositoryFolderMigrationDoesNotOverwrite(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyScopeNeverClaimsIndependentProjectsFiles(t *testing.T) {
+	s := syncingNode(t, true, true)
+	local := store.Project{ID: "local", Name: "same"}
+	legacy := store.Project{ID: "legacy", Name: "same", NetworkID: "net-1"}
+	for _, p := range []store.Project{local, legacy} {
+		if err := s.store.CreateProject(&p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := filepath.Join(s.layout.Projects(), "same")
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if s.projectDir(legacy) == dir || s.hasProjectFiles(legacy.NetworkID, legacy.Name) {
+		t.Fatal("legacy sharing scope claimed unrelated local files")
+	}
+	if err := s.MigrateProjectFolders(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatal("migration moved the independent project's files")
+	}
+}

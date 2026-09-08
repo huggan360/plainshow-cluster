@@ -43,8 +43,8 @@ export async function renderJobs(host) {
                 el('div', { class: 'panel' },
                     el('div', { class: 'panel__head' }, 'How jobs choose a network'),
                     el('p', { class: 'muted', style: 'margin:0;font-size:13px;line-height:1.65' },
-                        'Every project belongs to exactly one network. Running a project sends it ' +
-                        'to that network automatically; there is no workspace-wide network selector.'))),
+                        'Choose the active network on Networks. New project runs use that network; ' +
+                        'existing jobs keep their original target. Projects and files remain local.'))),
 
             el('div', { class: 'panel' },
                 el('div', { class: 'panel__head' }, 'Recent'),

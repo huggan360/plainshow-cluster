@@ -209,7 +209,7 @@ ok('network has its owner account',
   (await j(`/api/networks/${secondNetwork.body.id}/members`)).body[0].role === 'owner');
 const networkDetail = await j(`/api/networks/${secondNetwork.body.id}`);
 ok('network workspace has projects, devices and policy', networkDetail.status === 200 &&
-  networkDetail.body.projects.length === 1 && networkDetail.body.nodes.length === 1 &&
+  networkDetail.body.projects.length === 2 && networkDetail.body.nodes.length === 1 &&
   networkDetail.body.membership.id === secondNetwork.body.id);
 ok('device compute assignment can switch independently',
   (await j(`/api/networks/${defaultNetwork}/active`, { method: 'PUT' })).status === 200);
@@ -218,13 +218,15 @@ ok('switching device compute does not hide projects', (await j('/api/projects'))
 console.log('\nDELETE NETWORKS');
 ok('owner can delete a network',
   (await j(`/api/networks/${secondNetwork.body.id}`, { method: 'DELETE' })).status === 200);
-ok('deleting a network removes its project metadata only',
-  (await j('/api/projects')).body.length === 1);
+ok('deleting a network preserves local projects',
+  (await j('/api/projects')).body.length === 2);
 ok('owner can delete the final network',
   (await j(`/api/networks/${defaultNetwork}`, { method: 'DELETE' })).status === 200);
 const emptyNetworks = (await j('/api/networks')).body;
 ok('zero networks remains a valid state',
   emptyNetworks.networks.length === 0 && emptyNetworks.active === '');
+ok('projects can be created with zero networks',
+  (await j('/api/projects', { method: 'POST', body: { name: 'standalone' } })).status === 201);
 
 console.log(`\n  ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

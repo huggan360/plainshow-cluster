@@ -60,7 +60,6 @@ async function renderProjectList(host) {
 }
 
 function card(p) {
-    const network = (state.overview.networks || []).find((item) => item.id === p.network_id);
     return el('a', {
         class: 'panel ps-project-card', href: `#/projects/${encodeURIComponent(p.id)}`,
     },
@@ -68,7 +67,7 @@ function card(p) {
             el('span', { class: 'ps-project-mark' }, el('i', { class: 'bx bx-layer' })),
             el('span', { class: 'ps-project-card__copy' },
                 el('strong', {}, p.name),
-                el('span', {}, p.description || (network ? network.name : 'Local project'))),
+                el('span', {}, p.description || 'Local project')),
             el('span', { class: 'ps-project-card__status' },
                 el('i', { class: 'bx bx-git-branch' }), p.branch || 'main')),
         el('div', { class: 'ps-project-card__foot' },
@@ -79,18 +78,10 @@ function card(p) {
 }
 
 export function newProject(after) {
-    const networks = state.overview.networks || [];
-    if (!networks.length) {
-        toast('Create or join a network before creating a project.', 'err');
-        navigate('networks');
-        return;
-    }
     const name = el('input', {
         class: 'input', placeholder: 'vision-model', autocomplete: 'off',
     });
     const desc = el('input', { class: 'input', placeholder: 'What is it for? (optional)' });
-    const network = el('select', { class: 'input' }, ...networks.map((item) =>
-        el('option', { value: item.id }, item.name)));
 
     modal({
         title: 'New project',
@@ -100,14 +91,12 @@ export function newProject(after) {
                 el('label', { class: 'field__label' }, 'Name'), name),
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, 'Description'), desc),
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Network'), network),
             el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
                 'Letters, numbers, dashes and underscores.')),
         onConfirm: async (close) => {
             const project = await api('/api/projects', {
                 method: 'POST',
-                body: { name: name.value.trim(), description: desc.value.trim(), network_id: network.value },
+                body: { name: name.value.trim(), description: desc.value.trim() },
             });
             close();
             toast(`Created ${project.name}.`);
@@ -130,7 +119,7 @@ async function renderProject(host, reference, routeParts) {
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
     const projectSummary = state.overview.projects.find((project) =>
         project.id === reference || project.name === reference);
-    if (!projectSummary) throw new Error('No such project in your networks.');
+    if (!projectSummary) throw new Error('No such local project.');
     const name = projectSummary.name;
     const projectRef = projectSummary.id;
     const gitSnapshot = await api(`/api/projects/${encodeURIComponent(projectRef)}/git`);
@@ -484,6 +473,14 @@ async function renderProject(host, reference, routeParts) {
     });
     const runBtn = el('button', { class: 'btn btn--primary', onclick: run },
 		el('i', { class: 'bx bx-play' }), 'Run');
+	const runNetworkLink = el('a', { class: 'btn btn--sm', href: '#/networks' });
+	const showRunNetwork = () => {
+		const network = state.overview.networks.find(n => n.id === state.overview.active_network);
+		runNetworkLink.textContent = network ? `Run on: ${network.name}` : 'Choose run network';
+	};
+	showRunNetwork();
+	const offRunNetwork = on('network.active', showRunNetwork);
+	const offRunNetworks = on('networks.changed', showRunNetwork);
     const stopBtn = el('button', { class: 'btn btn--danger hide', onclick: stop },
 		el('i', { class: 'bx bx-stop-circle' }), 'Stop');
 	let jobPoll = null;
@@ -514,7 +511,7 @@ async function renderProject(host, reference, routeParts) {
     async function stop() {
         if (!currentJob) return;
         try {
-			await api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/stop?network_id=${encodeURIComponent(ctx.networkId)}`,
+			await api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/stop?network_id=${encodeURIComponent(currentJob.network_id)}`,
 				{ method: 'POST' });
         } catch (err) { toast(err.message, 'err'); }
     }
@@ -523,8 +520,8 @@ async function renderProject(host, reference, routeParts) {
 		if (!currentJob) return;
 		try {
 			const [logData, listing] = await Promise.all([
-				api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/logs?network_id=${encodeURIComponent(ctx.networkId)}`).catch(() => ({ logs: '' })),
-				api(`/api/ray/jobs?network_id=${encodeURIComponent(ctx.networkId)}`).catch(() => ({ jobs: [] })),
+				api(`/api/ray/jobs/${encodeURIComponent(currentJob.id)}/logs?network_id=${encodeURIComponent(currentJob.network_id)}`).catch(() => ({ logs: '' })),
+				api(`/api/ray/jobs?network_id=${encodeURIComponent(currentJob.network_id)}`).catch(() => ({ jobs: [] })),
 			]);
 			const job = (listing.jobs || []).find((item) => item.id === currentJob.id);
 			const lines = String(logData.logs || '').replace(/\s+$/, '').split('\n');
@@ -596,7 +593,7 @@ async function renderProject(host, reference, routeParts) {
 
 	const branchPane = el('div', { class: 'ws' },
 		el('div', { class: 'ws__side' }, filePanel), editorBox);
-	editorBox.append(el('div', { class: 'ray-tool-actions' }, runBtn, stopBtn), outputBox);
+	editorBox.append(el('div', { class: 'ray-tool-actions' }, runBtn, stopBtn, runNetworkLink), outputBox);
 	const gitPane = el('div', { class: 'panel' },
 		el('div', { class: 'panel__head' }, 'Repository and branch history'), repository.node);
 	const teamPane = el('div', { class: 'panel' },
@@ -604,7 +601,7 @@ async function renderProject(host, reference, routeParts) {
 	const settingsPane = projectSettingsPane(projectSummary);
 	const devicesPane = projectDevicesPane(projectSummary, activeTab === 'devices');
 	const raySnapshot = activeTab === 'overview'
-		? await api(`/api/ray?network_id=${encodeURIComponent(projectSummary.network_id)}`)
+		? await api('/api/ray')
 			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const tools = rayTools(projectSummary, activeTab);
@@ -622,7 +619,7 @@ async function renderProject(host, reference, routeParts) {
 		el('div', { class: 'detail-head' },
 			el('div', { class: 'detail-head__copy' },
 				el('p', { class: 'page__eyebrow' },
-					state.overview.networks.find((network) => network.id === projectSummary.network_id)?.name || 'Project'),
+					'Local project'),
 				el('h1', { class: 'page__title' }, name),
 				el('p', { class: 'page__sub' }, projectSummary.description || 'Local project folder'),
                 el('p', { class: 'project-local-path mono muted' }, projectSummary.path || ''),
@@ -717,6 +714,7 @@ async function renderProject(host, reference, routeParts) {
 
     return () => {
 		tools.close();
+		offRunNetwork(); offRunNetworks();
 		devicesPane.close();
 		if (jobPoll) clearInterval(jobPoll);
 		offTree(); offReplace(); offRename(); offDelete();
@@ -783,6 +781,14 @@ function projectStatusMetric(tone, icon, title, detail) {
 function projectDevicesPane(project, active) {
 	const box = el('div', {});
 	const pane = el('div', {}, box);
+	if (!project.network_id) {
+		mount(box, el('section', { class: 'panel' },
+			el('strong', {}, 'Local project files'),
+			el('p', { class: 'muted' }, 'Ray submits this project folder when you run a file. Choose the compute network on Networks. Use Git to share files with another machine.'),
+			el('a', { class: 'btn', href: '#/networks' }, 'Choose network')));
+		pane.close = () => {};
+		return pane;
+	}
 	let disposed = false;
 
 	const load = async () => {
@@ -888,53 +894,17 @@ function projectSettingsPane(project) {
 					el('i', { class: 'bx bx-trash' }), 'Delete permanently'))));
 }
 
-// networkPanel moves a project from one network to another.
-//
-// A project lives in exactly one network. That is what makes "who can see this"
-// answerable, and what lets a repository's collaborator list mean one thing. So
-// this is a move, not a copy, and the files go with it.
+// Compute selection never moves project files or changes sharing.
 function networkPanel(project) {
-	const networks = (state.overview.networks || [])
-		.filter((network) => network.id !== project.network_id);
-	const picker = el('select', { class: 'input' },
-		...networks.map((network) => el('option', { value: network.id }, network.name)));
 	const current = (state.overview.networks || [])
-		.find((network) => network.id === project.network_id);
+		.find((network) => network.id === state.overview.active_network);
 
 	return el('section', { class: 'panel' },
-		el('div', { class: 'panel__head' }, 'Network'),
+		el('div', { class: 'panel__head' }, 'Run network'),
 		el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12px;line-height:1.6' },
-			'This project belongs to ', el('strong', {}, current ? current.name : 'this network'),
-			'. Moving it takes its files with it and changes who can see it. ' +
-			'Only the project owner can.'),
-		networks.length
-			? el('div', {},
-				el('label', { class: 'field' },
-					el('span', { class: 'field__label' }, 'Move to'), picker),
-				el('button', { class: 'btn', onclick: () => moveProject(project, picker) },
-					el('i', { class: 'bx bx-transfer' }), 'Move project'))
-			: el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
-				'There is no other network to move it to.'));
-}
-
-function moveProject(project, picker) {
-	const target = picker.value;
-	const name = picker.options[picker.selectedIndex]?.text || 'that network';
-	modal({
-		title: `Move ${project.name} to ${name}?`,
-		confirmLabel: 'Move',
-		body: () => el('p', { style: 'margin:0;font-size:13px;color:#cbd5e1;line-height:1.6' },
-			'The project and its files move together. People in the network it is ' +
-			'leaving stop seeing it, and people in ' + name + ' start. Its Git ' +
-			'history and its GitHub repository are untouched.'),
-		onConfirm: async (close) => {
-			await api(`/api/projects/${encodeURIComponent(project.id)}/network`,
-				{ method: 'PUT', body: { network_id: target } });
-			close();
-			toast(`${project.name} moved to ${name}.`);
-			location.reload();
-		},
-	});
+			'Runs use ', el('strong', {}, current ? current.name : 'no network yet'),
+			'. Choose the active network on Networks. Project files and Git history stay here.'),
+		el('a', { class: 'btn', href: '#/networks' }, 'Choose network'));
 }
 
 function textEdit(before, after) {

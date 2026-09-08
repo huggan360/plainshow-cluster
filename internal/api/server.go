@@ -284,9 +284,10 @@ func (s *Server) projectDir(p store.Project) string {
 	if _, err := os.Stat(scoped); err == nil {
 		return scoped
 	}
-	legacy := filepath.Join(s.layout.Projects(), p.Name)
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
+	if legacy := s.legacyProjectDir(p); legacy != "" {
+		if _, err := os.Stat(legacy); err == nil {
+			return legacy
+		}
 	}
 	return scoped
 }
@@ -413,8 +414,8 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.NetworkID = strings.TrimSpace(body.NetworkID)
-	if !hasMembership(s.cfg, body.NetworkID) {
-		fail(w, http.StatusBadRequest, "Choose a network for this project.")
+	if body.NetworkID != "" && !hasMembership(s.cfg, body.NetworkID) {
+		fail(w, http.StatusBadRequest, "That optional sharing network is not available.")
 		return
 	}
 	if _, err := s.store.ProjectByNameInNetwork(body.NetworkID, body.Name); err == nil {
@@ -425,6 +426,13 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	p := store.Project{ID: config.NewID(), NetworkID: body.NetworkID,
 		Name: body.Name, Description: body.Description}
 	dir := s.projectDir(p)
+	if _, err := os.Lstat(dir); err == nil {
+		fail(w, http.StatusConflict, "That project folder already exists. Choose another name or open the existing project.")
+		return
+	} else if !os.IsNotExist(err) {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := projectfs.MkdirOwned(dir); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not create the project directory: %v", err))
 		return
