@@ -1,6 +1,7 @@
 // Networks — Plainshow-style network cards and one focused network workspace.
 
 import { el, mount, initials, megabytes, ago } from '../lib/ui.js';
+import { vendorMark } from '../lib/vendors.js';
 import { api, modal, toast, navigate, state, watchRefresh, refresh } from '../lib/client.js';
 
 export async function renderNetworks(host, args = []) {
@@ -55,7 +56,7 @@ async function renderNetworkList(host, subscribe = true) {
 // invited, because an invitation is the one item here that is waiting on you.
 function invitationsPanel(invites) {
     if (!invites.length) return null;
-    return el('section', { class: 'panel', style: 'margin-bottom:20px' },
+    return el('section', { class: 'panel', style: 'margin:18px 0 24px' },
         el('div', { class: 'panel__head' },
             el('span', { class: 'grow' }, 'Invitations'),
             el('span', { class: 'chip chip--warn' }, String(invites.length))),
@@ -281,7 +282,7 @@ function deviceCard(node) {
 }
 
 function gpuRow(gpu) {
-    return el('div', { class: 'ps-status-row' }, el('i', { class: 'bx bx-chip ps-gpu-icon' }),
+    return el('div', { class: 'ps-status-row' }, vendorMark(gpu.vendor),
         el('span', { class: 'ps-status-row__main' },
             el('span', { class: 'ps-status-row__title' }, gpu.name || 'Graphics card'),
             el('span', { class: 'ps-status-row__meta' },

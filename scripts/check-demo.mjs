@@ -9,6 +9,11 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+const DEMO = process.env.DEMO_DIR || 'dist/demo';
+// index.html stays at the root: it is the one file the CDN does not cache, and
+// it is what points at the newest build.
+const ROOT = 'dist/demo';
+
 const problems = [];
 
 function walk(dir) {
@@ -26,7 +31,7 @@ const shipped = walk('web')
     .map((file) => relative('web', file));
 
 for (const file of shipped) {
-    if (!existsSync(join('dist/demo', file))) {
+    if (!existsSync(join(DEMO, file))) {
         problems.push(`dist/demo is missing ${file}, which the product ships`);
     }
 }
@@ -34,14 +39,14 @@ for (const file of shipped) {
 // The mark is served by a Go route in the product rather than a file in web/,
 // so the demo carries its own copy and would otherwise lose its favicon
 // silently.
-if (!existsSync('dist/demo/brand/plainshow-icon.webp')) {
+if (!existsSync(`${DEMO}/brand/plainshow-icon.webp`)) {
     problems.push('dist/demo is missing the brand mark that the product serves from a route');
 }
 
 // The stub has to load before the interface, or the first request reaches a
 // node that is not there and the page renders an error instead of the app.
-const page = readFileSync('dist/demo/index.html', 'utf8');
-if (page.indexOf('demo-api.js') > page.indexOf('src="./app.js"')) {
+const page = readFileSync(`${ROOT}/index.html`, 'utf8');
+if (page.indexOf('demo-api.js') > page.indexOf('app.js"')) {
     problems.push('demo/index.html loads app.js before the stub, so the first request escapes');
 }
 if (!page.includes('demo-api.js')) {

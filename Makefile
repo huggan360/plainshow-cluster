@@ -180,17 +180,29 @@ run: build
 ## pages: demo/demo-api.js stubs fetch and WebSocket, and everything above them
 ## is the same app.js the product ships. A demo that reimplemented the pages
 ## would drift from them the day after it was written.
+##
+## Every build lands in a directory named after its timestamp, and index.html —
+## which the CDN in front of this does not cache — points at the newest one.
+## Without that, a rebuild is invisible for four hours behind a cached app.js,
+## which for something whose whole purpose is seeing changes is useless.
+DEMO_STAMP := $(shell date -u +%Y%m%d%H%M%S)
+
 demo:
 	@rm -rf dist/demo
-	@mkdir -p dist/demo
-	@cp -r web/. dist/demo/
-	@rm -f dist/demo/embed.go dist/demo/index.html
-	@cp demo/demo-api.js dist/demo/demo-api.js
-	@mkdir -p dist/demo/brand && cp demo/brand/plainshow-icon.webp dist/demo/brand/
-	@cp demo/index.html dist/demo/index.html
-	@node scripts/check-demo.mjs
-	@node scripts/check-demo-data.mjs
-	@echo "  dist/demo is ready — serve it from any static host"
+	@mkdir -p dist/demo/$(DEMO_STAMP)
+	@cp -r web/. dist/demo/$(DEMO_STAMP)/
+	@rm -f dist/demo/$(DEMO_STAMP)/embed.go dist/demo/$(DEMO_STAMP)/index.html
+	@cp demo/demo-api.js dist/demo/$(DEMO_STAMP)/demo-api.js
+	@mkdir -p dist/demo/$(DEMO_STAMP)/brand
+	@cp demo/brand/plainshow-icon.webp dist/demo/$(DEMO_STAMP)/brand/
+	@# The bundled stylesheets reference /fonts/... from the site root, so the
+	@# fonts are mirrored there rather than rewritten inside the CSS.
+	@cp -r web/fonts dist/demo/fonts
+	@sed 's|\./|./$(DEMO_STAMP)/|g' demo/index.html > dist/demo/index.html
+	@DEMO_DIR=dist/demo/$(DEMO_STAMP) node scripts/check-demo.mjs
+	@DEMO_DIR=dist/demo/$(DEMO_STAMP) node scripts/check-demo-data.mjs
+	@DEMO_DIR=dist/demo/$(DEMO_STAMP) node scripts/check-demo-boot.mjs
+	@echo "  dist/demo is ready — build $(DEMO_STAMP)"
 
 clean:
 	rm -rf $(BINARY) $(ADMIN_BINARY) $(DESKTOP_BINARY) dist .devnode .smokenode .smokepid

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log"
 	"time"
@@ -111,6 +112,9 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		PublicKey:     base64.RawURLEncoding.EncodeToString(s.device.Public),
 		Fingerprint:   s.fingerprint,
 		GitHubLogin:   s.githubLogin(ctx),
+		CPUCores:      info.CPUCores,
+		RAMTotalMB:    info.RAMTotalMB,
+		GPUs:          marshalGPUs(info.GPUs),
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	instructions, err := client.CheckIn(requestCtx, token, checkIn)
@@ -423,4 +427,16 @@ func (s *Server) githubLogin(parent context.Context) string {
 		return ""
 	}
 	return account.Login
+}
+
+// marshalGPUs renders this machine's graphics cards for the account's device
+// list. An error is reported as no cards rather than failing the check-in: the
+// heartbeat carries health, and losing all of it over a formatting problem
+// would be a poor trade.
+func marshalGPUs(gpus []sysinfo.GPU) string {
+	raw, err := json.Marshal(gpus)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }

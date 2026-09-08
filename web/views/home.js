@@ -2,6 +2,7 @@
 
 import { el, mount, megabytes, ago } from '../lib/ui.js';
 import { state, refresh, on, api, watchRefresh } from '../lib/client.js';
+import { vendorMark } from '../lib/vendors.js';
 
 export async function renderHome(host) {
     await refresh();
@@ -91,7 +92,7 @@ function gpuMetric(gpus) {
         el('div', { class: 'ps-metric-card__surface' },
             el('div', { class: 'ps-status-list' },
                 ...gpus.slice(0, 3).map((gpu) => el('div', { class: 'ps-status-row' },
-                    el('i', { class: 'bx bx-chip ps-gpu-icon', 'aria-hidden': 'true' }),
+                    vendorMark(gpu.vendor),
                     el('span', { class: 'ps-status-row__main' },
                         el('span', { class: 'ps-status-row__title' }, gpu.name),
                         el('span', { class: 'ps-status-row__meta' },

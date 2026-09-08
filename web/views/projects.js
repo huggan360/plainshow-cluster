@@ -96,7 +96,7 @@ function drawOrphans(box, reload) {
             ? `${(data.size_kb / 1024).toFixed(1)} MB`
             : `${data.size_kb} KB`;
 
-        mount(box, el('section', { class: 'panel', style: 'margin-bottom:20px' },
+        mount(box, el('section', { class: 'panel', style: 'margin:18px 0 24px' },
             el('div', { class: 'panel__head' },
                 el('span', { class: 'grow' }, 'Leftover project files'),
                 el('span', { class: 'chip chip--warn' }, size)),

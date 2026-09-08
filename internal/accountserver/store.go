@@ -118,6 +118,12 @@ type NodeCheckIn struct {
 	// GitHubLogin is the owner's GitHub name as this node knows it. Reported
 	// here because a node is where the two identities meet: it holds the token.
 	GitHubLogin string `json:"github_login"`
+	// CPUCores, RAMTotalMB and GPUs say what this machine actually is. A count
+	// of graphics cards cannot answer "which machine should run this", which is
+	// the question the device list exists to answer.
+	CPUCores   int    `json:"cpu_cores"`
+	RAMTotalMB int    `json:"ram_total_mb"`
+	GPUs       string `json:"gpus"`
 }
 
 // NodeInstructions is what the account service asks a device to do next.
@@ -215,6 +221,12 @@ func (s *Store) migrate() error {
 		// Set when somebody signs a device out from another machine. The device
 		// clears it on its next check-in, which is also the acknowledgement.
 		{"node", "sign_out_at", "TEXT NOT NULL DEFAULT ''"},
+		// What the machine actually is. A count of graphics cards cannot
+		// answer "which machine should run this", which is the question the
+		// device list exists to answer.
+		{"node", "cpu_cores", "INTEGER NOT NULL DEFAULT 0"},
+		{"node", "ram_total_mb", "INTEGER NOT NULL DEFAULT 0"},
+		{"node", "gpus", "TEXT NOT NULL DEFAULT '[]'"},
 		{"node", "address", "TEXT NOT NULL DEFAULT ''"},
 		{"node", "public_key", "TEXT NOT NULL DEFAULT ''"},
 		{"node", "fingerprint", "TEXT NOT NULL DEFAULT ''"},
@@ -422,16 +434,20 @@ func (s *Store) CheckIn(accountID string, input NodeCheckIn) (NodeInstructions, 
 	seen := now()
 	_, err = tx.Exec(`INSERT INTO node
         (id,owner_account_id,name,version,os,arch,gpu_count,project_count,running_jobs,
-         active_network,address,public_key,fingerprint,last_seen,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         active_network,address,public_key,fingerprint,cpu_cores,ram_total_mb,gpus,
+         last_seen,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET name=excluded.name,version=excluded.version,
           os=excluded.os,arch=excluded.arch,gpu_count=excluded.gpu_count,
           project_count=excluded.project_count,running_jobs=excluded.running_jobs,
           active_network=excluded.active_network,address=excluded.address,
           public_key=excluded.public_key,fingerprint=excluded.fingerprint,
+          cpu_cores=excluded.cpu_cores,ram_total_mb=excluded.ram_total_mb,
+          gpus=excluded.gpus,
           last_seen=excluded.last_seen`, input.ID, accountID, input.Name, input.Version,
 		input.OS, input.Arch, input.GPUCount, input.ProjectCount, input.RunningJobs,
-		input.ActiveNetwork, input.Address, input.PublicKey, input.Fingerprint, seen, seen)
+		input.ActiveNetwork, input.Address, input.PublicKey, input.Fingerprint,
+		input.CPUCores, input.RAMTotalMB, defaultJSON(input.GPUs), seen, seen)
 	if err != nil {
 		return instructions, err
 	}

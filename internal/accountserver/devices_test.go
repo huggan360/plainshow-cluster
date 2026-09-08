@@ -129,3 +129,44 @@ func TestRemovingSomebodyElsesDeviceIsRefused(t *testing.T) {
 		t.Fatalf("error = %v, want ErrDeviceNotFound", err)
 	}
 }
+
+// TestADeviceReportsWhatItIs backs the device list saying which machine should
+// run something. A count of graphics cards cannot answer that; their names,
+// vendors and the machine's cores can.
+//
+// It also guards the migration: the columns are added by migrate() and used by
+// the check-in insert, and losing one leaves a query that builds happily and
+// fails the moment anything checks in.
+func TestADeviceReportsWhatItIs(t *testing.T) {
+	store, hugo, _ := twoAccounts(t)
+	const cards = `[{"name":"NVIDIA GeForce RTX 5060","vendor":"nvidia","trainable":true,"vram_total_mb":8151}]`
+
+	if _, err := store.CheckIn(hugo.ID, NodeCheckIn{
+		ID: "n1", Name: "Stationary", GPUCount: 1,
+		CPUCores: 16, RAMTotalMB: 32768, GPUs: cards,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	devices, err := store.DevicesForAccount(hugo.ID)
+	if err != nil || len(devices) != 1 {
+		t.Fatalf("devices = %+v, %v", devices, err)
+	}
+	if devices[0].CPUCores != 16 || devices[0].RAMTotalMB != 32768 {
+		t.Errorf("machine reported as %+v", devices[0])
+	}
+	if string(devices[0].GPUs) != cards {
+		t.Errorf("gpus = %s", devices[0].GPUs)
+	}
+
+	// A machine that reports nothing must come back as an empty list, not a
+	// blank the browser has to guard against.
+	if _, err := store.CheckIn(hugo.ID, NodeCheckIn{ID: "n2", Name: "Headless"}); err != nil {
+		t.Fatal(err)
+	}
+	devices, _ = store.DevicesForAccount(hugo.ID)
+	for _, device := range devices {
+		if len(device.GPUs) == 0 || string(device.GPUs) == "" {
+			t.Errorf("%s reported gpus as blank rather than []", device.Name)
+		}
+	}
+}

@@ -9,6 +9,7 @@ package accountserver
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -24,25 +25,30 @@ const deviceOnlineAfter = 3 * time.Minute
 
 // AccountDevice is one machine as its owner sees it in the interface.
 type AccountDevice struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	Version        string       `json:"version"`
-	OS             string       `json:"os"`
-	Arch           string       `json:"arch"`
-	GPUCount       int          `json:"gpu_count"`
-	ProjectCount   int          `json:"project_count"`
-	RunningJobs    int          `json:"running_jobs"`
-	ActiveNetwork  string       `json:"active_network"`
-	DesiredNetwork string       `json:"desired_network"`
-	LastSeen       string       `json:"last_seen"`
-	Online         bool         `json:"online"`
-	Networks       []NetworkRef `json:"networks"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	OS         string `json:"os"`
+	Arch       string `json:"arch"`
+	GPUCount   int    `json:"gpu_count"`
+	CPUCores   int    `json:"cpu_cores"`
+	RAMTotalMB int    `json:"ram_total_mb"`
+	// GPUs is the machine's graphics cards as its own node reported them, so
+	// the list can say what a machine is rather than only how many it has.
+	GPUs           json.RawMessage `json:"gpus"`
+	ProjectCount   int             `json:"project_count"`
+	RunningJobs    int             `json:"running_jobs"`
+	ActiveNetwork  string          `json:"active_network"`
+	DesiredNetwork string          `json:"desired_network"`
+	LastSeen       string          `json:"last_seen"`
+	Online         bool            `json:"online"`
+	Networks       []NetworkRef    `json:"networks"`
 }
 
 // DevicesForAccount lists every machine signed in to this account.
 func (s *Store) DevicesForAccount(accountID string) ([]AccountDevice, error) {
 	rows, err := s.db.Query(`SELECT id,name,version,os,arch,gpu_count,project_count,
-            running_jobs,active_network,desired_network,last_seen
+            running_jobs,active_network,desired_network,cpu_cores,ram_total_mb,gpus,last_seen
         FROM node WHERE owner_account_id=? ORDER BY last_seen DESC`, accountID)
 	if err != nil {
 		return nil, err
@@ -51,11 +57,17 @@ func (s *Store) DevicesForAccount(accountID string) ([]AccountDevice, error) {
 	out := []AccountDevice{}
 	for rows.Next() {
 		var device AccountDevice
+		var gpus string
 		if err := rows.Scan(&device.ID, &device.Name, &device.Version, &device.OS,
 			&device.Arch, &device.GPUCount, &device.ProjectCount, &device.RunningJobs,
-			&device.ActiveNetwork, &device.DesiredNetwork, &device.LastSeen); err != nil {
+			&device.ActiveNetwork, &device.DesiredNetwork, &device.CPUCores,
+			&device.RAMTotalMB, &gpus, &device.LastSeen); err != nil {
 			return nil, err
 		}
+		if !json.Valid([]byte(gpus)) {
+			gpus = "[]"
+		}
+		device.GPUs = json.RawMessage(gpus)
 		device.Online = seenRecently(device.LastSeen)
 		device.Networks = []NetworkRef{}
 		out = append(out, device)
@@ -175,4 +187,13 @@ func (s *Store) networkRole(networkID, accountID string) (string, error) {
 		return "", ErrNotFound
 	}
 	return role, err
+}
+
+// defaultJSON keeps an empty capacity report as a valid empty list rather than
+// a blank the browser would have to guard against.
+func defaultJSON(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "[]"
+	}
+	return raw
 }

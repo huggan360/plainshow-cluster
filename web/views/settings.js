@@ -1,9 +1,10 @@
 // Settings — what this machine will allow, how it starts, and where it keeps
 // things.
 
-import { el, mount, ago } from '../lib/ui.js';
+import { el, mount, ago, megabytes } from '../lib/ui.js';
 import { api, toast, modal, state, watchRefresh, refresh } from '../lib/client.js';
 import { confirmShutdown } from '../lib/statusbar.js';
+import { vendorMark, vendorName } from '../lib/vendors.js';
 
 const TABS = [
     ['general', 'General', 'bx-slider-alt', '#/settings/general'],
@@ -442,8 +443,8 @@ async function renderDevices(page, tab) {
                 el('button', { class: 'btn btn--sm', onclick: draw },
                     el('i', { class: 'bx bx-refresh' }), 'Refresh')),
             devices.length
-                ? el('div', { class: 'account-device-grid' },
-                    ...devices.map((device) => deviceRow(device, networks, data.this_device, draw)))
+                ? el('div', { class: 'device-list' },
+                    ...devices.map((device) => deviceCard(device, networks, data.this_device, draw)))
                 : el('div', { class: 'panel empty' },
                     el('i', { class: 'bx bx-devices empty__ico' }),
                     el('strong', {}, 'No devices have checked in yet.')));
@@ -454,12 +455,21 @@ async function renderDevices(page, tab) {
     return () => { disposed = true; off(); };
 }
 
-function deviceRow(device, networks, thisDevice, reload) {
+// deviceCard shows what a machine is, not just that it exists.
+//
+// Which machine should run something is decided by what it has, so the graphics
+// cards and the cores are the card. Everything that operates the machine — the
+// network it works in, signing it out, removing it — sits along the bottom,
+// because a header carrying a name, a status, a dropdown and two buttons is a
+// row nothing fits on.
+function deviceCard(device, networks, thisDevice, reload) {
     const isThis = device.id === thisDevice;
+    const gpus = Array.isArray(device.gpus) ? device.gpus : [];
     const current = device.desired_network || device.active_network || '';
+    const moving = device.desired_network && device.desired_network !== device.active_network;
+
     const picker = el('select', {
-        class: 'input device-network-picker', 'aria-label': `Compute network for ${device.name}`,
-        title: 'The one Ray cluster receiving this machine’s CPU and GPUs',
+        class: 'select device-card__net', 'aria-label': `Network for ${device.name}`,
         onchange: async () => {
             picker.disabled = true;
             try {
@@ -475,37 +485,63 @@ function deviceRow(device, networks, thisDevice, reload) {
             }
         },
     },
-        el('option', { value: '', selected: current === '', disabled: true }, 'Choose compute network'),
+        el('option', { value: '', selected: current === '' }, 'No network'),
         ...networks.map((network) => el('option', {
             value: network.id, selected: network.id === current,
         }, network.name)));
 
-    return el('div', { class: 'panel account-device' },
-        el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
-        el('span', { class: 'row__main' },
-            el('span', { class: 'row__title' }, device.name,
-                isThis ? el('span', { class: 'chip chip--cyan', style: 'margin-left:8px' },
-                    'this machine') : null,
-                device.desired_network && device.desired_network !== device.active_network
-                    ? el('span', { class: 'chip chip--warn', style: 'margin-left:8px' }, 'moving')
-                    : null),
-            el('span', { class: 'row__meta' },
-                [
-                    `${device.os || 'linux'} · ${device.arch || '?'}`,
-                    `${device.gpu_count} GPU${device.gpu_count === 1 ? '' : 's'}`,
-                    device.version ? `v${device.version}` : null,
-                    device.online ? 'online' : `last seen ${ago(device.last_seen)}`,
-                ].filter(Boolean).join(' · '))),
-        el('label', { class: 'device-assignment' },
-            el('span', { class: 'field__label' }, 'Compute network'), picker),
-        el('button', {
-            class: 'btn btn--sm', title: 'Sign this device out of your account',
-            onclick: () => signOutDevice(device, isThis, reload),
-        }, el('i', { class: 'bx bx-log-out' })),
-        el('button', {
-            class: 'btn btn--sm btn--icon', title: 'Remove this device',
-            onclick: () => removeDevice(device, reload),
-        }, el('i', { class: 'bx bx-trash' })));
+    return el('section', { class: `panel device-card ${device.online ? '' : 'device-card--off'}` },
+        el('div', { class: 'device-card__top' },
+            el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
+            el('span', { class: 'device-card__name' }, device.name),
+            isThis ? el('span', { class: 'chip chip--cyan' }, 'this machine') : null,
+            moving ? el('span', { class: 'chip chip--warn' }, 'moving') : null,
+            el('span', { class: 'push' }),
+            el('span', { class: 'device-card__seen' },
+                device.online ? 'online' : ago(device.last_seen))),
+
+        el('div', { class: 'ps-metric-card ps-metric-card--gpus device-card__gpus' },
+            el('div', { class: 'ps-metric-card__surface' },
+                gpus.length
+                    ? el('div', { class: 'ps-status-list' },
+                        ...gpus.slice(0, 3).map((gpu) => el('div', { class: 'ps-status-row' },
+                            vendorMark(gpu.vendor),
+                            el('span', { class: 'ps-status-row__main' },
+                                el('span', { class: 'ps-status-row__title' },
+                                    gpu.name || 'Graphics card'),
+                                el('span', { class: 'ps-status-row__meta' },
+                                    [vendorName(gpu.vendor), megabytes(gpu.vram_total_mb),
+                                     gpu.trainable === false ? 'display only' : null]
+                                        .filter(Boolean).join(' · '))))))
+                    : el('div', { class: 'device-card__nogpu' },
+                        el('i', { class: 'bx bx-chip' }),
+                        el('span', {}, 'No graphics card')))),
+
+        el('div', { class: 'device-card__stats' },
+            deviceStat(device.cpu_cores || '—', 'Cores'),
+            deviceStat(device.ram_total_mb ? megabytes(device.ram_total_mb) : '—', 'Memory'),
+            deviceStat(gpus.length || device.gpu_count || 0, 'GPUs'),
+            deviceStat(device.project_count ?? 0, 'Projects')),
+
+        el('div', { class: 'device-card__foot' },
+            picker,
+            el('button', {
+                class: 'btn btn--sm btn--icon', title: 'Sign this device out of your account',
+                onclick: () => signOutDevice(device, isThis, reload),
+            }, el('i', { class: 'bx bx-log-out' })),
+            el('button', {
+                class: 'btn btn--sm btn--icon', title: 'Remove this device',
+                onclick: () => removeDevice(device, reload),
+            }, el('i', { class: 'bx bx-trash' }))),
+
+        el('p', { class: 'device-card__meta' },
+            [device.os || 'linux', device.arch, device.version ? `v${device.version}` : null]
+                .filter(Boolean).join(' · ')));
+}
+
+function deviceStat(value, label) {
+    return el('span', { class: 'device-stat' },
+        el('strong', {}, String(value)), el('span', {}, label));
 }
 
 function signOutDevice(device, isThis, reload) {

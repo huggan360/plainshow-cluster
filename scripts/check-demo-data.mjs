@@ -1,3 +1,5 @@
+const DEMO = process.env.DEMO_DIR || 'dist/demo';
+
 // Load the stub in a fake browser and confirm it answers the endpoints the
 // interface actually calls, with the shapes the views read.
 const listeners = {};
@@ -13,7 +15,7 @@ globalThis.Response = class {
     get ok() { return this.status < 400; }
 };
 
-const source = await import('node:fs').then((fs) => fs.readFileSync('demo/demo-api.js', 'utf8'));
+const source = await import('node:fs').then((fs) => fs.readFileSync(`${DEMO}/demo-api.js`, 'utf8'));
 new Function('window', 'document', 'Response', source)(window, document, Response);
 
 const endpoints = [

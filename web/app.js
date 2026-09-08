@@ -6,6 +6,7 @@
 import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
 import { powerButton } from './lib/statusbar.js';
+import { activityStrip } from './lib/activity.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
 import { renderProjects } from './views/projects.js';
