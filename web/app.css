@@ -519,7 +519,8 @@ a.ps-status-row:hover, button.ps-status-row:hover { border-color: rgba(255,255,2
 
 .code { position: relative; display: flex; min-height: 340px; max-height: 62vh; overflow: auto; background: #05070b; }
 .code__gutter {
-    flex: none; padding: 14px 10px 14px 14px; text-align: right;
+    flex: none; margin: 0; padding: 14px 10px 14px 14px; text-align: right;
+    white-space: pre; overflow-wrap: normal;
     font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
     color: var(--tx-4); user-select: none; background: #05070b;
     position: sticky; left: 0; z-index: 2; border-right: 1px solid rgba(255,255,255,.05);

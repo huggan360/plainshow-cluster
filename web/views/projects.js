@@ -314,7 +314,7 @@ async function renderProject(host, reference, routeParts) {
 
     // ---- editor ----
 
-    const gutter = el('div', { class: 'code__gutter' });
+    const gutter = el('pre', { class: 'code__gutter', 'aria-hidden': 'true' });
     const highlightLayer = el('pre', { class: 'code__hl' });
     const input = el('textarea', {
         class: 'code__in', spellcheck: 'false', autocapitalize: 'off',
@@ -609,7 +609,7 @@ async function renderProject(host, reference, routeParts) {
 		git: gitPane, devices: devicesPane, team: teamPane, settings: settingsPane };
 
 	const tabs = [
-		['overview', 'Overview', 'bx-grid-alt'], ['branch', branch, 'bx-git-branch'],
+		['overview', 'Overview', 'bx-grid-alt'], ['branch', 'Code', 'bx-code-alt'],
 		['test', 'Test', 'bx-check-circle'], ['preset', 'Preset', 'bx-file-blank'], ['git', 'Git', 'bx-git-commit'],
 		['devices', 'Devices', 'bx-devices'],
 		['team', 'Team', 'bx-group'], ['settings', 'Settings', 'bx-slider-alt'],
