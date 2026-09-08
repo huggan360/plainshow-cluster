@@ -75,9 +75,16 @@ open or configure.
 4. Create or clone a project. The Projects view supports folders, file uploads,
    downloads, rename/delete, syntax highlighting, live collaborative editing,
    Git and GitHub.
-5. Enter a command such as `python main.py` in the project's Run panel. The
-   project is uploaded through Ray's job service and may execute on any suitable
-   machine in that Ray cluster.
+5. Open **Test → Test cluster** to check that every online device executes a
+   Ray task. Missing workers appear in red with a next step.
+6. Open **Preset**, choose CPU, GPU, mixed or a GPU vendor, then create a Python
+   file. Put your code in the marked function and run the file from your IDE,
+   the branch editor's **Run** button, or the Ray command printed in the file.
+
+Presets discover live resources at execution and respect Ray's device limits.
+Mixed mode uses GPUs on GPU machines and CPUs on CPU-only machines. These are
+independent tasks, not a ready-made synchronous training loop across unlike GPUs.
+The Test tab checks Ray execution, not your GPU drivers or training framework.
 
 One account can browse, edit and run projects across several networks at once;
 there is no global selected network. Every project routes its run to the Ray
@@ -129,7 +136,34 @@ sudo pscluster update status
 journalctl -u plainshow-cluster -f
 ```
 
-All node-owned state lives below `/opt/plainshow-cluster`.
+Device keys and service state live below `/opt/plainshow-cluster`. Installing
+with `sudo` from your desktop account attempts to place projects in:
+
+```text
+/home/YOUR_USERNAME/Plainshow/Projects/<network-id>/<repository-name>/
+```
+
+The project header shows the exact path. Unlinked projects use their project
+name. Files created in the app remain editable by your desktop user.
+
+For an existing installation, after updating to a build with home workspaces:
+
+```sh
+sudo systemctl stop plainshow-cluster
+sudo pscluster workspace --root /opt/plainshow-cluster --user "$USER"
+sudo systemctl start plainshow-cluster
+```
+
+The migration retains the old files in `projects.before-home` under the service
+root. It refuses existing destination folders instead of merging them. A
+built-in binary update preserves this setup but does not choose a desktop user
+or migrate your files by itself. Headless installs can keep their current path.
+
+Shared-network devices exchange live hardware and Ray state over signed,
+certificate-pinned peer sockets. Clean disconnects update presence immediately;
+a silent connection loss takes up to 12 seconds to detect. Older devices fall
+back to heartbeat discovery. Project files still move through explicit
+send/fetch or Git; live editor operations use the Cowork controller.
 
 ## Build from source
 

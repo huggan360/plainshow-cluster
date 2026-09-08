@@ -35,8 +35,10 @@ function parseRoute() {
 }
 
 let disposeView = null;
+let routeGeneration = 0;
 
 async function renderRoute() {
+    const generation = ++routeGeneration;
     const { route, args } = parseRoute();
     // Views register event listeners; disposing on navigation is what keeps a
     // long-lived page from leaking one handler per visit.
@@ -50,12 +52,15 @@ async function renderRoute() {
     const title = document.getElementById('top-title');
     if (title) title.textContent = route.label;
 
-    const host = document.getElementById('view');
+    const host = el('div');
+    mount(document.getElementById('view'), host);
     mount(host, el('div', { class: 'page' },
         el('div', { class: 'empty' }, el('span', { class: 'spin' }))));
 
     try {
-        disposeView = await route.render(host, args) || null;
+        const dispose = await route.render(host, args) || null;
+        if (generation !== routeGeneration) { dispose?.(); return; }
+        disposeView = dispose;
     } catch (err) {
         mount(host, el('div', { class: 'page' },
             el('div', { class: 'panel' },

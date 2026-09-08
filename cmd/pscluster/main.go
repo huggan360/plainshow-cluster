@@ -59,6 +59,8 @@ func main() {
 		err = cmdRun(rest)
 	case "config":
 		err = cmdConfig(rest)
+	case "workspace":
+		err = cmdWorkspace(rest)
 	case "app", "open":
 		err = cmdApp(rest)
 	case "network", "networks":
@@ -451,6 +453,9 @@ func cmdServe(args []string) error {
 	sup := jobs.NewSupervisor(st, hub, l, cfg)
 	up := updater.New(cfg, l, hub)
 	srv := api.New(cfg, l, st, hub, sup, up, device, fingerprint, web.Assets)
+	if err := srv.MigrateProjectFolders(); err != nil {
+		log.Printf("project folders: %v", err)
+	}
 
 	// The command line reaches this daemon with the install root's local token,
 	// which keeps it working once the node has an owner account.
@@ -470,6 +475,7 @@ func cmdServe(args []string) error {
 	srv.StartRayReconciler(ctx, 15*time.Second)
 	srv.StartAccountCheckIn(ctx, time.Minute)
 	srv.StartAccountWatch(ctx)
+	srv.StartPeerWatch(ctx)
 	up.Run(ctx)
 	writePID(l)
 	defer os.Remove(l.PIDFile())

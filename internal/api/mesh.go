@@ -146,6 +146,7 @@ func (s *Server) MeshHandler() http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /mesh/v1/join/{network}", s.acceptJoin)
 	authed := http.NewServeMux()
+	authed.HandleFunc("GET /mesh/v1/events", s.peerEvents)
 	authed.HandleFunc("POST /mesh/v1/peers/check-in", s.acceptPeerCheckIn)
 	authed.HandleFunc("POST /mesh/v1/jobs", s.acceptRemoteJob)
 	authed.HandleFunc("POST /mesh/v1/projects", s.acceptProject)
@@ -396,9 +397,18 @@ func (s *Server) projectsOnDisk(networkID string) []string {
 		return []string{}
 	}
 	out := make([]string, 0, len(entries))
+	names := map[string]string{}
+	projects, _ := s.store.ProjectsInNetwork(networkID)
+	for _, project := range projects {
+		names[projectFolder(project)] = project.Name
+	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			out = append(out, entry.Name())
+			name := entry.Name()
+			if display, ok := names[name]; ok {
+				name = display
+			}
+			out = append(out, name)
 		}
 	}
 	sort.Strings(out)
@@ -531,7 +541,7 @@ func (s *Server) acceptRemoteJob(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, err.Error())
 			return
 		}
-		dir = filepath.Join(s.layout.Projects(), networkID, body.Project)
+		dir = s.projectDir(project)
 		if err := os.RemoveAll(dir); err != nil {
 			fail(w, 500, err.Error())
 			return

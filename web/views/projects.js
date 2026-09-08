@@ -1,10 +1,11 @@
 // Projects — branches, files, the editor, and running what you just wrote.
 
 import { el, mount, ago, bytes, megabytes, fileIcon, stateDot } from '../lib/ui.js';
-import { api, on, onConnection, send, isLive, toast, modal, navigate, refresh, state } from '../lib/client.js';
+import { api, on, onConnection, send, isLive, toast, modal, navigate, refresh, state, watchRefresh } from '../lib/client.js';
 import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
+import { rayTools } from '../lib/raytools.js';
 
 export async function renderProjects(host, args) {
     if (args.length > 0) return renderProject(host, args[0], args.slice(1));
@@ -55,7 +56,7 @@ async function renderProjectList(host) {
             el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search), count),
         results);
     await load();
-    return on('project.created', load);
+    return watchRefresh(['project.created', 'project.deleted', 'project.updated', 'project.moved', 'networks.changed', 'connection.restored'], load);
 }
 
 function card(p) {
@@ -123,9 +124,9 @@ async function renderProject(host, reference, routeParts) {
     const page = el('div', { class: 'page' });
     mount(host, page);
 
-    const projectTabs = new Set(['overview', 'branch', 'run', 'git', 'devices', 'team', 'settings']);
+    const projectTabs = new Set(['overview', 'branch', 'test', 'preset', 'run', 'git', 'devices', 'team', 'settings']);
     const requested = routeParts[0] || 'overview';
-    const activeTab = projectTabs.has(requested) ? requested : 'branch';
+    const activeTab = requested === 'run' ? 'test' : projectTabs.has(requested) ? requested : 'branch';
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
     const projectSummary = state.overview.projects.find((project) =>
         project.id === reference || project.name === reference);
@@ -489,6 +490,7 @@ async function renderProject(host, reference, routeParts) {
 	let currentCommand = '';
 
     async function run() {
+        if (ctx.path.endsWith('.py')) cmd.value = `python '${ctx.path.replaceAll("'", "'\"'\"'")}'`;
         const command = cmd.value.trim();
         if (!command) { toast('Type a command to run.', 'err'); return; }
         if (ctx.dirty) await save();
@@ -594,12 +596,7 @@ async function renderProject(host, reference, routeParts) {
 
 	const branchPane = el('div', { class: 'ws' },
 		el('div', { class: 'ws__side' }, filePanel), editorBox);
-	const runPane = el('div', { class: 'panel' },
-		el('div', { class: 'panel__head' }, 'Run this branch with Ray'),
-		el('div', { class: 'run' },
-			el('div', { class: 'field' }, el('label', { class: 'field__label' }, 'Command'), cmd),
-			runBtn, stopBtn),
-		el('div', { style: 'margin-top:12px' }, outputBox));
+	editorBox.append(el('div', { class: 'ray-tool-actions' }, runBtn, stopBtn), outputBox);
 	const gitPane = el('div', { class: 'panel' },
 		el('div', { class: 'panel__head' }, 'Repository and branch history'), repository.node);
 	const teamPane = el('div', { class: 'panel' },
@@ -610,12 +607,13 @@ async function renderProject(host, reference, routeParts) {
 		? await api(`/api/ray?network_id=${encodeURIComponent(projectSummary.network_id)}`)
 			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
-	const panes = { overview: overviewPane, branch: branchPane, run: runPane,
+	const tools = rayTools(projectSummary, activeTab);
+	const panes = { overview: overviewPane, branch: branchPane, test: tools.test, preset: tools.preset,
 		git: gitPane, devices: devicesPane, team: teamPane, settings: settingsPane };
 
 	const tabs = [
 		['overview', 'Overview', 'bx-grid-alt'], ['branch', branch, 'bx-git-branch'],
-		['run', 'Run', 'bx-play'], ['git', 'Git', 'bx-git-commit'],
+		['test', 'Test', 'bx-check-circle'], ['preset', 'Preset', 'bx-file-blank'], ['git', 'Git', 'bx-git-commit'],
 		['devices', 'Devices', 'bx-devices'],
 		['team', 'Team', 'bx-group'], ['settings', 'Settings', 'bx-slider-alt'],
 	];
@@ -627,6 +625,7 @@ async function renderProject(host, reference, routeParts) {
 					state.overview.networks.find((network) => network.id === projectSummary.network_id)?.name || 'Project'),
 				el('h1', { class: 'page__title' }, name),
 				el('p', { class: 'page__sub' }, projectSummary.description || 'Local project folder'),
+                el('p', { class: 'project-local-path mono muted' }, projectSummary.path || ''),
 				el('div', { class: 'detail-head__meta' },
 					el('span', { class: 'chip chip--cyan' }, el('i', { class: 'bx bx-git-branch' }), branch),
 					el('span', { class: 'chip' }, gitSnapshot.changes.length === 0 ? 'clean' : `${gitSnapshot.changes.length} changes`))),
@@ -717,6 +716,7 @@ async function renderProject(host, reference, routeParts) {
     window.addEventListener('beforeunload', beforeUnload);
 
     return () => {
+		tools.close();
 		if (jobPoll) clearInterval(jobPoll);
 		offTree(); offReplace(); offRename(); offDelete();
 		offCollab(); offReject(); offPresence(); offConnection();

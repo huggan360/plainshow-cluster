@@ -422,14 +422,20 @@ func NewLayout(root string) (Layout, error) {
 func (l Layout) ConfigFile() string { return filepath.Join(l.Root, "config.yaml") }
 func (l Layout) Database() string   { return filepath.Join(l.Root, "cluster.db") }
 func (l Layout) Keys() string       { return filepath.Join(l.Root, "keys") }
-func (l Layout) Projects() string   { return filepath.Join(l.Root, "projects") }
-func (l Layout) Datasets() string   { return filepath.Join(l.Root, "datasets") }
-func (l Layout) Artifacts() string  { return filepath.Join(l.Root, "artifacts") }
-func (l Layout) Logs() string       { return filepath.Join(l.Root, "logs") }
-func (l Layout) JobLogs() string    { return filepath.Join(l.Root, "logs", "jobs") }
-func (l Layout) Run() string        { return filepath.Join(l.Root, "run") }
-func (l Layout) Bin() string        { return filepath.Join(l.Root, "bin") }
-func (l Layout) Binary() string     { return filepath.Join(l.Root, "bin", "pscluster") }
+func (l Layout) Projects() string {
+	path := filepath.Join(l.Root, "projects")
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+func (l Layout) Datasets() string  { return filepath.Join(l.Root, "datasets") }
+func (l Layout) Artifacts() string { return filepath.Join(l.Root, "artifacts") }
+func (l Layout) Logs() string      { return filepath.Join(l.Root, "logs") }
+func (l Layout) JobLogs() string   { return filepath.Join(l.Root, "logs", "jobs") }
+func (l Layout) Run() string       { return filepath.Join(l.Root, "run") }
+func (l Layout) Bin() string       { return filepath.Join(l.Root, "bin") }
+func (l Layout) Binary() string    { return filepath.Join(l.Root, "bin", "pscluster") }
 
 // RayBinary is the Ray this node manages, installed into a virtual environment
 // under its own root. Preferring it means the version the node runs is the one

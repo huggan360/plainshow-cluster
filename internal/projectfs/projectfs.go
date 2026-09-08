@@ -186,11 +186,15 @@ func (p Project) WriteFile(rel, content string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+	if err := MkdirOwned(filepath.Dir(abs)); err != nil {
 		return err
 	}
 	tmp := abs + ".pscluster-tmp"
 	if err := os.WriteFile(tmp, []byte(content), 0o640); err != nil {
+		return err
+	}
+	if err := InheritOwner(tmp, p.Root); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, abs); err != nil {
@@ -206,7 +210,7 @@ func (p Project) CreateDir(rel string) error {
 	if err != nil {
 		return err
 	}
-	return os.MkdirAll(abs, 0o750)
+	return MkdirOwned(abs)
 }
 
 // Remove deletes a file, or a directory and everything under it.
@@ -238,7 +242,7 @@ func (p Project) Rename(from, to string) error {
 	if _, err := os.Stat(dst); err == nil {
 		return fmt.Errorf("%s already exists", to)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+	if err := MkdirOwned(filepath.Dir(dst)); err != nil {
 		return err
 	}
 	return os.Rename(src, dst)
@@ -253,7 +257,7 @@ func (p Project) Upload(rel string, r io.Reader, limit int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+	if err := MkdirOwned(filepath.Dir(abs)); err != nil {
 		return 0, err
 	}
 	// A unique sibling makes concurrent uploads safe while still allowing the
@@ -283,6 +287,9 @@ func (p Project) Upload(rel string, r io.Reader, limit int64) (int64, error) {
 	if err := os.Rename(tmp, abs); err != nil {
 		os.Remove(tmp)
 		return 0, err
+	}
+	if err := InheritOwner(abs, p.Root); err != nil {
+		return n, err
 	}
 	return n, nil
 }

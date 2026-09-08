@@ -44,6 +44,9 @@ import (
 
 // Server holds everything a request might need.
 type Server struct {
+	presenceMu    sync.RWMutex
+	peerContext   context.Context
+	presence      map[string]peerPresence
 	cfg           *config.Config
 	layout        config.Layout
 	store         *store.Store
@@ -108,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{name}/fetch", s.fetchProject)
 	mux.HandleFunc("PUT /api/projects/{name}/network", s.moveProjectNetwork)
 	mux.HandleFunc("GET /api/ray", s.getRay)
+	mux.HandleFunc("POST /api/projects/{name}/ray/test", s.testProjectRay)
+	mux.HandleFunc("POST /api/projects/{name}/ray/preset", s.createRayPreset)
 	mux.HandleFunc("POST /api/ray/start", s.startRay)
 	mux.HandleFunc("POST /api/ray/stop", s.stopRay)
 	mux.HandleFunc("GET /api/ray/jobs", s.getRayJobs)
@@ -271,7 +276,11 @@ func (s *Server) project(reference string) (store.Project, projectfs.Project, er
 }
 
 func (s *Server) projectDir(p store.Project) string {
-	scoped := filepath.Join(s.layout.Projects(), p.NetworkID, p.Name)
+	scoped := filepath.Join(s.layout.Projects(), p.NetworkID, projectFolder(p))
+	oldScoped := filepath.Join(s.layout.Projects(), p.NetworkID, p.Name)
+	if _, err := os.Stat(oldScoped); err == nil {
+		return oldScoped
+	}
 	if _, err := os.Stat(scoped); err == nil {
 		return scoped
 	}
@@ -416,7 +425,7 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	p := store.Project{ID: config.NewID(), NetworkID: body.NetworkID,
 		Name: body.Name, Description: body.Description}
 	dir := s.projectDir(p)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := projectfs.MkdirOwned(dir); err != nil {
 		fail(w, 500, fmt.Sprintf("Could not create the project directory: %v", err))
 		return
 	}

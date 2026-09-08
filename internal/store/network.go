@@ -246,6 +246,7 @@ func (s *Store) NetworkMembers(networkID string) ([]NetworkMemberRow, error) {
 }
 
 type NetworkNode struct {
+	Online      *bool          `json:"online,omitempty"`
 	NetworkID   string         `json:"network_id"`
 	NodeID      string         `json:"node_id"`
 	Name        string         `json:"name"`

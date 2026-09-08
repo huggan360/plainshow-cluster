@@ -39,7 +39,7 @@ func (s *Server) networkSummaries() ([]networkSummary, error) {
 		if projectErr != nil {
 			return nil, projectErr
 		}
-		nodes, nodeErr := s.store.NetworkNodes(network.ID)
+		nodes, nodeErr := s.liveNodes(network.ID)
 		if nodeErr != nil {
 			return nil, nodeErr
 		}
@@ -65,7 +65,7 @@ func (s *Server) networkSummaries() ([]networkSummary, error) {
 func (s *Server) allNetworkNodes() ([]store.NetworkNode, error) {
 	byID := make(map[string]store.NetworkNode)
 	for _, membership := range s.cfg.Memberships {
-		nodes, err := s.store.NetworkNodes(membership.ID)
+		nodes, err := s.liveNodes(membership.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +148,7 @@ func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.decorateProjects(projects)
-	nodes, err := s.store.NetworkNodes(id)
+	nodes, err := s.liveNodes(id)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -190,6 +190,9 @@ func (s *Server) networkDetail(w http.ResponseWriter, r *http.Request) {
 // for showing which machine belongs to a network, but it is not compute that a
 // job can use right now. Peer telemetry normally refreshes every 30 seconds.
 func nodeCapacityOnline(node store.NetworkNode, now time.Time) bool {
+	if node.Online != nil {
+		return *node.Online
+	}
 	if node.IsSelf {
 		return true
 	}
@@ -210,6 +213,7 @@ type recentCommit struct {
 
 func (s *Server) decorateProjects(projects []store.Project) {
 	for index := range projects {
+		projects[index].Path = s.projectDir(projects[index])
 		repo := gitrepo.Open(s.projectDir(projects[index]))
 		if repo.IsRepo() {
 			projects[index].Branch = repo.Branch()
@@ -616,7 +620,7 @@ func (s *Server) networkNodes(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "This device does not belong to that network.")
 		return
 	}
-	nodes, err := s.store.NetworkNodes(id)
+	nodes, err := s.liveNodes(id)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return

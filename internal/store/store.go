@@ -233,6 +233,7 @@ func (s *Store) Machines() ([]Machine, error) {
 
 // Project is a directory of code with a name.
 type Project struct {
+	Path        string `json:"path,omitempty"`
 	ID          string `json:"id"`
 	NetworkID   string `json:"network_id"`
 	Name        string `json:"name"`

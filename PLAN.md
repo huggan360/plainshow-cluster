@@ -64,7 +64,7 @@ keeps its own policy the last word.
   through the node so the browser holds no account credential and stays on one
   origin.
 - Settings is four tabs: **General · Devices · Updates · About**.
-- Home lists every device on the account and its GPUs.
+- Devices lists every device on the account. Home has no separate devices section.
 
 Two things worth remembering. A completed move is acknowledged by the device
 reporting the network it now works in, or the interface shows a pending move
@@ -220,10 +220,30 @@ Verification on 2026-09-07: `make check` passed and `make smoke` reported
 79 passed, 0 failed, including explicit first creation and deletion down to
 zero networks.
 
+## September 8 workspace and live UI update — unreleased
+
+- Home device section removed; Devices uses responsive cards and a styled
+  compute assignment control.
+- Signed, certificate-pinned peer WebSockets carry hardware and Ray snapshots
+  for every shared network. Browser views update on changes and reconnect;
+  heartbeat-only timestamps do not remount the network page.
+- Clean shutdown closes peer sockets. Silent links expire after 12 seconds.
+  Older nodes still use the existing heartbeat fallback.
+- Projects can be migrated to the desktop user's home with a retained backup.
+  New installs through sudo attempt this automatically. Repository folder names
+  are used by clone, startup migration, transfer, readiness and network moves.
+- Project Test performs a bounded Ray task on each live Ray worker and compares
+  the result against network devices. Preset creates non-overwriting Python
+  skeletons for CPU, GPU, mixed and vendor-specific independent tasks.
+- No release or production service deployment for this update.
+  Real Arch desktop rendering and multi-machine/GPU execution remain hardware
+  checks, not something the development Pi can certify.
+
 ## Rules this plan does not get to break
 
 - Bulk bytes never pass through the account service. It carries membership,
   placement and identity. Project files, datasets and logs go device to device.
 - A device enforces its own policy. The account server can ask a machine to join
   a network; it cannot make it accept work.
-- Everything a node stores stays under its one root.
+- Service state stays under its root; project files may live in the user's home
+  through the explicitly requested workspace migration.

@@ -16,6 +16,16 @@ _install_ray() {
     fi
 }
 
+_prepare_workspace() {
+    local workspace_user="${SUDO_USER:-${PSCLUSTER_WORKSPACE_USER:-}}"
+    if [[ -n "$workspace_user" && "$workspace_user" != root ]]; then
+        /opt/plainshow-cluster/bin/pscluster workspace --root /opt/plainshow-cluster --user "$workspace_user" ||
+            echo 'Project migration was not completed. Existing files were retained; see the message above.'
+    else
+        echo 'To place projects in your home: sudo pscluster workspace --root /opt/plainshow-cluster --user YOUR_USERNAME (stop the node first).'
+    fi
+}
+
 post_install() {
     install -d -m 0755 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
@@ -25,6 +35,7 @@ post_install() {
             /opt/plainshow-cluster/bin/pscluster init --root /opt/plainshow-cluster
     fi
 
+    _prepare_workspace
     _install_ray
 
     if [[ -d /run/systemd/system ]]; then
@@ -41,13 +52,17 @@ post_install() {
 }
 
 post_upgrade() {
+    if [[ -d /run/systemd/system ]]; then
+        systemctl stop plainshow-cluster.service || true
+    fi
     install -d -m 0755 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
+    _prepare_workspace
     _install_ray
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
-        systemctl try-restart plainshow-cluster.service || true
+        systemctl start plainshow-cluster.service || true
     fi
 }
 

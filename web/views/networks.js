@@ -1,16 +1,15 @@
 // Networks — Plainshow-style network cards and one focused network workspace.
 
 import { el, mount, initials, megabytes, ago } from '../lib/ui.js';
-import { api, modal, toast, navigate, state, on } from '../lib/client.js';
+import { api, modal, toast, navigate, state, watchRefresh } from '../lib/client.js';
 
 export async function renderNetworks(host, args = []) {
     if (args.length) return renderNetwork(host, args[0], args[1] || 'connected');
     return renderNetworkList(host);
 }
 
-async function renderNetworkList(host) {
+async function renderNetworkList(host, subscribe = true) {
     const page = el('div', { class: 'page' });
-    mount(host, page);
     const [data, invites] = await Promise.all([
         api('/api/networks'),
         // A node with no account authority has nowhere to ask, which is a
@@ -48,9 +47,11 @@ async function renderNetworkList(host) {
             el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search), count),
         results);
     drawResults();
+    mount(host, page);
     // An invitation is the one thing on this page that arrives while you are
     // looking at it, so it should not wait for a reload.
-    return on('invitations.changed', () => renderNetworkList(host));
+    return subscribe ? watchRefresh(['invitations.changed', 'networks.changed', 'connection.restored'],
+        () => renderNetworkList(host, false)) : null;
 }
 
 // invitationsPanel is the first thing on the page when somebody has been
@@ -119,9 +120,8 @@ function networkCard(network) {
             }, 'Open', el('i', { class: 'bx bx-right-arrow-alt' }))));
 }
 
-async function renderNetwork(host, id, requestedTab) {
+async function renderNetwork(host, id, requestedTab, subscribe = true) {
     const page = el('div', { class: 'page' });
-    mount(host, page);
     const data = await api(`/api/networks/${encodeURIComponent(id)}`);
     const tabs = new Set(['connected', 'settings', 'machine']);
     const activeTab = tabs.has(requestedTab) ? requestedTab : 'connected';
@@ -143,7 +143,10 @@ async function renderNetwork(host, id, requestedTab) {
         activeTab === 'connected' ? await connectedTab(data) : null,
         activeTab === 'settings' ? settingsTab(data) : null,
         activeTab === 'machine' ? machineTab(data) : null);
-    return null;
+    mount(host, page);
+    return subscribe && activeTab === 'connected'
+        ? watchRefresh(['peers.changed', 'ray.changed', 'networks.changed', 'connection.restored'],
+            () => renderNetwork(host, id, requestedTab, false)) : null;
 }
 
 function tabBar(id, active) {
@@ -497,6 +500,7 @@ function networkGPUs(nodes) {
 }
 
 function nodeOnline(node) {
+    if (typeof node.online === 'boolean') return node.online;
     if (node.is_self) return true;
     const seen = Date.parse(node.last_seen);
     return Number.isFinite(seen) && Date.now() - seen < 120000;

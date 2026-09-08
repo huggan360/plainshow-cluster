@@ -1,7 +1,7 @@
 // Home — the Plainshow dashboard adapted to networks, GPUs and Ray work.
 
-import { el, mount, megabytes, ago, initials } from '../lib/ui.js';
-import { state, refresh, on, api } from '../lib/client.js';
+import { el, mount, megabytes, ago } from '../lib/ui.js';
+import { state, refresh, on, api, watchRefresh } from '../lib/client.js';
 
 export async function renderHome(host) {
     await refresh();
@@ -21,12 +21,13 @@ export async function renderHome(host) {
     const offProject = on('project.created', redraw);
     const offNetwork = on('networks.changed', redraw);
     const offGit = on('git.committed', redraw);
+    const offLive = watchRefresh(['peers.changed', 'connection.restored', 'project.deleted', 'project.updated', 'project.moved'], redraw);
     const offRay = on('ray.changed', async () => {
         const data = await api('/api/ray/jobs').catch(() => ({ jobs: [] }));
         rayJobs = data.jobs || [];
         await redraw();
     });
-    return () => { offSystem(); offProject(); offNetwork(); offGit(); offRay(); };
+    return () => { offSystem(); offProject(); offNetwork(); offGit(); offRay(); offLive(); };
 }
 
 function content(rayJobs) {
@@ -51,59 +52,10 @@ function content(rayJobs) {
                     ? el('div', { class: 'ps-card-grid' },
                         ...overview.networks.slice(0, 9).map(networkPreview))
                     : emptyPanel('bx-network-chart', 'No networks yet',
-                        'Create or join a network to connect machines and projects.')),
-            devicesSection()),
+                        'Create or join a network to connect machines and projects.'))),
     ];
 }
 
-// devicesSection lists every machine on the account, not only the one being
-// looked at. The point of the product is the other computers, so the answer to
-// "what do I have" should not stop at this one.
-function devicesSection() {
-    const box = el('div', {});
-    const section = el('section', { style: 'margin-top:26px' },
-        el('div', { class: 'section-heading' },
-            el('strong', {}, 'Your devices'),
-            el('a', { href: '#/settings/devices' }, 'Manage ',
-                el('i', { class: 'bx bx-right-arrow-alt', 'aria-hidden': 'true' }))),
-        box);
-
-    // Loaded after the page: this needs the account service, and a node that
-    // has none is a working node, not a broken home page.
-    api('/api/devices').then((data) => {
-        const devices = data.devices || [];
-        if (!devices.length) { section.remove(); return; }
-        mount(box, el('div', { class: 'device-grid' },
-            ...devices.map((device) => accountDeviceCard(device, data.this_device))));
-    }).catch(() => section.remove());
-    return section;
-}
-
-function accountDeviceCard(device, thisDevice) {
-    const network = (device.networks || []).find((item) => item.id === device.active_network);
-    return el('a', {
-        class: 'panel device-card', href: '#/settings/devices',
-        style: device.online ? '' : 'opacity:.6',
-    },
-        el('div', { class: 'device-card__head' },
-            el('span', { class: 'avatar' }, initials(device.name)),
-            el('span', { class: 'row__main' },
-                el('span', { class: 'row__title' }, device.name),
-                el('span', { class: 'row__meta' },
-                    network ? `Compute · ${network.name}` : 'Compute not assigned')),
-            el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
-            device.id === thisDevice
-                ? el('span', { class: 'chip chip--cyan' }, 'this machine') : null),
-        el('div', { class: 'device-card__stats' },
-            deviceStat(device.gpu_count, 'GPUs'),
-            deviceStat(device.project_count, 'Projects'),
-            deviceStat(device.online ? 'online' : ago(device.last_seen), 'Seen')));
-}
-
-function deviceStat(value, label) {
-    return el('span', { class: 'device-stat' },
-        el('strong', {}, value ?? '—'), el('span', {}, label));
-}
 
 function projectMetric(overview) {
     return el('a', { class: 'ps-metric-card ps-metric-card--projects ps-metric-card--lift', href: '#/projects' },
@@ -251,6 +203,7 @@ function gpuInventory(overview, system) {
 }
 
 function machineOnline(machine) {
+    if (typeof machine.online === 'boolean') return machine.online;
     if (machine.is_self) return true;
     const seen = Date.parse(machine.last_seen);
     return Number.isFinite(seen) && Date.now() - seen >= 0 && Date.now() - seen < 120000;

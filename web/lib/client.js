@@ -78,6 +78,21 @@ export function emit(topic, data) {
     bus.dispatchEvent(new CustomEvent(topic, { detail: data }));
 }
 
+/** Coalesce bursts and release subscriptions when a route is left. */
+export function watchRefresh(topics, draw) {
+    let stopped = false, pending = false, running = false, timer;
+    const flush = async () => {
+        if (stopped || running) return;
+        running = true; pending = false;
+        try { await draw(); } catch (error) { if (!stopped) toast(error.message, 'err'); }
+        finally { running = false; if (pending && !stopped) timer = setTimeout(flush, 150); }
+    };
+    const off = topics.map((topic) => on(topic, () => {
+        pending = true; clearTimeout(timer); timer = setTimeout(flush, 150);
+    }));
+    return () => { stopped = true; clearTimeout(timer); off.forEach((fn) => fn()); };
+}
+
 let socket = null;
 const controllerSockets = new Map();
 let attempts = 0;
@@ -146,6 +161,7 @@ export function connect() {
         if (attempts > 0) toast('Reconnected to the node.');
         attempts = 0;
         setLive(true);
+        refresh().then(() => emit('connection.restored', {})).catch(() => {});
         const pending = outbox;
         outbox = [];
         localStorage.setItem(outboxKey, '[]');
@@ -176,6 +192,13 @@ export function connect() {
 function connectControllers() {
     const overview = state.overview || {};
     const targets = overview.controllers || (overview.controller ? [overview.controller] : []);
+    for (const [id, connection] of controllerSockets) {
+        const target = targets.find((item) => item.network_id === id);
+        if (!target || target.ws_url !== connection.url || connection.plainshowToken !== target.collab_token) {
+            controllerSockets.delete(id);
+            connection.close();
+        }
+    }
     targets.forEach(connectController);
 }
 
@@ -184,6 +207,7 @@ function connectController(target) {
     const existing = controllerSockets.get(target.network_id);
     if (existing && existing.readyState < 2) return;
     const connection = new WebSocket(target.ws_url, [`plainshow.${target.collab_token}`]);
+    connection.plainshowToken = target.collab_token;
     controllerSockets.set(target.network_id, connection);
     connection.onopen = () => {
         const pending = controllerOutbox.filter((message) =>
@@ -203,7 +227,7 @@ function connectController(target) {
         if (controllerSockets.get(target.network_id) === connection) {
             controllerSockets.delete(target.network_id);
         }
-        setTimeout(() => connectController(target), 3000);
+        setTimeout(() => { if (live) connectControllers(); }, 3000);
     };
     connection.onerror = () => connection.close();
 }

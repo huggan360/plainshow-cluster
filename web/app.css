@@ -756,3 +756,32 @@ td:first-child { color: #e2e8f0; }
 .cap:hover:not(:disabled) { border-color: var(--line-2); color: var(--tx-2); }
 .cap--on { border-color: rgba(52,211,153,.34); background: rgba(52,211,153,.07); color: #6ee7b7; }
 .cap:disabled { cursor: default; opacity: .75; }
+/* Compact hardware and Ray tools share the dashboard's existing gradients. */
+.account-device-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:16px; }
+.account-device { display:grid; grid-template-columns:12px minmax(0,1fr) auto auto; align-items:center; gap:12px; }
+.account-device .row__main { min-width:0; }
+.account-device .row__title { overflow-wrap:anywhere; }
+.account-device .row__meta { display:block; line-height:1.7; }
+.device-assignment { grid-column:1 / -1; grid-row:2; display:grid; gap:6px; }
+.device-network-picker { width:100%; }
+.ray-tool { max-width:1050px; }
+.ray-tool > p { font-size:13px; line-height:1.65; }
+.ray-tool-actions { display:flex; gap:10px; flex-wrap:wrap; margin:18px 0; }
+.ray-result { padding:24px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(125deg,#38bdf811,transparent); }
+.ray-result > .bx { font-size:28px; vertical-align:middle; margin-right:10px; }
+.ray-result > strong { font-size:17px; }
+.ray-result p { font-size:13px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ray-result--ok { border-color:#22c55e66; background:linear-gradient(125deg,#22c55e22,#14b8a608); }
+.ray-result--ok > .bx { color:#4ade80; }
+.ray-result--error { border-color:#f43f5e66; background:linear-gradient(125deg,#f43f5e22,#f9731608); }
+.ray-result--error > .bx { color:#fb7185; }
+.ray-check { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+.ray-check small { display:block; margin-top:4px; color:var(--muted); }
+.ray-preset-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin:20px 0; }
+.ray-preset-choice { cursor:pointer; text-align:left; color:inherit; font:inherit; padding:0; }
+.ray-preset-choice .ps-metric-card__surface { display:flex; flex-direction:column; justify-content:center; gap:12px; min-height:110px; }
+.ray-preset-choice .bx { font-size:28px; }
+.ray-preset-choice[aria-pressed=true] { outline:2px solid #67e8f9; outline-offset:3px; }
+.ray-inventory { display:flex; gap:8px; flex-wrap:wrap; }
+.ray-inventory small { flex-basis:100%; margin-top:4px; }
+.project-local-path { font-size:11px; overflow-wrap:anywhere; user-select:text; }

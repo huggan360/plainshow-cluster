@@ -371,6 +371,11 @@ case "$COMPONENT" in
             fi
             "$ROOT/bin/$BINARY_NAME" "$@"
         fi
+        workspace_user="${SUDO_USER:-${PSCLUSTER_WORKSPACE_USER:-}}"
+        if [ -n "$workspace_user" ] && [ "$workspace_user" != root ]; then
+            "$ROOT/bin/$BINARY_NAME" workspace --root "$ROOT" --user "$workspace_user" ||
+                echo 'Project migration was not completed. Stop the node and repeat pscluster workspace with --user.'
+        fi
         ;;
     admin)
         if [ ! -f "$ROOT/admin.yaml" ]; then

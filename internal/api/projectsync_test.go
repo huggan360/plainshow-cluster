@@ -10,6 +10,28 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
+func TestBadTransferPreservesPreviousFiles(t *testing.T) {
+	s := syncingNode(t, true, true)
+	project := store.Project{ID: "safe-project", Name: "safe", NetworkID: "net-1"}
+	if err := s.store.CreateProject(&project); err != nil {
+		t.Fatal(err)
+	}
+	dir := s.projectDir(project)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.py"), []byte("keep me"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.materialiseProject("net-1", projectPayload{Project: "safe", Archive: []byte("broken gzip")}); err == nil {
+		t.Fatal("accepted broken archive")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "main.py"))
+	if err != nil || string(raw) != "keep me" {
+		t.Fatalf("previous file lost: %q %v", raw, err)
+	}
+}
+
 func syncingNode(t *testing.T, device, network bool) *Server {
 	t.Helper()
 	srv, _ := newTestServer(t)

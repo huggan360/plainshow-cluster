@@ -70,6 +70,13 @@ func (s *Server) getDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		// The node knows one thing the account service does not: which of these
 		// machines is the one you are looking at.
+		for i := range devices {
+			if devices[i].ID == s.cfg.Node.ID {
+				devices[i].Online = true
+			} else if online, known := s.observedDevice(devices[i].ID); known {
+				devices[i].Online = online
+			}
+		}
 		return map[string]any{"devices": devices, "this_device": s.cfg.Node.ID}, nil
 	})
 }

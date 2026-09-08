@@ -27,7 +27,10 @@ two machines, and needs two lines of Apache config before it can. Read it before
 
 These are settled. Do not quietly reverse them.
 
-1. **Everything a node stores lives under one root directory.** No `/etc`, no
+1. **Service state lives under one root directory.** User-requested exception:
+   projects may live at `~/Plainshow/Projects/<network-id>/<repository-name>`;
+   `<root>/projects` links there. The desktop user owns these files; keys and
+   the database stay in the service root. No `/etc`, no
    `/var`, no scattered dotfiles. The only permitted exceptions are a `PATH`
    symlink and a systemd unit, both optional, and the unit file itself lives in
    the root and is only linked from `/etc/systemd/system`.

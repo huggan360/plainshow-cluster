@@ -409,6 +409,13 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 	p := store.Project{ID: newID(), NetworkID: body.NetworkID,
 		Name: name, Repository: body.Repository}
 	dir := s.projectDir(p)
+	if _, err := os.Lstat(dir); err == nil {
+		fail(w, 409, "That repository folder already exists. Choose another network or use the existing project.")
+		return
+	} else if !os.IsNotExist(err) {
+		fail(w, 500, err.Error())
+		return
+	}
 	if err := gitrepo.Clone(token, body.Repository, dir); err != nil {
 		os.RemoveAll(dir)
 		fail(w, 400, err.Error())

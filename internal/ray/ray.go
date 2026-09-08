@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -219,7 +220,12 @@ func Probe(ctx context.Context, dashboard string) Status {
 		}
 		status.Nodes = append(status.Nodes, node)
 	}
-	status.Running = len(status.Nodes) > 0
+	for _, node := range status.Nodes {
+		if node.Alive {
+			status.Running = true
+			break
+		}
+	}
 	if !status.Running {
 		status.Detail = "the Ray cluster reported no machines"
 	}
@@ -428,5 +434,5 @@ func DashboardURL(head string, port int) string {
 	if port <= 0 {
 		port = DefaultDashboard
 	}
-	return "http://" + head + ":" + strconv.Itoa(port)
+	return "http://" + net.JoinHostPort(head, strconv.Itoa(port))
 }

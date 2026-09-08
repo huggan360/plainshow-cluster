@@ -271,3 +271,83 @@ The pre-change database backup is
 the previous executable is
 `/opt/plainshow-cluster-admin/bin/pscluster-admin.before-alpha8`.
 Tag `v0.1.1-alpha.8` points at `0f2d683` and was pushed with `main`.
+
+## Handover — September 8, live devices and home workspaces (unreleased)
+
+User instruction: finish the requested implementation, **do not publish a
+release yet**. No tag, release, dependency installation or production service
+change was made in this session. Local source and development binaries only.
+
+Read Claude's latest session in
+`~/.claude/projects/-var-www-html/b4b8d1b9-8de4-47b5-a7df-314d1351aedb.jsonl`.
+The user explicitly clarified there that "react" meant smooth live updates,
+not adopting the React framework. Claude's grep-based audit confused an unused
+Home helper with a visible device section. The helper is now removed too.
+The interrupted import/edit was repaired; the actual exit statuses of the
+checks below were observed, without piping away compiler failures.
+
+Implemented:
+
+- Devices uses responsive cards and the existing styled inputs. Home has no
+  device section. Test and Preset use dashboard gradients and bundled Boxicons.
+  Run remains available inside the branch editor for the open Python file.
+- Direct peer streams use signed mesh authentication and certificate pinning.
+  There is a connection per device **per shared network**, not just whichever
+  network happened to win the deduplicated device list. Clean shutdown closes
+  sockets; silent connections expire after 12 seconds; reconnect retries after
+  two seconds. Periodic discovery remains for bootstrap and older versions.
+- Presence is locally observed, scoped per network, and combined across links
+  for Devices. Hardware and Ray changes refresh their views; timestamp-only
+  heartbeats do not repeatedly blank/remount the network page. Reconnection
+  refreshes state. Route generations prevent a late old page from replacing a
+  newer one. Removed/replaced Cowork controller targets are disconnected.
+- Newly created global networks wake account adoption. This is an account
+  server source change, **not deployed to the Pi service** in this session.
+- `pscluster workspace --root ... --user USER` copies projects into
+  `~/Plainshow/Projects`, retains `<root>/projects.before-home`, and links the
+  old path. It refuses a running node and destination collisions. Installers
+  attempt migration when SUDO_USER/PSCLUSTER_WORKSPACE_USER identifies the user;
+  existing binary-only updates need the documented one-time migration command.
+- Files/directories inherit the workspace owner's Unix ownership; Git commands
+  execute as that user. Clones, transfers, readiness and network moves resolve
+  repository-name directories. Startup renames old alias directories without
+  overwriting collisions. The project header shows the physical folder path.
+- Project transfers get nonempty local IDs and unpack into staging first.
+  Corrupt archives leave the existing folder intact. Directory replacement has
+  rollback; ownership is applied to the received files.
+- Test submits a bounded diagnostic through Ray's Jobs REST API, pins a tiny
+  task to each live Ray node, compares returned workers against online network
+  devices, and reports per-device results. Timeout/cancellation stops its job.
+  It does not claim to validate GPU drivers or training frameworks.
+- Preset generates new files with CPU, all-GPU, mixed, NVIDIA, AMD or Intel
+  placement. It detects live Ray resources when executed, respects a per-device
+  worker cap, reserves the matching vendor resource, and never overwrites an
+  existing file. Mixed-vendor devices on the same physical host are skipped as
+  ambiguous; a vendor resource alone cannot bind a specific physical GPU.
+  CPU-only machines can participate in mixed mode. User training/inference
+  code goes in the commented task function. These are independent Ray tasks,
+  **not universal cross-vendor synchronous distributed training**.
+
+Verification:
+
+- `GOPROXY=off GOTOOLCHAIN=local PATH=/usr/local/go/bin:$PATH make check`: passed.
+- `make smoke` with the same offline Go environment: **79 passed, 0 failed**.
+- Signed TLS WebSocket tests cover delivery, pin refusal, cancellation, pushed
+  Ray changes and server shutdown. Presence tests cover two shared networks.
+- Regression tests cover repository rename/readiness, destination collisions,
+  failed-transfer preservation and preset overwrite/traversal refusal.
+- Generated Python was executed against a Ray API double representing three
+  NVIDIA GPUs, two AMD GPUs, a CPU-only device and an offline machine. All six
+  modes produced the expected placements. Ray's Jobs diagnostic was exercised
+  against a local HTTP fixture, including cleanup.
+- Web module/import and installer syntax checks passed. No browser/GTK runtime
+  is installed for visual inspection here. No real multi-machine Ray workload,
+  actual GPU framework, root-owned Arch service migration, or native desktop
+  rendering was exercised; those remain hardware integration checks.
+
+Boundaries to retain: peer streams carry hardware/Ray snapshots, not project
+file mirroring. File placement remains explicit send/fetch or Git, and editor
+operations still use the independent Cowork controller. Account bootstrap can
+still wait for a heartbeat when discovering a newly registered device. Do not
+promise instantaneous detection of a power cut or identical files on every
+device merely because their presence sockets are connected.

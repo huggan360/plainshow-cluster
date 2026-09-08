@@ -22,7 +22,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
+	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
@@ -104,7 +106,7 @@ func (s *Server) serveProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "No such project in that network.")
 		return
 	}
-	dir := filepath.Join(s.layout.Projects(), networkID, project.Name)
+	dir := s.projectDir(project)
 	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
 		fail(w, http.StatusNotFound, "This machine does not have that project's files.")
 		return
@@ -128,7 +130,7 @@ func (s *Server) serveProject(w http.ResponseWriter, r *http.Request) {
 func (s *Server) materialiseProject(networkID string, body projectPayload) (store.Project, error) {
 	project, err := s.store.ProjectByNameInNetwork(networkID, body.Project)
 	if errors.Is(err, store.ErrNotFound) {
-		project = store.Project{NetworkID: networkID, Name: body.Project,
+		project = store.Project{ID: config.NewID(), NetworkID: networkID, Name: body.Project,
 			Description: body.Description, Repository: body.Repository}
 		if err = s.store.CreateProject(&project); err != nil {
 			return store.Project{}, err
@@ -136,12 +138,47 @@ func (s *Server) materialiseProject(networkID string, body projectPayload) (stor
 	} else if err != nil {
 		return store.Project{}, err
 	}
-	dir := filepath.Join(s.layout.Projects(), networkID, project.Name)
-	if err := os.RemoveAll(dir); err != nil {
+	if body.Repository != "" {
+		project.Repository = body.Repository
+		if err := s.store.SetProjectRepositoryID(project.ID, body.Repository); err != nil {
+			return store.Project{}, err
+		}
+	}
+	dir := s.projectDir(project)
+	if err := projectfs.MkdirOwned(filepath.Dir(dir)); err != nil {
 		return store.Project{}, err
 	}
-	if err := mesh.ExtractArchive(body.Archive, dir); err != nil {
+	staging, err := os.MkdirTemp(filepath.Dir(dir), ".project-receive-")
+	if err != nil {
+		return store.Project{}, err
+	}
+	defer os.RemoveAll(staging)
+	if err := mesh.ExtractArchive(body.Archive, staging); err != nil {
 		return store.Project{}, fmt.Errorf("could not write the project files: %w", err)
+	}
+	if err := projectfs.OwnTree(staging, s.layout.Projects()); err != nil {
+		return store.Project{}, err
+	}
+	backup := staging + ".previous"
+	hadPrevious := false
+	if _, err := os.Lstat(dir); err == nil {
+		if err := os.Rename(dir, backup); err != nil {
+			return store.Project{}, err
+		}
+		hadPrevious = true
+	} else if !os.IsNotExist(err) {
+		return store.Project{}, err
+	}
+	if err := os.Rename(staging, dir); err != nil {
+		if hadPrevious {
+			if restore := os.Rename(backup, dir); restore != nil {
+				return store.Project{}, fmt.Errorf("install failed: %v; previous files remain at %s: %w", err, backup, restore)
+			}
+		}
+		return store.Project{}, err
+	}
+	if hadPrevious {
+		_ = os.RemoveAll(backup)
 	}
 	return project, nil
 }
@@ -274,7 +311,11 @@ func (s *Server) projectReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hasProjectFiles(networkID, name string) bool {
-	info, err := os.Stat(filepath.Join(s.layout.Projects(), networkID, name))
+	project, err := s.store.ProjectByNameInNetwork(networkID, name)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(s.projectDir(project))
 	return err == nil && info.IsDir()
 }
 
@@ -334,9 +375,13 @@ func (s *Server) moveProjectNetwork(w http.ResponseWriter, r *http.Request) {
 	// Move the files first. A failed rename leaves the row where it was, which
 	// is recoverable; a moved row with stranded files is not.
 	from := s.projectDir(project)
-	to := filepath.Join(s.layout.Projects(), target, project.Name)
+	to := filepath.Join(s.layout.Projects(), target, projectFolder(project))
+	if _, err := os.Lstat(to); err == nil {
+		fail(w, 409, "The destination repository folder already exists.")
+		return
+	}
 	if _, statErr := os.Stat(from); statErr == nil {
-		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		if err := projectfs.MkdirOwned(filepath.Dir(to)); err != nil {
 			fail(w, http.StatusInternalServerError, err.Error())
 			return
 		}

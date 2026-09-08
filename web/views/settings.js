@@ -2,7 +2,7 @@
 // things.
 
 import { el, mount, ago } from '../lib/ui.js';
-import { api, toast, modal, state, on } from '../lib/client.js';
+import { api, toast, modal, state, watchRefresh, refresh } from '../lib/client.js';
 import { confirmShutdown } from '../lib/statusbar.js';
 
 const TABS = [
@@ -319,17 +319,20 @@ function updatePanel(update, initial, toggle) {
  * a machine: each action records a request that the machine reads on its next
  * check-in and carries out itself. */
 async function renderDevices(page, tab) {
+    let disposed = false;
     const draw = async () => {
         let data;
         try {
             data = await api('/api/devices');
         } catch (err) {
+            if (disposed) return;
             mount(page, settingsHead(tab), el('div', { class: 'panel empty' },
                 el('i', { class: 'bx bx-devices empty__ico' }),
                 el('strong', {}, 'Devices are listed by your Plainshow account.'),
                 el('span', { class: 'empty__text' }, err.message)));
             return;
         }
+        if (disposed) return;
         const networks = (state.overview && state.overview.networks) || [];
         const devices = data.devices || [];
         const online = devices.filter((device) => device.online).length;
@@ -340,14 +343,13 @@ async function renderDevices(page, tab) {
                     el('strong', { style: 'font-size:13px' }, 'Your machines'),
                     el('span', {
                         class: 'muted', style: 'display:block;margin-top:3px;font-size:12px',
-                    }, 'Every computer signed in to your account. Changes are picked ' +
-                       'up by a machine on its next check-in, within about a minute.')),
+                    }, 'Your computers. Shared-network connections update live.')),
                 el('span', { class: 'chip chip--good' }, `${online} online`),
                 el('span', { class: 'chip' }, `${devices.length} total`),
                 el('button', { class: 'btn btn--sm', onclick: draw },
                     el('i', { class: 'bx bx-refresh' }), 'Refresh')),
             devices.length
-                ? el('div', { class: 'rows' },
+                ? el('div', { class: 'account-device-grid' },
                     ...devices.map((device) => deviceRow(device, networks, data.this_device, draw)))
                 : el('div', { class: 'panel empty' },
                     el('i', { class: 'bx bx-devices empty__ico' }),
@@ -355,14 +357,15 @@ async function renderDevices(page, tab) {
     };
     await draw();
     // Another machine can move or sign out a device while this page is open.
-    return on('devices.changed', draw);
+    const off = watchRefresh(['devices.changed', 'connection.restored', 'networks.changed'], async () => { await refresh(); await draw(); });
+    return () => { disposed = true; off(); };
 }
 
 function deviceRow(device, networks, thisDevice, reload) {
     const isThis = device.id === thisDevice;
     const current = device.desired_network || device.active_network || '';
     const picker = el('select', {
-        class: 'select', 'aria-label': `Compute network for ${device.name}`,
+        class: 'input device-network-picker', 'aria-label': `Compute network for ${device.name}`,
         title: 'The one Ray cluster receiving this machine’s CPU and GPUs',
         onchange: async () => {
             picker.disabled = true;
@@ -379,12 +382,12 @@ function deviceRow(device, networks, thisDevice, reload) {
             }
         },
     },
-        el('option', { value: '', selected: current === '' }, 'No network'),
+        el('option', { value: '', selected: current === '', disabled: true }, 'Choose compute network'),
         ...networks.map((network) => el('option', {
             value: network.id, selected: network.id === current,
         }, network.name)));
 
-    return el('div', { class: 'row', style: 'cursor:default;align-items:center' },
+    return el('div', { class: 'panel account-device' },
         el('span', { class: `dot ${device.online ? 'dot--on' : 'dot--off'}` }),
         el('span', { class: 'row__main' },
             el('span', { class: 'row__title' }, device.name,
@@ -400,7 +403,8 @@ function deviceRow(device, networks, thisDevice, reload) {
                     device.version ? `v${device.version}` : null,
                     device.online ? 'online' : `last seen ${ago(device.last_seen)}`,
                 ].filter(Boolean).join(' · '))),
-        picker,
+        el('label', { class: 'device-assignment' },
+            el('span', { class: 'field__label' }, 'Compute network'), picker),
         el('button', {
             class: 'btn btn--sm', title: 'Sign this device out of your account',
             onclick: () => signOutDevice(device, isThis, reload),

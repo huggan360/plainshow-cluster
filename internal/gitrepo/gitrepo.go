@@ -23,6 +23,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/huggan360/plainshow-cluster/internal/projectfs"
 )
 
 // ErrNoGit is returned when the git binary is not installed.
@@ -55,6 +57,7 @@ func (r Repo) run(args ...string) (string, error) {
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_OPTIONAL_LOCKS=0",
 	)
+	projectfs.AsOwner(cmd, r.Dir)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -241,6 +244,7 @@ func (r Repo) runAuthed(token string, args ...string) (string, error) {
 		"GIT_OPTIONAL_LOCKS=0",
 		"PSCLUSTER_GIT_TOKEN="+token,
 	)
+	projectfs.AsOwner(cmd, r.Dir)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -417,7 +421,7 @@ func Clone(token, repository, dir string) error {
 		return ErrNoGit
 	}
 	parent := filepath.Dir(dir)
-	if err := os.MkdirAll(parent, 0o750); err != nil {
+	if err := projectfs.MkdirOwned(parent); err != nil {
 		return err
 	}
 	// Clone runs in the parent, since the target directory is its output.

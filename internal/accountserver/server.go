@@ -310,6 +310,7 @@ func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	previousMembers, _ := s.store.NetworkMembers(input.ID)
 	network, err := s.store.RegisterNetwork(account.ID, input)
 	if err != nil {
 		if errors.Is(err, ErrNetworkDeleted) {
@@ -334,6 +335,13 @@ func (s *Server) syncNetwork(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"network": network, "controller": controller, "members": members,
 	})
+	// Only a newly created network wakes adoption. Notifying every heartbeat
+	// would make each awakened device wake all the others again indefinitely.
+	if len(previousMembers) == 0 {
+		for _, member := range members {
+			s.watchers.notify(member.AccountID, TopicNetworks)
+		}
+	}
 }
 
 func (s *Server) deleteNetwork(w http.ResponseWriter, r *http.Request) {
