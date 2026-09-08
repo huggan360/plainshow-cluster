@@ -151,6 +151,8 @@ jobs:
             dist/install.sh
             dist/checksums.txt
           generate_release_notes: true
+          name: Plainshow Cluster ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
 

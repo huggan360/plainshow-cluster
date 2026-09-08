@@ -51,8 +51,9 @@ export function rayTools(project, activeTab) {
         start.disabled = true;
         try {
             await api('/api/ray/start', { method: 'POST', body: { network_id: project.network_id } });
+            if (disposed) return;
             toast('Ray started. Other devices attach when assigned to this network.');
-        } catch (error) { toast(error.message, 'err'); }
+        } catch (error) { if (!disposed) toast(error.message, 'err'); }
         finally { start.disabled = false; }
     } }, el('i', { class: 'bx bx-play' }), 'Start / attach this device');
     mount(test, el('div', { class: 'panel__head' }, 'Test your cluster'), result,
@@ -79,9 +80,10 @@ export function rayTools(project, activeTab) {
         create.disabled = true;
         try {
             const data = await api(`${base}/preset`, { method: 'POST', body: { mode, filename: filename.value.trim(), limit: Number(limit.value) } });
+            if (disposed) return;
             toast(`Created ${data.path}. Add your code in the marked function.`);
             navigate(`projects/${encodeURIComponent(project.id)}/branch/${encodeURIComponent(data.path)}`);
-        } catch (error) { toast(error.message, 'err'); create.disabled = false; }
+        } catch (error) { if (!disposed) toast(error.message, 'err'); create.disabled = false; }
     } }, el('i', { class: 'bx bx-file-blank' }), 'Create preset file');
     mount(preset, el('div', { class: 'panel__head' }, 'Ray presets'),
         el('p', { class: 'muted' }, 'Choose the hardware to use. The generated file discovers live Ray workers each time you run it.'),

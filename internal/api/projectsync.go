@@ -279,7 +279,7 @@ func (s *Server) projectReadiness(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "No such project.")
 		return
 	}
-	nodes, err := s.store.NetworkNodes(project.NetworkID)
+	nodes, err := s.liveNodes(project.NetworkID)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return

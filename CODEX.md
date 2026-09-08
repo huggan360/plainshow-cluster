@@ -351,3 +351,35 @@ operations still use the independent Cowork controller. Account bootstrap can
 still wait for a heartbeat when discovering a newly registered device. Do not
 promise instantaneous detection of a power cut or identical files on every
 device merely because their presence sockets are connected.
+
+## September 8 addendum — Alpha 0.1.2 preparation
+
+The user superseded the no-release instruction: “deploy when you are ready
+alpha 0.1.2”. Target tag: `v0.1.2-alpha.1`.
+
+Additional fixes after 6942e88:
+
+- Device check-in compares discovery facts, not timestamps or job counters.
+  New devices, endpoint changes, returning devices and membership changes wake
+  the owner's devices and shared-network accounts without heartbeat feedback.
+  This supersedes the new-device heartbeat limitation documented above.
+- Project Devices uses direct presence and subscribes to live changes while
+  active. Leaving the page disposes subscriptions; late preset creation no
+  longer navigates away from a newer page.
+- Presets with no known project-network head fail explicitly unless Ray Jobs
+  or the user supplies RAY_ADDRESS; they no longer select a random local cluster.
+- Remembered sessions recover expired cookies as well as missing ones.
+  Restored sessions now pass the normal cross-origin mutation guard.
+- Added release notes and a workflow body/title; README targets Alpha 0.1.2
+  and explains full-desktop Arch updates and private-repository access.
+
+Verification: `GOPROXY=off GOTOOLCHAIN=local PATH=/usr/local/go/bin:$PATH make check`
+passed, including new discovery/no-feedback, expired-cookie/origin and preset
+network regressions. No dependency installation or unrelated service changes.
+Real desktop rendering and heterogeneous physical GPU training remain unverified.
+
+Repository visibility is PRIVATE. Do not make it public without explicit
+permission. The updater uses the locally connected GitHub token for access.
+Release publication and account-service deployment outcomes will be appended
+after the workflow completes. Keep the existing account database intact; no
+network/account deletion was requested in this session.

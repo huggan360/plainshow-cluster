@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/huggan360/plainshow-cluster/internal/config"
@@ -69,6 +70,42 @@ func TestAuthStatusRestoresRememberedDesktopSession(t *testing.T) {
 	}
 	if recorder.Header().Get("Set-Cookie") == "" {
 		t.Fatal("startup status restored no browser cookie")
+	}
+}
+
+func TestRememberedSessionRecoversExpiredCookie(t *testing.T) {
+	for _, status := range []bool{false, true} {
+		srv := signedInMachine(t)
+		r := loopbackRequest()
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: "expired-session"})
+		w := httptest.NewRecorder()
+		if status {
+			srv.authStatus(w, r)
+			if !strings.Contains(w.Body.String(), `"authenticated":true`) {
+				t.Fatalf("remembered status: %s", w.Body)
+			}
+		} else {
+			srv.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})).ServeHTTP(w, r)
+		}
+		if w.Code != http.StatusOK || w.Header().Get("Set-Cookie") == "" {
+			t.Fatalf("status=%v: code=%d cookies=%v", status, w.Code, w.Result().Cookies())
+		}
+	}
+}
+
+func TestRememberedSessionCannotBypassOriginGuard(t *testing.T) {
+	srv := signedInMachine(t)
+	r := loopbackRequest()
+	r.Method = http.MethodPost
+	r.Header.Set("Origin", "https://untrusted.example")
+	w := httptest.NewRecorder()
+	srv.authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("cross-origin mutation reached the handler")
+	})).ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || w.Header().Get("Set-Cookie") != "" {
+		t.Fatalf("code=%d cookies=%v", w.Code, w.Result().Cookies())
 	}
 }
 

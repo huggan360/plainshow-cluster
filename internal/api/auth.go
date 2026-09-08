@@ -75,7 +75,18 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			}
 		}
 
+		// Apply the origin guard to restored sessions too, before granting any
+		// local browser a remembered credential.
+		if !safeMethod(r.Method) && !sameOrigin(r) {
+			fail(w, http.StatusForbidden, "Cross-origin request refused.")
+			return
+		}
+
+		var account store.Account
 		cookie, err := r.Cookie(sessionCookie)
+		if err == nil {
+			account, err = s.store.SessionAccount(cookie.Value)
+		}
 		if err != nil {
 			// The desktop window cannot keep a cookie, so a browser session is
 			// not the durable credential here — the node's own account token
@@ -88,21 +99,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 					return
 				}
 			}
-			fail(w, http.StatusUnauthorized, "Sign in to continue.")
-			return
-		}
-		account, err := s.store.SessionAccount(cookie.Value)
-		if err != nil {
 			clearSessionCookie(w, r)
-			fail(w, http.StatusUnauthorized, "Your session expired. Sign in again.")
-			return
-		}
-
-		// A cookie alone would let any other site drive this node through the
-		// signed-in browser, so anything that changes state must also prove it
-		// came from here.
-		if !safeMethod(r.Method) && !sameOrigin(r) {
-			fail(w, http.StatusForbidden, "Cross-origin request refused.")
+			fail(w, http.StatusUnauthorized, "Sign in to continue.")
 			return
 		}
 
@@ -223,16 +221,19 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 			response["authenticated"] = true
 			response["account"] = account
 		}
-	} else if account, ok := s.rememberedAccount(r); ok {
-		// Startup asks this public endpoint before it tries any protected API.
-		// Recreate WebKitGTK's memory-only cookie here or the login gate appears
-		// before rememberedAccount can ever be reached by authenticate.
-		if err := s.issueSession(w, r, account); err != nil {
-			fail(w, http.StatusInternalServerError, err.Error())
-			return
+	}
+	if response["authenticated"] == false {
+		if account, ok := s.rememberedAccount(r); ok {
+			// Startup asks this public endpoint before it tries any protected API.
+			// Recreate WebKitGTK's memory-only cookie here or the login gate appears
+			// before rememberedAccount can ever be reached by authenticate.
+			if err := s.issueSession(w, r, account); err != nil {
+				fail(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			response["authenticated"] = true
+			response["account"] = account
 		}
-		response["authenticated"] = true
-		response["account"] = account
 	}
 	writeJSON(w, http.StatusOK, response)
 }

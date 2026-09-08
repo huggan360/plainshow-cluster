@@ -108,7 +108,6 @@ func (s *Server) createRayPreset(w http.ResponseWriter, r *http.Request) {
 	head := s.rayHead(p.NetworkID)
 	dashboard := ray.DashboardURL(hostOf(head), ray.DefaultDashboard)
 	if head == "" {
-		head = "auto"
 		dashboard = "http://YOUR_RAY_HEAD:8265"
 	}
 	code = strings.NewReplacer("__HEAD__", head, "__DASHBOARD__", dashboard).Replace(code)

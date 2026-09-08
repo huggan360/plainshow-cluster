@@ -38,6 +38,9 @@ func TestPresetCreatesNewFileAndNeverOverwritesUserCode(t *testing.T) {
 	if strings.Contains(string(raw), "__HEAD__") || !strings.Contains(string(raw), `MODE = "mixed"`) {
 		t.Fatal("unrendered preset")
 	}
+	if !strings.Contains(string(raw), `os.environ.get("RAY_ADDRESS", "")`) {
+		t.Fatal("a project without a Ray head must not default to an unrelated local cluster")
+	}
 	if err := os.WriteFile(file, []byte("user code"), 0640); err != nil {
 		t.Fatal(err)
 	}

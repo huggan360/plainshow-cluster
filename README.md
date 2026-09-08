@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The `v0.1.1-alpha.8` release provides one complete archive for each supported
+The [Alpha 0.1.2 release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.2-alpha.1) provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`
@@ -114,6 +114,9 @@ SQLite data are not replaced.
 
 Alpha builds are prereleases, so select the beta channel once:
 
+The repository is currently private. Downloads require repository access;
+the built-in updater also needs a connected GitHub account/token with that access.
+
 ```sh
 sudo pscluster config set update.channel beta
 sudo pscluster update check
@@ -124,6 +127,10 @@ The same controls are in **Settings → Updates**. Checks run every six hours;
 installation is manual unless `update.automatic` is enabled. Re-running a
 newer release's installer is also safe and updates the native desktop binary
 and dependencies while preserving node data.
+
+On Arch, download the new `.pkg.tar.zst` and run `sudo pacman -U ./plainshow-cluster-*.pkg.tar.zst`
+to update both the node and desktop application together. Close the app first,
+and keep only the package you want to install in that folder.
 
 ## Useful commands
 

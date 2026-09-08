@@ -602,7 +602,7 @@ async function renderProject(host, reference, routeParts) {
 	const teamPane = el('div', { class: 'panel' },
 		el('div', { class: 'panel__head' }, 'Project team'), team.node);
 	const settingsPane = projectSettingsPane(projectSummary);
-	const devicesPane = projectDevicesPane(projectSummary);
+	const devicesPane = projectDevicesPane(projectSummary, activeTab === 'devices');
 	const raySnapshot = activeTab === 'overview'
 		? await api(`/api/ray?network_id=${encodeURIComponent(projectSummary.network_id)}`)
 			.catch((error) => ({ running: false, detail: error.message })) : null;
@@ -717,6 +717,7 @@ async function renderProject(host, reference, routeParts) {
 
     return () => {
 		tools.close();
+		devicesPane.close();
 		if (jobPoll) clearInterval(jobPoll);
 		offTree(); offReplace(); offRename(); offDelete();
 		offCollab(); offReject(); offPresence(); offConnection();
@@ -779,19 +780,23 @@ function projectStatusMetric(tone, icon, title, detail) {
 // downloaded when you join a network — a laptop should not receive somebody's
 // eighteen gigabytes of training data because it was in the room — so the files
 // travel when a person decides they should.
-function projectDevicesPane(project) {
+function projectDevicesPane(project, active) {
 	const box = el('div', {});
 	const pane = el('div', {}, box);
+	let disposed = false;
 
 	const load = async () => {
+		if (disposed) return;
 		let data;
 		try {
 			data = await api(`/api/projects/${encodeURIComponent(project.id)}/devices`);
 		} catch (err) {
+			if (disposed) return;
 			mount(box, el('div', { class: 'panel' },
 				el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message)));
 			return;
 		}
+		if (disposed) return;
 		const devices = data.devices || [];
 		const ready = devices.filter((device) => device.online && device.has_files).length;
 		mount(box,
@@ -808,7 +813,10 @@ function projectDevicesPane(project) {
 			el('div', { class: 'rows' },
 				...devices.map((device) => deviceReadinessRow(project, device, load))));
 	};
-	load();
+	const off = active ? watchRefresh(['peers.changed', 'devices.changed', 'project.created',
+		'project.deleted', 'tree.changed', 'connection.restored'], load) : () => {};
+	if (active) load();
+	pane.close = () => { disposed = true; off(); };
 	return pane;
 }
 

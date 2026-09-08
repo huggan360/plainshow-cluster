@@ -508,6 +508,7 @@ func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "The node check-in is incomplete or invalid.")
 		return
 	}
+	before, discoveryErr := s.store.deviceDiscovery(input.ID)
 	instructions, err := s.store.CheckIn(account.ID, input)
 	if err != nil {
 		if errors.Is(err, ErrNodeOwner) {
@@ -517,9 +518,11 @@ func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// The heartbeat is the only channel back to a device, so the answer to a
-	// check-in is also where "move to this network" and "sign out" are
-	// delivered.
+	if after, err := s.store.deviceDiscovery(input.ID); err == nil && discoveryErr == nil {
+		s.notifyDeviceDiscovery(account.ID, before, after)
+	}
+	// Instructions still travel in the check-in response; the account socket
+	// only wakes devices to fetch the changed directory or pending instruction.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "recorded", "instructions": instructions,
 	})

@@ -30,8 +30,12 @@ def work(shard, backend):
 
 
 def main():
-    # 'auto' refuses to silently create a standalone cluster.
-    ray.init(address=os.environ.get("RAY_ADDRESS", "__HEAD__"))
+    # Never attach to an unrelated local cluster when this project's head was
+    # not configured at generation time. Ray Jobs supplies its own RAY_ADDRESS.
+    address = os.environ.get("RAY_ADDRESS", "__HEAD__").strip()
+    if not address:
+        raise RuntimeError("Start Ray for this project's network, then set RAY_ADDRESS to its head or run this file through the Plainshow branch editor.")
+    ray.init(address=address)
     pending = []
     try:
         for node in sorted((n for n in ray.nodes() if n["Alive"]), key=lambda n: n["NodeID"]):
