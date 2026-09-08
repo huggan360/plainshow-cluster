@@ -89,16 +89,20 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
     color: transparent; background: var(--brand); background-clip: text;
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-/* The wordmark's subtitle is brand, not interface. It is set in the code face
- * for contrast against the geometric wordmark above it, and keeps the wide
- * tracking the rest of Plainshow uses for it — the general rule that labels
- * should not be tracked into texture does not apply to a lockup, where the
- * spacing is what makes the word sit under the mark rather than beside it. */
+/* The wordmark's subtitle is brand, not interface, so the general rule about
+ * not tracking labels into texture does not apply: here the spacing is what
+ * makes the word span the mark above it rather than sit beside it.
+ *
+ * It shares the wordmark's family and separates by weight and colour instead of
+ * by typeface. A second face under a logotype reads as two things that happen
+ * to be stacked; one family at two weights reads as one mark. The trailing
+ * indent is not decoration — letter-spacing adds a gap after the final letter,
+ * and without compensating the word sits visibly left of the wordmark. */
 .brand-logo__sub {
-    display: block; margin-top: 5px;
-    font-family: var(--mono); font-size: 9px; font-weight: 500;
-    letter-spacing: .28em; text-indent: .28em;
-    text-transform: uppercase; color: var(--tx-3);
+    display: block; margin-top: 3px;
+    font-family: var(--sans); font-size: 10px; font-weight: 500;
+    letter-spacing: .34em; text-indent: .34em;
+    text-transform: uppercase; color: var(--tx-2); opacity: .75;
 }
 
 .nav { flex: 1; padding: 0 12px; }
@@ -1212,3 +1216,85 @@ td:first-child { color: #e2e8f0; }
 .presence__switch:disabled { opacity: .4; cursor: default; }
 
 .profile { max-width: 900px; }
+
+/* ---------------------------------------------------------------- jobs --- */
+
+/* Three questions in the order somebody has them: what is running, what is
+ * next, what happened. Compact rows, because a job list is scanned rather than
+ * read, and one that spends a row per fact scrolls instead of showing. */
+.jobs-head {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap; margin-bottom: 24px;
+}
+.jobs-head__sub { margin: 6px 0 0; color: var(--tx-3); font-size: 13px; }
+.jobs-capacity {
+    display: flex; align-items: center; gap: 18px;
+    border-radius: 13px; background: rgba(255,255,255,.03); padding: 10px 16px;
+}
+.jobs-capacity--off { gap: 8px; color: var(--tx-4); font-size: 12px; }
+.jobs-capacity--off i { font-size: 15px; }
+.jobs-capacity__stat { display: flex; align-items: baseline; gap: 5px; }
+.jobs-capacity__stat strong { color: var(--tx); font-size: 15px; font-weight: 600; }
+.jobs-capacity__stat span { color: var(--tx-4); font-size: 10px; }
+
+.jobs-section { margin-bottom: 22px; }
+.jobs-section__head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.jobs-section__head i { color: var(--tx-4); font-size: 15px; }
+.jobs-section__title { color: var(--tx-2); font-size: 12px; font-weight: 600; }
+.jobs-section__count {
+    border-radius: 999px; background: rgba(255,255,255,.06); padding: 1px 7px;
+    color: var(--tx-3); font-size: 10px;
+}
+.jobs-empty { margin: 0; padding: 12px 2px; color: var(--tx-4); font-size: 12px; }
+.jobs-list { display: flex; flex-direction: column; gap: 4px; }
+
+.job { border-radius: 11px; background: rgba(255,255,255,.022); overflow: hidden; }
+.job--open { background: rgba(255,255,255,.045); }
+.job__line {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    border: 0; background: transparent; padding: 9px 12px;
+    cursor: pointer; text-align: left; font-family: var(--sans);
+}
+.job__line:hover { background: rgba(255,255,255,.03); }
+.job__dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--tx-4); }
+.job__dot--succeeded { background: var(--good); }
+.job__dot--failed { background: var(--bad); }
+.job__dot--pending { background: var(--warn); }
+.job__spin { flex: none; color: var(--cyan); font-size: 15px; animation: busy-spin 1s linear infinite; }
+.job__what { min-width: 0; flex: 1; }
+.job__cmd {
+    display: block; overflow: hidden; color: var(--tx); font-family: var(--mono);
+    font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.job__meta {
+    display: block; margin-top: 2px; overflow: hidden; color: var(--tx-4);
+    font-size: 10px; text-overflow: ellipsis; white-space: nowrap;
+}
+.job__time {
+    flex: none; color: var(--tx-3); font-family: var(--mono);
+    font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.job__state {
+    flex: none; border-radius: 999px; background: rgba(255,255,255,.05);
+    padding: 2px 8px; color: var(--tx-3); font-size: 10px;
+}
+.job__state--running { background: rgba(103,232,249,.12); color: var(--cyan); }
+.job__state--succeeded { background: rgba(52,211,153,.12); color: #6ee7b7; }
+.job__state--failed { background: rgba(251,113,133,.12); color: #fda4af; }
+.job__state--pending { background: rgba(251,191,36,.12); color: #fcd34d; }
+.job__chev { flex: none; color: var(--tx-4); font-size: 16px; }
+.job__message {
+    margin: 0; padding: 0 12px 9px 42px; color: #fda4af;
+    font-size: 11px; line-height: 1.5;
+}
+.job__log {
+    margin: 0 12px; max-height: 220px; overflow: auto; border-radius: 9px;
+    background: #05070b; padding: 10px 12px; color: #a5b4c4;
+    font-family: var(--mono); font-size: 11px; line-height: 1.6; white-space: pre-wrap;
+}
+.job__actions { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+
+@media (max-width: 620px) {
+    .job__meta, .job__time { display: none; }
+    .jobs-capacity { width: 100%; justify-content: space-between; }
+}

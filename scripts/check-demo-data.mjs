@@ -33,6 +33,11 @@ const endpoints = [
     ['/api/service/uninstall', (d) => d.options.length === 2],
     ['/api/projects-orphans', (d) => d.orphans.length === 1],
     ['/api/downloads', (d) => Array.isArray(d.downloads)],
+    // The Jobs page shows running, waiting and finished separately, so the
+    // demo has to have all three or two of its three sections are empty.
+    ['/api/ray/jobs', (d) => ['RUNNING', 'PENDING', 'SUCCEEDED', 'FAILED']
+        .every((state) => d.jobs.some((job) => job.status === state))],
+    ['/api/ray/jobs/plainshow_7f31c2/logs', (d) => typeof d.logs === 'string' && d.logs.length > 0],
     ['/api/accounts/search?q=alb', (d) => d.accounts.length === 1],
 ];
 

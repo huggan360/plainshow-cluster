@@ -95,3 +95,5 @@
 .bx-task:before { content: "\ec3e"; }
 .bx-wifi-off:before { content: "\ec80"; }
 .bx-x:before { content: "\ec8d"; }
+.bx-loader-alt:before { content: "\eb46"; }
+.bx-time-five:before { content: "\ec46"; }

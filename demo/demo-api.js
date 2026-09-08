@@ -61,8 +61,48 @@
               username: 'huggan360', display_name: 'Hugo', invited_by_name: 'Albin',
               role: 'operator', status: 'pending', created_at: ago(4) },
         ],
-        jobs: [],
+        // Enough shapes to see every state the Jobs page can show: work in
+        // flight, work waiting behind it, a success and a failure.
+        jobs: [
+            { id: 'plainshow_7f31c2', status: 'RUNNING', network_name: 'Research lab',
+              entrypoint: 'python train.py --epochs 40 --batch 256',
+              started_at: Date.now() - 1000 * 60 * 7 - 12000 },
+            { id: 'plainshow_a1e004', status: 'RUNNING', network_name: 'Research lab',
+              entrypoint: 'python evaluate.py --split val',
+              started_at: Date.now() - 1000 * 96 },
+            { id: 'plainshow_b52d18', status: 'PENDING', network_name: 'Research lab',
+              entrypoint: 'python train.py --epochs 40 --batch 512' },
+            { id: 'plainshow_c90a77', status: 'PENDING', network_name: 'Research lab',
+              entrypoint: 'python sweep.py --trials 12' },
+            { id: 'plainshow_44b1de', status: 'SUCCEEDED', network_name: 'Research lab',
+              entrypoint: 'python prepare_data.py',
+              started_at: Date.now() - 1000 * 60 * 52,
+              ended_at: Date.now() - 1000 * 60 * 47 },
+            { id: 'plainshow_20cc31', status: 'FAILED', network_name: 'Research lab',
+              entrypoint: 'python train.py --epochs 40 --batch 1024',
+              message: 'CUDA out of memory. Tried to allocate 2.10 GiB.',
+              started_at: Date.now() - 1000 * 60 * 96,
+              ended_at: Date.now() - 1000 * 60 * 94 },
+            { id: 'plainshow_18ff05', status: 'STOPPED', network_name: "Albin's network",
+              entrypoint: 'python train.py --resume checkpoints/last.pt',
+              started_at: Date.now() - 1000 * 60 * 300,
+              ended_at: Date.now() - 1000 * 60 * 240 },
+        ],
     };
+
+    // A running job's output grows while you watch it, which is the thing the
+    // Jobs page exists to show.
+    const logLines = [
+        'ray: connected to 100.64.0.1:6379 (3 nodes, 40 CPU, 4 GPU)',
+        'loading dataset from data/ — 128000 examples',
+        'epoch 1/40  loss 4.812  lr 3.0e-04  12.4 it/s',
+        'epoch 2/40  loss 3.944  lr 3.0e-04  12.6 it/s',
+        'epoch 3/40  loss 3.401  lr 3.0e-04  12.5 it/s',
+        'epoch 4/40  loss 3.088  lr 2.9e-04  12.6 it/s',
+        'epoch 5/40  loss 2.870  lr 2.9e-04  12.4 it/s',
+        'epoch 6/40  loss 2.702  lr 2.8e-04  12.5 it/s',
+        'epoch 7/40  loss 2.571  lr 2.8e-04  12.6 it/s',
+    ];
 
     const system = {
         os: 'linux', arch: 'amd64', cpu_cores: 16, ram_total_mb: 32768,
@@ -120,7 +160,11 @@
             nodes: [{}, {}, {}], total_cpu: 40, total_gpu: 4, eligible: true,
             policy: { allow_gpu: true },
         })],
-        ['GET', /^\/api\/ray\/jobs$/, () => ({ jobs: [], running: true })],
+        ['GET', /^\/api\/ray\/jobs$/, () => ({ jobs: state.jobs, running: true })],
+        ['GET', /^\/api\/ray\/jobs\/[^/]+\/logs/, () => ({
+            // One more line every few seconds, so the tail visibly moves.
+            logs: logLines.slice(0, 4 + (Math.floor(Date.now() / 4000) % 6)).join('\n') + '\n',
+        })],
         ['GET', /^\/api\/github$/, () => ({
             connected: true, account: 'huggan360', name: 'Hugo', email: '',
             repositories: { total: 24, private: 9, admin: 24 }, git_ready: true,
