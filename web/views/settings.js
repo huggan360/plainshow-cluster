@@ -300,7 +300,107 @@ function updatePanel(update, initial, toggle) {
             toggle(update, 'automatic', 'Install automatically',
                 'Apply a verified update and restart this node when one is found.'),
             el('p', { class: 'muted', style: 'margin:10px 0 0;font-size:11.5px' },
-                'Saved with Save changes above.')));
+                'Saved with Save changes above.')),
+
+        // Anything that installs itself should be able to take itself off
+        // again, from the same place it offers to update itself.
+        el('div', {
+            style: 'display:flex;align-items:center;gap:12px;margin-top:18px;' +
+                   'padding-top:16px;border-top:1px solid var(--line)',
+        },
+            el('div', { style: 'flex:1' },
+                el('strong', { style: 'display:block;font-size:13px' },
+                    'Remove Plainshow Cluster'),
+                el('span', { class: 'muted', style: 'font-size:12px' },
+                    'Take this installation off the machine, and choose what else goes with it.')),
+            el('button', { class: 'btn btn--danger', onclick: uninstallDialog },
+                el('i', { class: 'bx bx-trash' }), 'Remove')));
+}
+
+// uninstallDialog states what will happen to this machine, not what usually
+// happens to an installation. Everything Plainshow put here goes; everything it
+// merely installed is asked about one item at a time, because Tailscale may be
+// carrying somebody's other traffic and a program on its way out should not
+// decide what else the computer no longer needs.
+async function uninstallDialog() {
+    let plan;
+    try {
+        plan = await api('/api/service/uninstall');
+    } catch (err) { toast(err.message, 'err'); return; }
+
+    const chosen = new Set();
+    const present = (plan.options || []).filter((option) => option.present);
+    const confirm = el('input', {
+        class: 'input input--mono', placeholder: 'remove', autocomplete: 'off',
+    });
+
+    modal({
+        title: 'Remove Plainshow Cluster',
+        confirmLabel: 'Remove',
+        danger: true,
+        body: () => el('div', {},
+            el('p', { style: 'margin:0 0 12px;font-size:13px;color:#cbd5e1;line-height:1.6' },
+                'These go without asking, because Plainshow put them here:'),
+            el('ul', { class: 'uninstall-list' },
+                ...(plan.always || []).map((item) => el('li', {}, item))),
+
+            present.length
+                ? el('div', {},
+                    el('p', { class: 'field__label', style: 'margin:18px 0 8px' },
+                        'Also remove'),
+                    ...present.map((option) => el('label', { class: 'uninstall-opt' },
+                        el('input', {
+                            type: 'checkbox',
+                            onchange: (event) => {
+                                if (event.target.checked) chosen.add(option.id);
+                                else chosen.delete(option.id);
+                            },
+                        }),
+                        el('span', {},
+                            el('strong', {}, option.name),
+                            el('span', { class: 'uninstall-opt__detail' }, option.detail),
+                            option.warn
+                                ? el('span', { class: 'uninstall-opt__warn' }, option.warn)
+                                : null))))
+                : null,
+
+            !plan.can_remove
+                ? el('p', { style: 'margin:16px 0 0;font-size:12px;color:var(--warn)' },
+                    'This is a packaged installation, so removing it needs root. ' +
+                    'Run sudo pscluster uninstall in a terminal instead.')
+                : null,
+
+            el('div', { class: 'field', style: 'margin-top:18px' },
+                el('span', { class: 'field__label' }, 'Type remove to confirm'), confirm),
+            el('p', { class: 'muted', style: 'margin:0;font-size:11.5px;line-height:1.6' },
+                'Your GitHub repositories are untouched. Anything in ',
+                el('span', { class: 'mono' }, plan.root),
+                ' that is not pushed is gone for good.')),
+        onConfirm: async (close) => {
+            await api('/api/service/uninstall', {
+                method: 'POST',
+                body: { confirm: confirm.value.trim(), also: [...chosen] },
+            });
+            close();
+            removedScreen(plan.root);
+        },
+    });
+}
+
+function removedScreen(root) {
+    const app = document.getElementById('app');
+    if (!app) return;
+    setTimeout(() => mount(app, el('div', {
+        class: 'page', style: 'margin:auto;max-width:520px;padding-top:80px',
+    },
+        el('div', { class: 'panel' },
+            el('div', { class: 'panel__head' }, 'Plainshow Cluster has been removed'),
+            el('p', { class: 'muted', style: 'font-size:12.5px;line-height:1.7' },
+                'The service is stopped and ', el('span', { class: 'mono' }, root),
+                ' is gone. Your GitHub repositories are untouched — installing ' +
+                'again and signing in brings your account, networks and projects back.'),
+            el('p', { class: 'muted', style: 'font-size:12px' },
+                'You can close this window.')))), 900);
 }
 
 // ---------------------------------------------------------------- devices --

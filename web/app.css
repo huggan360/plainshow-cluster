@@ -1077,3 +1077,41 @@ td:first-child { color: #e2e8f0; }
 .activity__pct { color: var(--tx-4); font-family: var(--mono); font-size: 9.5px; }
 
 @media (max-width: 900px) { .activity { display: none; } }
+
+/* ----------------------------------------------------------- uninstall ---- */
+
+.uninstall-list {
+    margin: 0; padding-left: 18px; color: var(--tx-3);
+    font-size: 12px; line-height: 1.9;
+}
+.uninstall-opt {
+    display: flex; align-items: flex-start; gap: 10px;
+    border: 1px solid var(--line); border-radius: 11px;
+    background: rgba(255,255,255,.02); padding: 11px 13px; cursor: pointer;
+}
+.uninstall-opt + .uninstall-opt { margin-top: 7px; }
+.uninstall-opt:hover { border-color: var(--line-2); }
+.uninstall-opt input { margin-top: 2px; accent-color: var(--cyan); }
+.uninstall-opt strong { display: block; color: var(--tx-2); font-size: 12.5px; }
+.uninstall-opt__detail { display: block; margin-top: 3px; color: var(--tx-4); font-size: 11.5px; line-height: 1.5; }
+.uninstall-opt__warn { display: block; margin-top: 5px; color: var(--warn); font-size: 11px; }
+
+/* ------------------------------------------------------- busy controls ---- */
+
+/* A control that is waiting on the network says so. The contents stay in place
+ * and turn transparent rather than being replaced, so the button keeps its
+ * width and nothing on the page moves while it works. */
+.is-busy { position: relative; pointer-events: none; }
+.is-busy > * { visibility: hidden; }
+.is-busy::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border: 2px solid currentColor; border-top-color: transparent;
+    border-radius: 50%; opacity: .85;
+    animation: busy-spin .7s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Gradient controls carry their own inner surface, so the spinner belongs on
+ * that rather than on the gradient itself. */
+.dl-action.is-busy::after, .conflict-choice.is-busy::after { color: #fff; }

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Plainshow Cluster — demonstration</title>
+<link rel="icon" href="./brand/plainshow-icon.webp" type="image/webp">
+<link rel="stylesheet" href="./fonts.css">
+<link rel="stylesheet" href="./boxicons.css">
+<link rel="stylesheet" href="./app.css">
+<style>
+    .demo-banner {
+        position: fixed; left: 50%; bottom: 16px; z-index: 200;
+        transform: translateX(-50%);
+        border: 1px solid rgba(255,255,255,.1); border-radius: 999px;
+        background: rgba(11,14,20,.92); backdrop-filter: blur(12px);
+        padding: 8px 16px; color: #94a3b8; font-size: 11px;
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+    }
+</style>
+<!-- The node is replaced before the interface loads; everything above the
+     network is the real program. -->
+<script src="./demo-api.js"></script>
+</head>
+<body>
+<div id="app" class="app"></div>
+<div id="toasts" class="toasts"></div>
+<div id="modal"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

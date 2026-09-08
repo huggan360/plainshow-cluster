@@ -201,6 +201,11 @@ func (s *Server) stopEverything(state serviceState, leaveTailnet bool) {
 			return
 		}
 	}
+	stopThisProcess()
+}
+
+// stopThisProcess asks the node to shut itself down cleanly.
+func stopThisProcess() {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		log.Printf("stop: could not signal this process: %v", err)
 	}

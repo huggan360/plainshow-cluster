@@ -112,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{name}/fetch", s.fetchProject)
 	mux.HandleFunc("POST /api/projects/{name}/download", s.startDownload)
 	mux.HandleFunc("GET /api/downloads", s.getDownloads)
+	mux.HandleFunc("GET /api/projects-orphans", s.getOrphans)
+	mux.HandleFunc("POST /api/projects-orphans/delete", s.deleteOrphans)
 	mux.HandleFunc("PUT /api/projects/{name}/network", s.moveProjectNetwork)
 	mux.HandleFunc("GET /api/ray", s.getRay)
 	mux.HandleFunc("POST /api/projects/{name}/ray/test", s.testProjectRay)
@@ -203,6 +205,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/service", s.getService)
 	mux.HandleFunc("PUT /api/service/boot", s.putServiceBoot)
 	mux.HandleFunc("POST /api/service/shutdown", s.shutdownService)
+	mux.HandleFunc("GET /api/service/uninstall", s.getUninstall)
+	mux.HandleFunc("POST /api/service/uninstall", s.postUninstall)
 
 	mux.HandleFunc("GET /ws", s.serveWS)
 

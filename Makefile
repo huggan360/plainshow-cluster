@@ -15,7 +15,7 @@ LDFLAGS := -s -w \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Version=$(VERSION) \
 	-X github.com/huggan360/plainshow-cluster/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build desktop check test vet fmt web installer-check clean install install-admin dist arch-package release run smoke
+.PHONY: all build desktop check test vet fmt web installer-check clean install install-admin dist arch-package release run smoke demo
 
 all: build
 
@@ -173,6 +173,24 @@ install-admin: build
 run: build
 	./$(BINARY) init --root ./.devnode --name dev --cluster dev-cluster 2>/dev/null || true
 	./$(BINARY) serve --root ./.devnode
+
+## demo: assemble the browsable demonstration into dist/demo
+##
+## It is the real interface with the node replaced, not a second copy of the
+## pages: demo/demo-api.js stubs fetch and WebSocket, and everything above them
+## is the same app.js the product ships. A demo that reimplemented the pages
+## would drift from them the day after it was written.
+demo:
+	@rm -rf dist/demo
+	@mkdir -p dist/demo
+	@cp -r web/. dist/demo/
+	@rm -f dist/demo/embed.go dist/demo/index.html
+	@cp demo/demo-api.js dist/demo/demo-api.js
+	@mkdir -p dist/demo/brand && cp demo/brand/plainshow-icon.webp dist/demo/brand/
+	@cp demo/index.html dist/demo/index.html
+	@node scripts/check-demo.mjs
+	@node scripts/check-demo-data.mjs
+	@echo "  dist/demo is ready — serve it from any static host"
 
 clean:
 	rm -rf $(BINARY) $(ADMIN_BINARY) $(DESKTOP_BINARY) dist .devnode .smokenode .smokepid

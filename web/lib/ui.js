@@ -11,7 +11,13 @@ export function el(tag, attrs = {}, ...children) {
         if (value === null || value === undefined || value === false) continue;
         if (key === 'class') node.className = value;
         else if (key === 'html') node.innerHTML = value;
-        else if (key.startsWith('on') && typeof value === 'function') {
+        else if (key === 'onclick' && typeof value === 'function') {
+            // Every click that waits on the network says so. Doing it here
+            // rather than at each call site is the only way it stays true:
+            // a loader somebody has to remember to add is a loader that is
+            // missing from the button added next week.
+            node.addEventListener('click', (event) => whileBusy(node, () => value(event)));
+        } else if (key.startsWith('on') && typeof value === 'function') {
             node.addEventListener(key.slice(2).toLowerCase(), value);
         } else if (key === 'dataset') {
             Object.assign(node.dataset, value);
@@ -144,4 +150,36 @@ export function plainshowLogo(subtitle = '') {
 /** icon returns the character used for a file or folder in the tree. */
 export function fileIcon(name, isDir) {
     return el('i', { class: `bx ${isDir ? 'bx-folder' : 'bx-file'}`, 'aria-hidden': 'true' });
+}
+
+/** whileBusy shows a spinner on a control until its handler settles.
+ *
+ * Only for handlers that return a promise. A synchronous click — navigating,
+ * toggling something local — finishes before a spinner could be seen, and
+ * flashing one would be noise pretending to be feedback. */
+export function whileBusy(node, run) {
+    let result;
+    try {
+        result = run();
+    } catch (error) {
+        throw error;
+    }
+    if (!result || typeof result.then !== 'function') return result;
+    // A second click while the first is in flight would submit twice, which for
+    // anything that creates something is worse than a slow button.
+    if (node.dataset.busy === '1') return result;
+
+    node.dataset.busy = '1';
+    node.classList.add('is-busy');
+    const wasDisabled = node.disabled;
+    if ('disabled' in node) node.disabled = true;
+    const done = () => {
+        delete node.dataset.busy;
+        node.classList.remove('is-busy');
+        // Restore rather than enable: a button that was disabled for its own
+        // reasons must not come back enabled because something finished.
+        if ('disabled' in node) node.disabled = wasDisabled;
+    };
+    return result.then((value) => { done(); return value; },
+        (error) => { done(); throw error; });
 }

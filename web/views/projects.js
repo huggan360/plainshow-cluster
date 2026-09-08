@@ -56,10 +56,12 @@ async function renderProjectList(host) {
                         onclick: () => navigate('new'),
                     }, el('i', { class: 'bx bx-plus' }), 'Create a project'))));
     };
+    const orphanBox = el('div', {});
     const load = async () => {
         projects = await api('/api/projects');
         drawScope();
         drawResults();
+        drawOrphans(orphanBox, load);
     };
     search.addEventListener('input', () => { query = search.value.toLowerCase(); drawResults(); });
     mount(page,
@@ -73,9 +75,68 @@ async function renderProjectList(host) {
         el('div', { class: 'panel ps-toolbar' },
             el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search),
             scope, count),
+        orphanBox,
         results);
     await load();
     return watchRefresh(['project.created', 'project.deleted', 'project.updated', 'project.moved', 'networks.changed', 'connection.restored'], load);
+}
+
+// drawOrphans offers to clear up folders no project claims.
+//
+// A working tree outlives its row more often than you would think — a project
+// deleted on another machine, a network left, an upgrade that renamed folders —
+// and nothing else in the interface would ever mention them, because every page
+// starts from the database. It never deletes on its own: a folder that looks
+// orphaned to this node may be the only copy of somebody's work.
+function drawOrphans(box, reload) {
+    api('/api/projects-orphans').then((data) => {
+        const orphans = data.orphans || [];
+        if (!orphans.length) { mount(box); return; }
+        const size = data.size_kb >= 1024
+            ? `${(data.size_kb / 1024).toFixed(1)} MB`
+            : `${data.size_kb} KB`;
+
+        mount(box, el('section', { class: 'panel', style: 'margin-bottom:20px' },
+            el('div', { class: 'panel__head' },
+                el('span', { class: 'grow' }, 'Leftover project files'),
+                el('span', { class: 'chip chip--warn' }, size)),
+            el('p', { class: 'muted', style: 'margin:0 0 12px;font-size:12.5px;line-height:1.6' },
+                `${orphans.length} folder${orphans.length === 1 ? '' : 's'} on this machine ` +
+                'belong to projects that no longer exist here. Deleting them frees the ' +
+                'space; nothing on GitHub is affected.'),
+            el('div', { class: 'rows' }, ...orphans.map((item) =>
+                el('div', { class: 'row', style: 'cursor:default' },
+                    el('i', { class: 'bx bx-folder', style: 'color:var(--warn)' }),
+                    el('span', { class: 'row__main' },
+                        el('span', { class: 'row__title mono', style: 'font-size:12px' }, item.name),
+                        el('span', { class: 'row__meta mono' }, item.path)),
+                    el('span', { class: 'chip' }, item.size_kb >= 1024
+                        ? `${(item.size_kb / 1024).toFixed(1)} MB` : `${item.size_kb} KB`)))),
+            el('div', { style: 'display:flex;justify-content:flex-end;margin-top:12px' },
+                el('button', { class: 'btn btn--danger btn--sm',
+                    onclick: () => confirmOrphans(orphans, size, reload) },
+                    el('i', { class: 'bx bx-trash' }), 'Delete them'))));
+    }).catch(() => mount(box));
+}
+
+function confirmOrphans(orphans, size, reload) {
+    modal({
+        title: 'Delete leftover files?',
+        confirmLabel: 'Delete',
+        danger: true,
+        body: () => el('p', { style: 'margin:0;font-size:13px;color:#cbd5e1;line-height:1.6' },
+            `${orphans.length} folder${orphans.length === 1 ? '' : 's'}, ${size}. ` +
+            'Anything in them that was never pushed is gone for good. Your GitHub ' +
+            'repositories are untouched.'),
+        onConfirm: async (close) => {
+            const result = await api('/api/projects-orphans/delete', {
+                method: 'POST', body: { names: orphans.map((item) => item.name) },
+            });
+            close();
+            toast(`Deleted ${(result.removed || []).length} folder(s).`);
+            await reload();
+        },
+    });
 }
 
 // isTrunk reports whether a project is a repository's main line rather than one
