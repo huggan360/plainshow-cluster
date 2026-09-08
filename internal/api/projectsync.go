@@ -43,6 +43,9 @@ type projectPayload struct {
 // per-network setting can only narrow it — no network can grant itself more of
 // somebody's computer than they offered.
 func (s *Server) projectSyncAllowed(networkID string) error {
+	if !s.Available() {
+		return errors.New("This machine has been set offline by the person using it.")
+	}
 	if !s.cfg.Worker.AllowProjectSync {
 		return errors.New("This machine does not accept project files. Turn on project files in Settings.")
 	}

@@ -269,6 +269,20 @@ func (c *Client) PublishGitHubToken(ctx context.Context, token, github, login st
 		map[string]string{"token": github, "login": login}, nil)
 }
 
+// UpdateProfile renames the account.
+func (c *Client) UpdateProfile(ctx context.Context, token, displayName string) (accountserver.Account, error) {
+	var out accountserver.Account
+	err := c.call(ctx, http.MethodPut, "/api/account/profile", token,
+		map[string]string{"display_name": displayName}, &out)
+	return out, err
+}
+
+// ChangePassword replaces the account password, proving the old one first.
+func (c *Client) ChangePassword(ctx context.Context, token, current, next string) error {
+	return c.call(ctx, http.MethodPut, "/api/account/password", token,
+		map[string]string{"current_password": current, "new_password": next}, nil)
+}
+
 // Projects lists every project this account owns or belongs to. Metadata only:
 // the files never pass through the account service.
 func (c *Client) Projects(ctx context.Context, token string) ([]accountserver.AccountProject, error) {

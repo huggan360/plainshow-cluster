@@ -380,7 +380,12 @@ func (s *Server) rayPolicy(networkID string) (ray.ResourcePolicy, bool) {
 			break
 		}
 	}
-	eligible := found && device.Enabled && device.AllowJobs && network.Enabled && network.AllowJobs
+	// Availability is the quick switch in the corner; the rest is the durable
+	// policy in Settings. Both have to say yes, and this one is checked here so
+	// going offline actually removes the machine from Ray rather than only
+	// changing a word on the screen.
+	eligible := s.Available() && found && device.Enabled && device.AllowJobs &&
+		network.Enabled && network.AllowJobs
 	policy := ray.ResourcePolicy{
 		MaxCPU:    minNonzero(device.MaxCPU, network.MaxCPU),
 		MaxRAMMB:  minNonzero(device.MaxRAMMB, network.MaxRAMMB),

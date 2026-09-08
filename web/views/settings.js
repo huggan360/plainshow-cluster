@@ -520,8 +520,7 @@ function deviceCard(device, networks, thisDevice, reload) {
         el('div', { class: 'device-card__stats' },
             deviceStat(device.cpu_cores || '—', 'Cores'),
             deviceStat(device.ram_total_mb ? megabytes(device.ram_total_mb) : '—', 'Memory'),
-            deviceStat(gpus.length || device.gpu_count || 0, 'GPUs'),
-            deviceStat(device.project_count ?? 0, 'Projects')),
+            deviceStat(gpus.length || device.gpu_count || 0, 'GPUs')),
 
         el('div', { class: 'device-card__foot' },
             picker,

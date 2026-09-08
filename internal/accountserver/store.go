@@ -347,6 +347,20 @@ func (s *Store) AccountByUsername(username string) (Account, error) {
 	return account, err
 }
 
+// AccountByID returns one identity, for showing somebody their own profile.
+func (s *Store) AccountByID(id string) (Account, error) {
+	var account Account
+	err := s.db.QueryRow(`SELECT id,username,display_name,password_hash,is_admin,
+        disabled,github_login,created_at,last_login_at FROM account WHERE id=?`, id).Scan(
+		&account.ID, &account.Username, &account.DisplayName, &account.PasswordHash,
+		&account.Admin, &account.Disabled, &account.GitHubLogin,
+		&account.Created, &account.LastLogin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return account, ErrNotFound
+	}
+	return account, err
+}
+
 // Accounts lists identities without password material.
 func (s *Store) Accounts() ([]Account, error) {
 	rows, err := s.db.Query(`SELECT id,username,display_name,is_admin,disabled,

@@ -134,7 +134,7 @@ realClear(watchdog);
 // that this check has to go looking for. Missing that is how a page shipped
 // with an undefined function while the check reported success.
 const pages = ['home', 'networks', 'projects', 'jobs', 'github',
-    'devices', 'howto', 'settings', 'new'];
+    'devices', 'howto', 'settings', 'new', 'profile'];
 if (!failure) {
     for (const page of pages) {
         globalThis.window.location.hash = `#/${page}`;

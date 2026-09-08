@@ -5,7 +5,7 @@ which permits bundling and redistribution with software.
 
 - **Space Grotesk** — Copyright 2020 Florian Karsten.
   <https://github.com/floriankarsten/space-grotesk>
-- **IBM Plex Mono** — Copyright 2017 IBM Corp.
-  <https://github.com/IBM/plex>
+- **JetBrains Mono** — Copyright 2020 JetBrains s.r.o.
+  <https://github.com/JetBrains/JetBrainsMono>
 
 Full licence text: <https://openfontlicense.org>

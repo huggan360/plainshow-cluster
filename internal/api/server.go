@@ -60,6 +60,7 @@ type Server struct {
 	tailnetMu     sync.Mutex
 	membershipMu  sync.Mutex
 	downloads     downloads
+	availability  availability
 	rayMu         sync.RWMutex
 	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
@@ -202,6 +203,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/invitations/{id}", s.revokeInvitation)
 	mux.HandleFunc("GET /api/networks/{id}/invitations", s.getNetworkInvitations)
 	mux.HandleFunc("POST /api/networks/{id}/invitations", s.createNetworkInvitation)
+	mux.HandleFunc("PUT /api/profile", s.updateProfile)
+	mux.HandleFunc("PUT /api/profile/password", s.changePassword)
+	mux.HandleFunc("GET /api/presence", s.getPresence)
+	mux.HandleFunc("PUT /api/presence", s.putPresence)
 	mux.HandleFunc("GET /api/service", s.getService)
 	mux.HandleFunc("PUT /api/service/boot", s.putServiceBoot)
 	mux.HandleFunc("POST /api/service/shutdown", s.shutdownService)

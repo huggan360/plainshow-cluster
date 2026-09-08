@@ -16,6 +16,7 @@ import (
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/config"
+	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
 // errNoAuthority means this node has no account service to ask.
@@ -205,5 +206,48 @@ func (s *Server) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		return map[string]string{"status": "revoked"}, nil
+	})
+}
+
+// ------------------------------------------------------------- profile ----
+
+func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DisplayName string `json:"display_name"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.withAuthority(w, r, func(ctx context.Context, client *accountclient.Client, token string) (any, error) {
+		account, err := client.UpdateProfile(ctx, token, body.DisplayName)
+		if err != nil {
+			return nil, err
+		}
+		// The node caches the name for the sidebar, so it has to learn the new
+		// one now rather than at the next check-in.
+		s.cfg.Account.DisplayName = account.DisplayName
+		_ = config.Save(s.layout, s.cfg)
+		_ = s.store.UpsertAccount(store.Account{
+			ID: account.ID, Username: account.Username, DisplayName: account.DisplayName,
+		})
+		return account, nil
+	})
+}
+
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Current string `json:"current_password"`
+		Next    string `json:"new_password"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.withAuthority(w, r, func(ctx context.Context, client *accountclient.Client, token string) (any, error) {
+		if err := client.ChangePassword(ctx, token, body.Current, body.Next); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "changed"}, nil
 	})
 }

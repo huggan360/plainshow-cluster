@@ -515,6 +515,13 @@ func (s *Server) acceptRemoteJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "This worker is not active in that network.")
 		return
 	}
+	// Offline means offline. A peer asking this machine to run something is
+	// exactly what the switch in the corner is for.
+	if !s.Available() {
+		fail(w, http.StatusForbidden,
+			"That machine has been set offline by the person using it.")
+		return
+	}
 	var body remoteJobRequest
 	if err := decode(r, &body); err != nil {
 		fail(w, 400, err.Error())

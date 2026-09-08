@@ -32,7 +32,7 @@ const j = async (p, o) => {
 console.log('\nSTATIC');
 for (const [path, type] of [['/', 'text/html'], ['/app.js', 'javascript'], ['/app.css', 'css'],
                             ['/fonts.css', 'css'], ['/boxicons.css', 'css'], ['/lib/client.js', 'javascript'],
-                            ['/views/home.js', 'javascript'], ['/fonts/ibm-plex-mono-400.woff2', 'font'],
+                            ['/views/home.js', 'javascript'], ['/fonts/jetbrains-mono.woff2', 'font'],
                             ['/fonts/boxicons.woff2', 'font'],
                             ['/brand/plainshow-icon.webp', 'image/webp']]) {
   const r = await fetch(B + path);

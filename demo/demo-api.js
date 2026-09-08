@@ -152,6 +152,9 @@
         ['GET', /^\/api\/update$/, () => ({
             current: '0.1.2-demo', latest: '0.1.2-demo', available: false, checking: false,
         })],
+        ['GET', /^\/api\/presence$/, () => ({
+            available: true, accept_work: true, resets: true,
+        })],
         ['GET', /^\/api\/service$/, () => ({
             managed: true, unit: 'plainshow-cluster.service',
             boot_enabled: true, can_change: true, detail: '',

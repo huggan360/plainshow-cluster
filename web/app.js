@@ -7,10 +7,12 @@ import { el, mount, initials, plainshowLogo } from './lib/ui.js';
 import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
 import { powerButton } from './lib/statusbar.js';
 import { activityStrip } from './lib/activity.js';
+import { availabilitySwitch } from './lib/availability.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
 import { renderProjects } from './views/projects.js';
 import { renderNewProject } from './views/newproject.js';
+import { renderProfile } from './views/profile.js';
 import { renderHowTo } from './views/howto.js';
 import { renderSettings, renderDevicesPage } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
@@ -29,6 +31,7 @@ const ROUTES = [
     // Reachable, but not a place in the sidebar: it is a step in making a
     // project, not somewhere you go.
     { id: 'new', label: 'New project', icon: 'bx-layer-plus', render: renderNewProject, hidden: true },
+    { id: 'profile', label: 'Account', icon: 'bx-user', render: renderProfile, hidden: true },
 ];
 
 /** parseRoute reads the hash as a route id plus its arguments. */
@@ -102,20 +105,23 @@ function shell(overview) {
                 el('span', {}, r.label),
                 el('span', { class: 'nav__dot hide' })))),
         el('div', { class: 'nodecard' },
-            el('div', { class: 'nodecard__row' },
-                el('span', { class: 'nodecard__avatar' }, initials(node.name)),
+            // The whole row opens the account, because a name and a face is
+            // where people look for their own settings.
+            el('a', { class: 'nodecard__row', href: '#/profile', title: 'Your account' },
+                el('span', { class: 'nodecard__avatar' }, initials(account.display_name || node.name)),
                 el('span', { style: 'min-width:0;flex:1' },
                     el('span', { class: 'nodecard__name' }, account.display_name || node.name),
                     el('span', { class: 'nodecard__meta' }, account.username
-						? `@${account.username}` : node.name))),
+						? `@${account.username}` : node.name)),
+                el('i', { class: 'bx bx-chevron-right nodecard__go' })),
             el('div', { class: 'nodecard__foot' },
                 // The version string may already start with a v, and vv0.1.2 looks broken.
                 el('span', {}, /^v/i.test(overview.version) ? overview.version : `v${overview.version}`),
-                el('span', { style: 'display:flex;align-items:center;gap:6px' },
-                    el('span', { class: 'dot dot--off', id: 'conn-dot' }),
-                    el('span', {
-                        class: 'mono', id: 'conn-label', style: 'font-size:10px',
-                    }, 'offline')),
+                // The dot is the connection to this node; the switch beside it is
+                // whether other people's work may run here. Different questions,
+                // and only one of them is worth a word.
+                el('span', { class: 'dot dot--off', id: 'conn-dot', title: 'Connecting…' }),
+                availabilitySwitch(),
 				el('button', {
 					class: 'tree__action', title: 'Sign out', 'aria-label': 'Sign out',
 					onclick: async () => {
@@ -173,10 +179,9 @@ async function boot() {
     mount(app, ...shell(state.overview));
     onConnection((live) => {
         const dot = document.getElementById('conn-dot');
-        const label = document.getElementById('conn-label');
-        if (!dot || !label) return;
+        if (!dot) return;
         dot.className = `dot ${live ? 'dot--on' : 'dot--bad'}`;
-        label.textContent = live ? 'live' : 'offline';
+        dot.title = live ? 'Connected to this node' : 'Not reaching this node';
     });
 
     // A session can expire while the page is open. Show the gate again rather
