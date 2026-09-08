@@ -114,6 +114,28 @@ for (const root of ROOTS) {
     }
 }
 
+// Every icon the interface asks for must have a class in the bundled stylesheet.
+//
+// The font is upstream's complete file, but only some class-to-codepoint rules
+// were kept. A class with no rule renders as nothing — no error, no fallback,
+// no gap in the layout — so a button simply stops having an icon and nobody
+// notices until they look for it. Thirty-eight of them were missing at once.
+{
+    const sheet = readFileSync('web/boxicons.css', 'utf8');
+    const defined = new Set(
+        [...sheet.matchAll(/^\.(bxl?-[a-z0-9-]+):before/gm)].map((match) => match[1]));
+    const used = new Map();
+    for (const file of files.filter((candidate) => candidate.endsWith('.js'))) {
+        const source = readFileSync(file, 'utf8');
+        for (const match of source.matchAll(/\bbxl?-[a-z0-9-]+/g)) {
+            if (!defined.has(match[0])) used.set(match[0], file);
+        }
+    }
+    for (const [icon, file] of [...used].sort()) {
+        problems.push(`${file}: uses ${icon}, which web/boxicons.css does not define`);
+    }
+}
+
 if (problems.length) {
     console.error('web check failed:\n' + problems.map((p) => '  ' + p).join('\n'));
     process.exit(1);

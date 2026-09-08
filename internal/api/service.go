@@ -167,6 +167,9 @@ func (s *Server) stopEverything(state serviceState, leaveTailnet bool) {
 	defer cancel()
 
 	s.hub.Publish("service.stopping", map[string]any{"tailnet": leaveTailnet})
+
+	// Jobs first. They are this node's own children, and stopping Ray under a
+	// running job leaves the job writing into a cluster that is going away.
 	s.sup.StopAll()
 
 	s.rayActionMu.Lock()
@@ -181,6 +184,9 @@ func (s *Server) stopEverything(state serviceState, leaveTailnet bool) {
 	}
 	s.rayActionMu.Unlock()
 
+	// The tailnet is the one thing here that is not ours alone: the daemon is
+	// system-wide and somebody may be using it for something else, so leaving
+	// it up is the default and disconnecting is asked for explicitly.
 	if leaveTailnet {
 		if err := tailnet.Down(ctx); err != nil {
 			log.Printf("stop: tailnet did not disconnect: %v", err)

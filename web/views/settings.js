@@ -139,11 +139,7 @@ function settingsHead(active) {
     return el('div', {},
         el('div', { class: 'page__head' },
             el('p', { class: 'page__eyebrow' }, 'Settings'),
-            el('h1', { class: 'page__title' }, 'This machine'),
-            el('p', { class: 'page__sub' },
-                'These limits are enforced here, by this machine. Nothing in the ' +
-                'cluster can widen them — which is what makes it reasonable to lend ' +
-                'someone else your computer.')),
+            el('h1', { class: 'page__title' }, 'This machine')),
         el('nav', { class: 'tabs', 'aria-label': 'Settings sections' },
             ...TABS.map(([id, label, icon, href]) => el('a', {
                 class: `tab ${active === id ? 'tab--on' : ''}`, href,
@@ -154,10 +150,7 @@ function aboutPanel(settings, service) {
     return el('div', { class: 'grid grid--2' },
         el('div', { class: 'panel' },
             el('div', { class: 'panel__head' }, 'Plainshow Cluster'),
-            el('p', { class: 'muted', style: 'margin:0 0 14px;font-size:12.5px;line-height:1.7' },
-                'An interface over programs that already work: Tailscale makes the ' +
-                'machines reachable, git moves the code, Ray runs the work. ' +
-                'Plainshow sets those up and shows what is happening.'),
+
             el('dl', { class: 'kv' },
                 el('dt', {}, 'Version'), el('dd', {}, settings.version),
                 el('dt', {}, 'Node'), el('dd', {}, settings.node.name),

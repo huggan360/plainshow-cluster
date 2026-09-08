@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -385,30 +384,30 @@ func (s *Server) refreshLocalNodeSnapshot(ctx context.Context, networkID string)
 	})
 }
 
-// projectsOnDisk reads the directory rather than the database.
+// projectsOnDisk reports what this machine can actually run.
 //
-// The database says which projects a network has; the disk says which of them
-// this machine can actually run. Those differ constantly — a project is not
-// downloaded when you join a network — and the whole point of reporting this is
-// to tell the two apart.
+// Being listed in the database and having the files are different things — a
+// project is not downloaded when you join a network — and telling those apart is
+// the whole point of reporting this.
+//
+// It walks the projects rather than one directory because a project is no
+// longer tied to a network: an independent one lives in the projects root while
+// a network-scoped one lives in a subdirectory. Reading a single directory
+// reported every independent project as absent to every peer, which made them
+// look unable to run work they were perfectly able to run.
 func (s *Server) projectsOnDisk(networkID string) []string {
-	entries, err := os.ReadDir(filepath.Join(s.layout.Projects(), networkID))
+	projects, err := s.store.Projects()
 	if err != nil {
 		return []string{}
 	}
-	out := make([]string, 0, len(entries))
-	names := map[string]string{}
-	projects, _ := s.store.ProjectsInNetwork(networkID)
+	out := make([]string, 0, len(projects))
 	for _, project := range projects {
-		names[projectFolder(project)] = project.Name
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			name := entry.Name()
-			if display, ok := names[name]; ok {
-				name = display
-			}
-			out = append(out, name)
+		// A project belonging to another network is that network's business.
+		if project.NetworkID != "" && project.NetworkID != networkID {
+			continue
+		}
+		if info, statErr := os.Stat(s.projectDir(project)); statErr == nil && info.IsDir() {
+			out = append(out, project.Name)
 		}
 	}
 	sort.Strings(out)

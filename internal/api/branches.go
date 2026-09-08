@@ -50,7 +50,7 @@ func (s *Server) getBranches(w http.ResponseWriter, r *http.Request) {
 	}
 	repo := gitrepo.Open(s.projectDir(project))
 	local, _ := repo.Branches()
-	siblings, err := s.store.SiblingProjects(project.NetworkID, project.Repository)
+	siblings, err := s.store.SiblingProjects(project.Repository)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
@@ -144,7 +144,7 @@ func (s *Server) pushToBranch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Somewhere already holds this branch: use it rather than making a second.
 	if existing, lookupErr := s.store.ProjectOnBranch(
-		project.NetworkID, project.Repository, branch); lookupErr == nil {
+		project.Repository, branch); lookupErr == nil {
 		response["project"] = existing.Name
 		response["created"] = false
 		response["detail"] = fmt.Sprintf(
@@ -177,7 +177,9 @@ func (s *Server) createBranchProject(source store.Project, branch string) (store
 		base = strings.SplitN(base, "@", 2)[0]
 	}
 	name := branchProjectName(base, branch, false)
-	if _, err := s.store.ProjectByNameInNetwork(source.NetworkID, name); err == nil {
+	// Names are resolved across the machine, not within a network, so the
+	// clash to check for is a global one.
+	if _, err := s.store.ProjectByName(name); err == nil {
 		return store.Project{}, fmt.Errorf("a project called %q already exists", name)
 	}
 

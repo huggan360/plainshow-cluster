@@ -51,3 +51,47 @@
 .bx-wifi:before{content:"\ec7c"}.bx-wifi-off:before{content:"\ec80"}
 .bx-dots-horizontal-rounded:before{content:"\eab2"}.bx-file-blank:before{content:"\ead6"}
 .bx-folder-plus:before{content:"\eae2"}.bx-sync:before{content:"\ec37"}
+
+/* The font file is upstream's, byte for byte, so every glyph is present — only
+ * these class-to-codepoint rules were subset. An icon whose rule is missing
+ * renders as nothing at all, silently, which is how a whole toolbar of them
+ * went unnoticed. scripts/check-web.mjs now fails when the interface uses a
+ * class this file does not define. */
+.bx-check:before { content: "\ea41"; }
+.bx-check-circle:before { content: "\ea46"; }
+.bx-chevron-down:before { content: "\ea4a"; }
+.bx-code-alt:before { content: "\ea69"; }
+.bx-copy:before { content: "\ea84"; }
+.bx-edit-alt:before { content: "\eac0"; }
+.bx-envelope:before { content: "\eac1"; }
+.bx-file-blank:before { content: "\ead6"; }
+.bx-git-branch:before { content: "\eaf0"; }
+.bx-git-commit:before { content: "\eaf1"; }
+.bx-git-compare:before { content: "\eaf2"; }
+.bx-git-merge:before { content: "\eaf3"; }
+.bx-globe:before { content: "\eaf8"; }
+.bx-group:before { content: "\eaff"; }
+.bx-hdd:before { content: "\eb06"; }
+.bx-help-circle:before { content: "\eb0d"; }
+.bx-hide:before { content: "\eb0e"; }
+.bx-info-circle:before { content: "\eb21"; }
+.bx-key:before { content: "\eb28"; }
+.bx-layer:before { content: "\eb2e"; }
+.bx-layer-plus:before { content: "\eb30"; }
+.bx-left-arrow-alt:before { content: "\eb33"; }
+.bx-link:before { content: "\eb3c"; }
+.bx-link-external:before { content: "\eb3e"; }
+.bx-lock-alt:before { content: "\eb4a"; }
+.bx-log-out:before { content: "\eb4f"; }
+.bx-network-chart:before { content: "\eb9e"; }
+.bx-power-off:before { content: "\ebc8"; }
+.bx-refresh:before { content: "\ebd9"; }
+.bx-save:before { content: "\ebf4"; }
+.bx-server:before { content: "\ebfd"; }
+.bx-show:before { content: "\ec0c"; }
+.bx-slider-alt:before { content: "\ec17"; }
+.bx-stop-circle:before { content: "\ec2c"; }
+.bx-sync:before { content: "\ec37"; }
+.bx-task:before { content: "\ec3e"; }
+.bx-wifi-off:before { content: "\ec80"; }
+.bx-x:before { content: "\ec8d"; }

@@ -422,7 +422,11 @@ func resourceArguments(policy ResourcePolicy) []string {
 func Stop(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	_, err := runner(ctx, "stop")
+	// --force kills the whole raylet family rather than asking politely.
+	// A plain stop leaves workers behind when the head is already unhealthy,
+	// which is exactly the state somebody is in when they reach for a stop
+	// button — and a leftover worker keeps the GPU and the port.
+	_, err := runner(ctx, "stop", "--force")
 	return err
 }
 

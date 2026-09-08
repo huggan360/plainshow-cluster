@@ -290,17 +290,22 @@ func (s *Store) SetProjectBranch(id, branch string) error {
 	return err
 }
 
-// ProjectOnBranch finds the project in a network that holds one branch of one
-// repository.
+// ProjectOnBranch finds the project that holds one branch of one repository.
 //
 // This is what stops a second push to dev making a second dev project. A
 // repository plus a branch is one working tree; two would drift apart and each
 // would think it was the one.
-func (s *Store) ProjectOnBranch(networkID, repository, branch string) (Project, error) {
+//
+// Deliberately not scoped by network. Projects are local and independent —
+// ProjectByName resolves them across the whole machine — so scoping this would
+// hide a folder that already holds the branch behind a network boundary the
+// rest of the product no longer draws, and make exactly the duplicate this
+// exists to prevent.
+func (s *Store) ProjectOnBranch(repository, branch string) (Project, error) {
 	var project Project
 	err := s.db.QueryRow(`SELECT id,network_id,name,description,repository,branch,created_at,updated_at
-        FROM project WHERE network_id=? AND lower(repository)=lower(?) AND branch=?
-        AND repository<>''`, networkID, repository, branch).Scan(&project.ID,
+        FROM project WHERE lower(repository)=lower(?) AND branch=?
+        AND repository<>''`, repository, branch).Scan(&project.ID,
 		&project.NetworkID, &project.Name, &project.Description, &project.Repository,
 		&project.Branch, &project.Created, &project.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -309,16 +314,16 @@ func (s *Store) ProjectOnBranch(networkID, repository, branch string) (Project, 
 	return project, err
 }
 
-// SiblingProjects lists every project in a network holding a branch of the same
-// repository, including the one asked about.
-func (s *Store) SiblingProjects(networkID, repository string) ([]Project, error) {
+// SiblingProjects lists every project holding a branch of the same repository,
+// including the one asked about.
+func (s *Store) SiblingProjects(repository string) ([]Project, error) {
 	if strings.TrimSpace(repository) == "" {
 		return []Project{}, nil
 	}
 	rows, err := s.db.Query(`SELECT id,network_id,name,description,repository,branch,created_at,updated_at
-        FROM project WHERE network_id=? AND lower(repository)=lower(?)
+        FROM project WHERE lower(repository)=lower(?)
         ORDER BY CASE branch WHEN 'main' THEN 0 WHEN 'master' THEN 1 ELSE 2 END, branch`,
-		networkID, repository)
+		repository)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +345,7 @@ func (s *Store) SiblingProjects(networkID, repository string) ([]Project, error)
 // across all networks. A repository belongs to one project in one network, and
 // this is what catches the second one being made.
 func (s *Store) ProjectsWithRepository(repository string) ([]Project, error) {
-	rows, err := s.db.Query(`SELECT id,network_id,name,description,repository,created_at,updated_at
+	rows, err := s.db.Query(`SELECT id,network_id,name,description,repository,branch,created_at,updated_at
         FROM project WHERE lower(repository)=lower(?) AND repository<>''`, repository)
 	if err != nil {
 		return nil, err
@@ -350,7 +355,7 @@ func (s *Store) ProjectsWithRepository(repository string) ([]Project, error) {
 	for rows.Next() {
 		var project Project
 		if err := rows.Scan(&project.ID, &project.NetworkID, &project.Name,
-			&project.Description, &project.Repository, &project.Created,
+			&project.Description, &project.Repository, &project.Branch, &project.Created,
 			&project.Updated); err != nil {
 			return nil, err
 		}
@@ -378,7 +383,7 @@ func (s *Store) UpdateProjectDescription(id, description string) error {
 // Projects lists all projects, most recently touched first.
 func (s *Store) Projects() ([]Project, error) {
 	rows, err := s.db.Query(`
-		SELECT id, network_id, name, description, repository, created_at, updated_at
+		SELECT id, network_id, name, description, repository, branch, created_at, updated_at
         FROM project ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
@@ -389,7 +394,7 @@ func (s *Store) Projects() ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository,
-			&p.Created, &p.Updated); err != nil {
+			&p.Branch, &p.Created, &p.Updated); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -400,7 +405,7 @@ func (s *Store) Projects() ([]Project, error) {
 // ProjectsInNetwork lists projects belonging to one independent network.
 func (s *Store) ProjectsInNetwork(networkID string) ([]Project, error) {
 	rows, err := s.db.Query(`
-        SELECT id, network_id, name, description, repository, created_at, updated_at
+        SELECT id, network_id, name, description, repository, branch, created_at, updated_at
         FROM project WHERE network_id=? ORDER BY updated_at DESC`, networkID)
 	if err != nil {
 		return nil, err
@@ -410,7 +415,7 @@ func (s *Store) ProjectsInNetwork(networkID string) ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description,
-			&p.Repository, &p.Created, &p.Updated); err != nil {
+			&p.Repository, &p.Branch, &p.Created, &p.Updated); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -421,7 +426,7 @@ func (s *Store) ProjectsInNetwork(networkID string) ([]Project, error) {
 // ProjectByName looks a project up by its directory name.
 func (s *Store) ProjectByName(name string) (Project, error) {
 	rows, err := s.db.Query(`
-		SELECT id, network_id, name, description, repository, created_at, updated_at
+		SELECT id, network_id, name, description, repository, branch, created_at, updated_at
 		FROM project WHERE name = ? ORDER BY updated_at DESC LIMIT 2`, name)
 	if err != nil {
 		return Project{}, err
@@ -432,7 +437,7 @@ func (s *Store) ProjectByName(name string) (Project, error) {
 		return p, ErrNotFound
 	}
 	if err := rows.Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description,
-		&p.Repository, &p.Created, &p.Updated); err != nil {
+		&p.Repository, &p.Branch, &p.Created, &p.Updated); err != nil {
 		return Project{}, err
 	}
 	if rows.Next() {
@@ -447,9 +452,9 @@ func (s *Store) ProjectByName(name string) (Project, error) {
 func (s *Store) ProjectByID(id string) (Project, error) {
 	var p Project
 	err := s.db.QueryRow(`
-		SELECT id, network_id, name, description, repository, created_at, updated_at
+		SELECT id, network_id, name, description, repository, branch, created_at, updated_at
 		FROM project WHERE id = ?`, id).
-		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
+		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Branch, &p.Created, &p.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -459,9 +464,9 @@ func (s *Store) ProjectByID(id string) (Project, error) {
 func (s *Store) ProjectByNameInNetwork(networkID, name string) (Project, error) {
 	var p Project
 	err := s.db.QueryRow(`
-        SELECT id, network_id, name, description, repository, created_at, updated_at
+        SELECT id, network_id, name, description, repository, branch, created_at, updated_at
         FROM project WHERE network_id=? AND name=?`, networkID, name).
-		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Created, &p.Updated)
+		Scan(&p.ID, &p.NetworkID, &p.Name, &p.Description, &p.Repository, &p.Branch, &p.Created, &p.Updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}

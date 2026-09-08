@@ -108,7 +108,8 @@ function shell(overview) {
                     el('span', { class: 'nodecard__meta' }, account.username
 						? `@${account.username}` : node.name))),
             el('div', { class: 'nodecard__foot' },
-                el('span', {}, `v${overview.version}`),
+                // The version string may already start with a v, and vv0.1.2 looks broken.
+                el('span', {}, /^v/i.test(overview.version) ? overview.version : `v${overview.version}`),
                 el('span', { style: 'display:flex;align-items:center;gap:6px' },
                     el('span', { class: 'dot dot--off', id: 'conn-dot' }),
                     el('span', {

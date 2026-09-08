@@ -237,6 +237,11 @@ func TestNodeProjectsSurviveAWriteAndRead(t *testing.T) {
 // TestOneProjectPerBranchOfARepository is the rule that stops a second push to
 // dev making a second dev project. A repository plus a branch is one working
 // tree; two would drift apart and each would think it was the one.
+//
+// The lookup is deliberately not scoped by network. Projects are local and
+// independent now, and a legacy row still carrying a network id must not be
+// invisible to its own siblings — that would produce the exact duplicate this
+// rule exists to prevent.
 func TestOneProjectPerBranchOfARepository(t *testing.T) {
 	st := open(t)
 	main := Project{ID: "p1", NetworkID: "net-a", Name: "vision"}
@@ -256,19 +261,15 @@ func TestOneProjectPerBranchOfARepository(t *testing.T) {
 		}
 	}
 
-	found, err := st.ProjectOnBranch("net-a", "HUGGAN360/VISION", "dev")
+	found, err := st.ProjectOnBranch("HUGGAN360/VISION", "dev")
 	if err != nil || found.ID != "p2" {
 		t.Fatalf("lookup for dev = %+v, %v", found, err)
 	}
-	if _, err := st.ProjectOnBranch("net-a", "huggan360/vision", "release"); err == nil {
+	if _, err := st.ProjectOnBranch("huggan360/vision", "release"); err == nil {
 		t.Error("a branch nothing holds was reported as held")
 	}
-	// A different network is a different set of people, so it holds nothing.
-	if _, err := st.ProjectOnBranch("net-b", "huggan360/vision", "dev"); err == nil {
-		t.Error("another network's project was found")
-	}
 
-	siblings, err := st.SiblingProjects("net-a", "huggan360/vision")
+	siblings, err := st.SiblingProjects("huggan360/vision")
 	if err != nil || len(siblings) != 2 {
 		t.Fatalf("siblings = %+v, %v", siblings, err)
 	}
@@ -278,7 +279,23 @@ func TestOneProjectPerBranchOfARepository(t *testing.T) {
 	}
 	// A project with no repository has no siblings, rather than every other
 	// project that also has none.
-	if empty, err := st.SiblingProjects("net-a", ""); err != nil || len(empty) != 0 {
+	if empty, err := st.SiblingProjects(""); err != nil || len(empty) != 0 {
 		t.Errorf("projects with no repository = %+v, %v", empty, err)
+	}
+
+	// The bug this replaced: a project left on an old network was invisible to
+	// its own siblings, so pushing to its branch made a second folder for it.
+	legacy := Project{ID: "p3", NetworkID: "", Name: "vision@release"}
+	if err := st.CreateProject(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProjectRepositoryID(legacy.ID, "huggan360/vision"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProjectBranch(legacy.ID, "release"); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := st.ProjectOnBranch("huggan360/vision", "release"); err != nil || found.ID != "p3" {
+		t.Fatalf("a project on another network id was not found: %+v, %v", found, err)
 	}
 }

@@ -22,8 +22,8 @@ export function confirmShutdown() {
         body: () => el('div', {},
             el('p', { style: 'margin:0 0 14px;font-size:13px;color:#cbd5e1;line-height:1.6' },
                 'Nothing of Plainshow keeps running here afterwards. In order: jobs ' +
-                'started on this machine are stopped, this machine leaves the Ray ' +
-                'cluster, and the node service exits.'),
+                'started on this machine are stopped, every Ray process is killed, ' +
+                'and the node service exits.'),
             el('p', { class: 'muted', style: 'margin:0 0 14px;font-size:12px;line-height:1.6' },
                 'If this machine is the Ray head, the other machines are told it has ' +
                 'gone rather than being left retrying it. Your projects, history and ' +
