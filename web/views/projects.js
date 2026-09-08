@@ -7,6 +7,7 @@ import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
 import { conflictPane } from './conflicts.js';
 import { branchPane, branchChip } from './branches.js';
+import { downloadPane } from './download.js';
 import { rayTools } from '../lib/raytools.js';
 
 export async function renderProjects(host, args) {
@@ -119,6 +120,17 @@ async function renderProject(host, reference, routeParts) {
     const projectSummary = state.overview.projects.find((project) =>
         project.id === reference || project.name === reference);
     if (!projectSummary) throw new Error('No such local project.');
+
+    // A project can be here as a row long before its files are: adopted from
+    // the account, or joined through somebody's invitation. Showing the usual
+    // tabs then would be seven doors onto an empty room, so there is one thing
+    // to do and this is it.
+    if (projectSummary.has_files === false) {
+        const pane = downloadPane(projectSummary);
+        mount(page, pane.node);
+        return pane.dispose;
+    }
+
     const name = projectSummary.name;
     const projectRef = projectSummary.id;
     const gitSnapshot = await api(`/api/projects/${encodeURIComponent(projectRef)}/git`);

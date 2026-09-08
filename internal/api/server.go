@@ -59,6 +59,7 @@ type Server struct {
 	remoteMu      sync.RWMutex
 	tailnetMu     sync.Mutex
 	membershipMu  sync.Mutex
+	downloads     downloads
 	rayMu         sync.RWMutex
 	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
@@ -109,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{name}/devices", s.projectReadiness)
 	mux.HandleFunc("POST /api/projects/{name}/send", s.sendProject)
 	mux.HandleFunc("POST /api/projects/{name}/fetch", s.fetchProject)
+	mux.HandleFunc("POST /api/projects/{name}/download", s.startDownload)
+	mux.HandleFunc("GET /api/downloads", s.getDownloads)
 	mux.HandleFunc("PUT /api/projects/{name}/network", s.moveProjectNetwork)
 	mux.HandleFunc("GET /api/ray", s.getRay)
 	mux.HandleFunc("POST /api/projects/{name}/ray/test", s.testProjectRay)

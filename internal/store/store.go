@@ -247,6 +247,14 @@ type Project struct {
 	Created     string `json:"created_at"`
 	Updated     string `json:"updated_at"`
 	Branch      string `json:"branch,omitempty"`
+	// HasFiles says whether this machine actually holds the working tree. A
+	// project adopted from the account exists as a row long before its files
+	// arrive, and that is a state the interface has to render rather than a
+	// project that mysteriously does nothing.
+	HasFiles bool `json:"has_files"`
+	// SizeKB is what the files weigh, so somebody can be told before agreeing
+	// to a download rather than after.
+	SizeKB int `json:"size_kb"`
 }
 
 // CreateProject records a new project, filling in its timestamps so the caller

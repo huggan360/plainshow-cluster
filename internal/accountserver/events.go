@@ -24,6 +24,11 @@ import (
 const (
 	TopicDevices     = "devices"
 	TopicInvitations = "invitations"
+	// TopicProjects wakes a device when a project it can see is added,
+	// renamed or removed somewhere else on the account.
+	TopicProjects = "projects"
+	// TopicCredentials wakes a device when the account's GitHub token changes.
+	TopicCredentials = "credentials"
 	TopicNetworks    = "networks"
 )
 

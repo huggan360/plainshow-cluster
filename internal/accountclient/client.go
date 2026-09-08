@@ -251,6 +251,42 @@ func (c *Client) MyNetworkState(ctx context.Context, token string) (NetworkState
 	return out, err
 }
 
+// GitHubToken fetches the credential the account keeps, so a machine that has
+// never had one connected picks it up.
+func (c *Client) GitHubToken(ctx context.Context, token string) (string, string, error) {
+	var out struct {
+		Token string `json:"token"`
+		Login string `json:"login"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/github/token", token, nil, &out)
+	return out.Token, out.Login, err
+}
+
+// PublishGitHubToken shares a credential connected here with the account's
+// other machines. An empty token disconnects everywhere.
+func (c *Client) PublishGitHubToken(ctx context.Context, token, github, login string) error {
+	return c.call(ctx, http.MethodPut, "/api/github/token", token,
+		map[string]string{"token": github, "login": login}, nil)
+}
+
+// Projects lists every project this account owns or belongs to. Metadata only:
+// the files never pass through the account service.
+func (c *Client) Projects(ctx context.Context, token string) ([]accountserver.AccountProject, error) {
+	var out struct {
+		Projects []accountserver.AccountProject `json:"projects"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/projects/mine", token, nil, &out)
+	return out.Projects, err
+}
+
+// SyncProject reports a project this machine holds.
+func (c *Client) SyncProject(ctx context.Context, token string,
+	input accountserver.ProjectRegistration) (accountserver.AccountProject, error) {
+	var out accountserver.AccountProject
+	err := c.call(ctx, http.MethodPost, "/api/projects/sync", token, input, &out)
+	return out, err
+}
+
 // GrantNetworkMember records the account authenticated by a consumed peer
 // invitation in the enterprise registry.
 func (c *Client) GrantNetworkMember(ctx context.Context, token, networkID,

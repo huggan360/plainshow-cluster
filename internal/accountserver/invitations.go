@@ -249,3 +249,28 @@ func scanInvitation(row scanner) (Invitation, error) {
 		&item.Role, &item.Status, &item.Created, &item.Responded)
 	return item, err
 }
+
+// SetGitHubToken stores the account's GitHub credential so every machine signed
+// in to that account can use it.
+//
+// This is a real escalation and worth being clear about: the account service
+// now holds a token that can act on somebody's repositories, so a lost database
+// costs more than it did. It is stored because the alternative is worse in
+// practice — a token pasted separately into every machine drifts, and the one
+// that is never rotated is the one that leaks. An empty value clears it, which
+// is what disconnecting GitHub does.
+func (s *Store) SetGitHubToken(accountID, token string) error {
+	_, err := s.db.Exec(`UPDATE account SET github_token=? WHERE id=?`,
+		strings.TrimSpace(token), accountID)
+	return err
+}
+
+// GitHubToken returns the account's stored credential, if it has one.
+func (s *Store) GitHubToken(accountID string) (string, error) {
+	var token string
+	err := s.db.QueryRow(`SELECT github_token FROM account WHERE id=?`, accountID).Scan(&token)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return token, err
+}

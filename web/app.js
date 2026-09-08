@@ -134,6 +134,7 @@ function shell(overview) {
 				onclick: toggleRail,
             }, el('i', { class: 'bx bx-menu' })),
 			el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
+            activityStrip(),
             el('span', { class: 'top__spacer' }),
             powerButton(),
 			el('a', { class: 'btn btn--sm', href: '#/new', title: 'New project' },

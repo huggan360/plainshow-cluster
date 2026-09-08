@@ -54,6 +54,13 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 	// Pull before pushing. A machine somebody has just signed into has nothing
 	// to report yet, and everything to learn.
 	_, _ = s.AdoptAccountNetworks(ctx, client, token)
+	// Projects travel as metadata only. A machine learns that a project exists
+	// and how big it is; the files stay where they are until somebody asks.
+	// A machine that has never had GitHub connected takes the account's token,
+	// so signing in is the only setup step.
+	s.adoptGitHubToken(ctx, client, token)
+	s.publishProjects(ctx, client, token)
+	s.adoptAccountProjects(ctx, client, token)
 	projects, err := s.store.Projects()
 	if err != nil {
 		return
@@ -390,6 +397,8 @@ func (s *Server) handleAccountEvent(ctx context.Context, topic string) {
 		s.hub.Publish("devices.changed", map[string]string{"reason": "account"})
 	case accountserver.TopicInvitations:
 		s.hub.Publish("invitations.changed", map[string]string{"reason": "account"})
+	case accountserver.TopicProjects, accountserver.TopicCredentials:
+		s.checkInAccountServer(ctx)
 	case accountserver.TopicNetworks:
 		s.checkInAccountServer(ctx)
 		s.hub.Publish("networks.changed", map[string]string{"reason": "account"})

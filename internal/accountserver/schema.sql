@@ -115,6 +115,33 @@ CREATE TABLE IF NOT EXISTS network_invitation (
 CREATE INDEX IF NOT EXISTS invitation_account_idx
     ON network_invitation(account_id, status);
 
+-- A project the account knows about. Metadata only: never a file, never a
+-- commit, never a byte of anybody's data. This is what lets a second machine
+-- show you a project you made somewhere else and offer to fetch it, rather than
+-- showing an empty workspace and no explanation.
+CREATE TABLE IF NOT EXISTS project (
+    id               TEXT PRIMARY KEY,
+    owner_account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    description      TEXT NOT NULL DEFAULT '',
+    repository       TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    size_kb          INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_member (
+    project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    joined_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, account_id)
+);
+
+CREATE INDEX IF NOT EXISTS project_member_account_idx
+    ON project_member(account_id);
+
 CREATE INDEX IF NOT EXISTS session_expiry_idx ON login_session(expires_at);
 CREATE INDEX IF NOT EXISTS node_seen_idx ON node(last_seen DESC);
 CREATE INDEX IF NOT EXISTS controller_seen_idx ON controller_server(last_seen DESC);

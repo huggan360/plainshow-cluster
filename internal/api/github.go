@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/github"
 	"github.com/huggan360/plainshow-cluster/internal/gitrepo"
 	"github.com/huggan360/plainshow-cluster/internal/store"
@@ -126,6 +129,9 @@ func (s *Server) githubConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Connect once, on any machine. The account keeps it so the others pick it
+	// up rather than each needing the same token pasted in again.
+	go s.publishGitHubToken(context.Background(), body.Token, account.Login)
 	s.hub.Publish("github.connected", map[string]string{"account": account.Login})
 	writeJSON(w, 200, map[string]any{"connected": true, "account": account.Login})
 }
@@ -135,6 +141,9 @@ func (s *Server) githubDisconnect(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
+	// Disconnecting is an account decision, not a machine one: leaving the
+	// token on the account would put it straight back on the next check-in.
+	go s.publishGitHubToken(context.Background(), "", "")
 	s.hub.Publish("github.disconnected", nil)
 	writeJSON(w, 200, map[string]string{"status": "disconnected"})
 }
@@ -432,4 +441,42 @@ func (s *Server) cloneRepository(w http.ResponseWriter, r *http.Request) {
 
 	s.hub.Publish("project.created", p)
 	writeJSON(w, 201, p)
+}
+
+// publishGitHubToken shares this machine's GitHub credential with the account,
+// so connecting it once connects it everywhere.
+//
+// Failure is silent on purpose. The token already works on this machine; an
+// account service that cannot be reached should not make connecting GitHub
+// look like it failed.
+func (s *Server) publishGitHubToken(parent context.Context, github, login string) {
+	client, token, err := s.authority(parent)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+	if err := client.PublishGitHubToken(ctx, token, github, login); err != nil {
+		log.Printf("github: could not share the token with the account: %v", err)
+	}
+}
+
+// adoptGitHubToken takes the account's credential when this machine has none.
+//
+// One direction only. A machine that already holds a token keeps it: the last
+// person to press Connect decides, and a background sync must not overwrite
+// what somebody just typed.
+func (s *Server) adoptGitHubToken(ctx context.Context, client *accountclient.Client, token string) {
+	if s.tokenStore().Connected() {
+		return
+	}
+	shared, _, err := client.GitHubToken(ctx, token)
+	if err != nil || strings.TrimSpace(shared) == "" {
+		return
+	}
+	if err := s.tokenStore().Write(shared); err != nil {
+		log.Printf("github: could not store the account's token: %v", err)
+		return
+	}
+	s.hub.Publish("github.connected", map[string]string{"account": ""})
 }

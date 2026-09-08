@@ -200,6 +200,11 @@ func Open(path string) (*Store, error) {
 func (s *Store) migrate() error {
 	columns := []struct{ table, name, definition string }{
 		{"account", "github_login", "TEXT NOT NULL DEFAULT ''"},
+		// The GitHub token, so connecting it on one machine connects it on
+		// all of them. It is a credential this service now holds on
+		// somebody's behalf, which is a real escalation of what a lost
+		// database costs — see SetGitHubToken.
+		{"account", "github_token", "TEXT NOT NULL DEFAULT ''"},
 		{"network", "owner_account_id", "TEXT NOT NULL DEFAULT ''"},
 		{"network", "management_key", "TEXT NOT NULL DEFAULT ''"},
 		// A device reports which network it is working in, and is told which

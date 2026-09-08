@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -229,6 +230,10 @@ func (s *Server) decorateProjects(projects []store.Project) {
 		}
 		if projects[index].Branch == "" {
 			projects[index].Branch = "main"
+		}
+		if info, err := os.Stat(projects[index].Path); err == nil && info.IsDir() {
+			projects[index].HasFiles = true
+			projects[index].SizeKB = directorySizeKB(projects[index].Path)
 		}
 	}
 }

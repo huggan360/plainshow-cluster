@@ -175,3 +175,83 @@ func (s *Server) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 	}
 }
+
+// ------------------------------------------------------------- projects --
+
+func (s *Server) myProjects(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	projects, err := s.store.ProjectsForAccount(account.ID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
+}
+
+func (s *Server) syncProject(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var input ProjectRegistration
+	if err := decode(r, &input); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	project, err := s.store.RegisterProject(account.ID, input)
+	if err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Everybody on it should see it appear rather than wait out a heartbeat.
+	s.watchers.notify(account.ID, TopicProjects)
+	writeJSON(w, http.StatusOK, project)
+}
+
+func (s *Server) forgetProject(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	if err := s.store.ForgetProject(account.ID, r.PathValue("id")); err != nil {
+		fail(w, http.StatusNotFound, "No such project on this account.")
+		return
+	}
+	s.watchers.notify(account.ID, TopicProjects)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "forgotten"})
+}
+
+// ------------------------------------------------------------ credentials --
+
+// getGitHubToken hands a signed-in device the account's GitHub credential.
+//
+// Only over an authenticated call, and only ever to a machine already holding
+// this account's bearer token — which can do everything this token can anyway.
+func (s *Server) getGitHubToken(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	token, err := s.store.GitHubToken(account.ID)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": token, "connected": token != "", "login": account.GitHubLogin,
+	})
+}
+
+// putGitHubToken records a credential connected on one machine so the account's
+// other machines pick it up.
+func (s *Server) putGitHubToken(w http.ResponseWriter, r *http.Request) {
+	account, _ := s.currentAccount(r)
+	var body struct {
+		Token string `json:"token"`
+		Login string `json:"login"`
+	}
+	if err := decode(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.SetGitHubToken(account.ID, body.Token); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if login := strings.TrimSpace(body.Login); login != "" {
+		_ = s.store.SetGitHubLogin(account.ID, login)
+	}
+	s.watchers.notify(account.ID, TopicCredentials)
+	writeJSON(w, http.StatusOK, map[string]bool{"connected": strings.TrimSpace(body.Token) != ""})
+}
