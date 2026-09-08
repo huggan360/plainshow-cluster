@@ -8,7 +8,7 @@ This is alpha software. Keep backups of important projects while testing it.
 
 ## Install the alpha
 
-The [Alpha 0.1.2 release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.2-alpha.1) provides one complete archive for each supported
+The [Alpha 0.1.3 release](https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.3-alpha.1) provides one complete archive for each supported
 architecture. Check yours with `uname -m`:
 
 - `x86_64` → download `plainshow-cluster-linux-amd64.tar.gz`

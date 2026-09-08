@@ -567,3 +567,13 @@ preview passed; the existing `dist/demo` was rebuilt as `20260908202830`, with
 20 fixture checks and simulated boot passing. The web check passed again after
 the last reconnect/capacity UI adjustment. This is a static demo update, not a
 node/admin service rollout.
+
+## Alpha 0.1.3 release trigger
+
+User requested starting Alpha 0.1.3 on GitHub, without additional testing.
+Target tag is `v0.1.3-alpha.1`, including implementation `39c249c` and updated
+release notes/README. No local tests are run for this release-trigger turn.
+The existing tag-triggered GitHub workflow builds desktop, portable and Arch
+assets and retains its normal automated checks. Server services are not deployed
+by tagging the release. Do not confuse a successfully pushed tag with completed
+asset publication; the latter depends on the workflow finishing successfully.

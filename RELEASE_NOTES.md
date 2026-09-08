@@ -1,36 +1,41 @@
-# Plainshow Cluster — Alpha 0.1.2
+# Plainshow Cluster — Alpha 0.1.3
 
-Version: `v0.1.2-alpha.1`. This remains an alpha: keep backups of important work.
+Version: `v0.1.3-alpha.1`. This remains an alpha: keep backups of important work.
 
 ## What changed
 
-- Live, authenticated peer connections update device presence and hardware/Ray
-  information. New devices wake discovery without waiting for an account heartbeat.
-- Cleaner Devices settings, no device section on Home, and live Project Devices
-  readiness. Late page requests no longer replace the page you navigated to.
-- Remembered desktop sessions recover missing or expired cookies. Restored
-  sessions enforce the same cross-origin protection as normal sessions.
-- User-owned projects under `~/Plainshow/Projects/<network-id>/<repository-name>`.
-  Existing installations have a safe workspace migration command and retained backup.
-- Safer project transfers: staged extraction, rollback on replacement failure,
-  and correct file ownership.
-- A project **Test** tab checks execution on online Ray workers and reports
-  missing workers. A **Preset** tab creates editable CPU, GPU, mixed, NVIDIA,
-  AMD or Intel Ray task skeletons without overwriting existing files.
-- Presets target the project's network and refuse an unspecified Ray head
-  instead of accidentally using an unrelated local cluster.
+- Independent projects: choose the active compute network on Networks for runs,
+  tests and presets. Existing project folders remain in place.
+- A Code tab with corrected line numbers, visual merge-conflict resolution,
+  a full create-project page and branch-specific working folders.
+- Account-held project metadata and GitHub credentials, invitations by username,
+  and explicit project downloads with progress.
+- Redesigned device cards, restored icons, updated typography, profile settings,
+  an availability switch and an interactive-looking sample-data demo.
+- CPU/GPU software diagnostics report CUDA, ROCm and Intel tooling and try an
+  available GPU without making missing GPU software fail network connectivity.
+- Jobs shows waiting, running and paginated history for the selected network.
+  Small job summaries persist on clusteradmin; member devices receive change
+  notifications, with polling as a fallback. Unsent summaries retry after outages.
+- Deleting a network removes its job history and pending uploads, not project
+  files or Git history. Saved unfinished jobs show their last known state.
+- Centered spinners, fixed completed-job timers and cleaned-up log polling.
+
+Shared job history requires updating **both the account server and the nodes**.
+The new SQLite tables are added on startup. Logs, code and datasets are not
+archived on clusteradmin. Publishing this release does not deploy server services.
 
 ## Install or update
 
 This repository is private: downloads and built-in updates require GitHub
 access to it. Connect an authorized GitHub account for the built-in updater.
 
-Arch: download `plainshow-cluster-0.1.2.alpha.1-1-x86_64.pkg.tar.zst` and
+Arch: download `plainshow-cluster-0.1.3.alpha.1-1-x86_64.pkg.tar.zst` and
 `arch-checksums.txt`, close Plainshow Cluster, then run:
 
 ```sh
 sha256sum -c arch-checksums.txt
-sudo pacman -U ./plainshow-cluster-0.1.2.alpha.1-1-x86_64.pkg.tar.zst
+sudo pacman -U ./plainshow-cluster-0.1.3.alpha.1-1-x86_64.pkg.tar.zst
 ```
 
 Other supported Linux distributions: download the complete `amd64` or `arm64`
@@ -58,6 +63,6 @@ up to the socket timeout, not literally zero time.
 
 Presets distribute independent tasks over compatible resources. They are not
 a universal synchronized training loop for unlike GPUs. Install the matching
-GPU drivers and framework on each worker. The Test tab checks Ray execution,
-not GPU framework compatibility. Native rendering and real mixed-hardware
-training still need testing on users' machines.
+GPU drivers and framework on each worker. GPU checks sample one available GPU
+in Ray's Python environment, not every card or project environment. Native
+rendering and real mixed-hardware training still need testing on users' machines.
