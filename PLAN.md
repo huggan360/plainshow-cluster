@@ -1,5 +1,16 @@
 # Plan: the account owns the network, the device only participates
 
+## September 8 continuation — network job history (unreleased)
+
+Implemented after Claude's `c2838e0`: selected-network Jobs, durable summaries
+on clusteradmin, account-scoped change notifications using the existing socket,
+and a node outbox for failed history uploads. Network deletion cascades to both
+central history and pending local uploads; project files and Git stay intact.
+Centered loaders and Jobs polling/elapsed-time cleanup are included. Ray owns
+execution; no second scheduler, FIFO queue, log archive or file relay was added.
+Node/admin rollout and physical multi-machine verification are still separate
+from implementation. See the latest CODEX.md handover for checks and limits.
+
 ## Current product override — independent projects (September 8)
 
 The user superseded Stage 4's required project/network binding. Projects are

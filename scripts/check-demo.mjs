@@ -12,7 +12,7 @@ import { join, relative } from 'node:path';
 const DEMO = process.env.DEMO_DIR || 'dist/demo';
 // index.html stays at the root: it is the one file the CDN does not cache, and
 // it is what points at the newest build.
-const ROOT = 'dist/demo';
+const INDEX = process.env.DEMO_INDEX || 'dist/demo/index.html';
 
 const problems = [];
 
@@ -45,7 +45,7 @@ if (!existsSync(`${DEMO}/brand/plainshow-icon.webp`)) {
 
 // The stub has to load before the interface, or the first request reaches a
 // node that is not there and the page renders an error instead of the app.
-const page = readFileSync(`${ROOT}/index.html`, 'utf8');
+const page = readFileSync(INDEX, 'utf8');
 if (page.indexOf('demo-api.js') > page.indexOf('app.js"')) {
     problems.push('demo/index.html loads app.js before the stub, so the first request escapes');
 }

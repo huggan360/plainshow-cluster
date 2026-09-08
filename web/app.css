@@ -657,7 +657,7 @@ td:first-child { color: #e2e8f0; }
 .fold[open] > summary::before { transform: rotate(90deg); }
 .fold > summary:hover { color: var(--tx-2); }
 
-.spin-icon { display: inline-block; animation: spin-icon .9s linear infinite; }
+.spin-icon { display: inline-flex; align-items: center; justify-content: center; width: 1em; height: 1em; line-height: 1; transform-origin: 50% 50%; animation: spin-icon .9s linear infinite; }
 @keyframes spin-icon { to { transform: rotate(360deg); } }
 
 /* --------------------------------------------------------------- GitHub -- */
@@ -1123,10 +1123,14 @@ td:first-child { color: #e2e8f0; }
 .is-busy > * { visibility: hidden; }
 .is-busy::after {
     content: ''; position: absolute; top: 50%; left: 50%;
-    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    box-sizing: border-box; width: 14px; height: 14px; margin: 0;
     border: 2px solid currentColor; border-top-color: transparent;
     border-radius: 50%; opacity: .85;
-    animation: busy-spin .7s linear infinite;
+    transform-origin: 50% 50%; animation: busy-center-spin .7s linear infinite;
+}
+@keyframes busy-center-spin {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
 }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 
@@ -1260,7 +1264,8 @@ td:first-child { color: #e2e8f0; }
 .job__dot--succeeded { background: var(--good); }
 .job__dot--failed { background: var(--bad); }
 .job__dot--pending { background: var(--warn); }
-.job__spin { flex: none; color: var(--cyan); font-size: 15px; animation: busy-spin 1s linear infinite; }
+.job__spin { display: inline-flex; align-items: center; justify-content: center; width: 1em; height: 1em; line-height: 1; flex: none; color: var(--cyan); font-size: 15px; transform-origin: 50% 50%; animation: busy-spin 1s linear infinite; }
+.jobs-warning { color: var(--warn); font-size: 12px; margin-bottom: 16px; }
 .job__what { min-width: 0; flex: 1; }
 .job__cmd {
     display: block; overflow: hidden; color: var(--tx); font-family: var(--mono);

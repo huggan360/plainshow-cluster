@@ -158,6 +158,7 @@ export function fileIcon(name, isDir) {
  * toggling something local — finishes before a spinner could be seen, and
  * flashing one would be noise pretending to be feedback. */
 export function whileBusy(node, run) {
+    if (node.dataset.busy === '1') return;
     let result;
     try {
         result = run();
@@ -167,7 +168,6 @@ export function whileBusy(node, run) {
     if (!result || typeof result.then !== 'function') return result;
     // A second click while the first is in flight would submit twice, which for
     // anything that creates something is worse than a slow button.
-    if (node.dataset.busy === '1') return result;
 
     node.dataset.busy = '1';
     node.classList.add('is-busy');

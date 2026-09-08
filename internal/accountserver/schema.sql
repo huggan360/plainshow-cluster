@@ -1,3 +1,17 @@
+-- Ray owns execution; this table preserves only network-scoped job summaries.
+-- Deleting the network deletes its history in the same transaction.
+CREATE TABLE IF NOT EXISTS ray_job_history (
+    network_id TEXT NOT NULL REFERENCES network(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    entrypoint TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL DEFAULT 0,
+    ended_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(network_id,id,started_at)
+);
+CREATE INDEX IF NOT EXISTS ray_job_history_recent ON ray_job_history(network_id,started_at DESC,id);
+
 CREATE TABLE IF NOT EXISTS setting (
     name  TEXT PRIMARY KEY,
     value TEXT NOT NULL

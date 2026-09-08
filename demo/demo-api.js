@@ -160,7 +160,16 @@
             nodes: [{}, {}, {}], total_cpu: 40, total_gpu: 4, eligible: true,
             policy: { allow_gpu: true },
         })],
-        ['GET', /^\/api\/ray\/jobs$/, () => ({ jobs: state.jobs, running: true })],
+        ['GET', /^\/api\/ray\/jobs$/, (url) => {
+            const network = url.searchParams.get('network_id') || 'net-lab';
+            const name = state.networks.find((item) => item.id === network)?.name || '';
+            const jobs = state.jobs.filter((job) => job.network_name === name)
+                .map((job) => ({ ...job, network_id: network,
+                    archived: network === 'net-albin' || job.status === 'FAILED' }));
+            return { jobs, running: network === 'net-lab', network_id: network,
+                network_name: name, history_total: jobs.length, history_more: false,
+                detail: network === 'net-albin' ? 'Ray is offline. Saved entries show the last known status.' : '' };
+        }],
         ['GET', /^\/api\/ray\/jobs\/[^/]+\/logs/, () => ({
             // One more line every few seconds, so the tail visibly moves.
             logs: logLines.slice(0, 4 + (Math.floor(Date.now() / 4000) % 6)).join('\n') + '\n',
@@ -230,7 +239,7 @@
 
         for (const [verb, pattern, answer] of routes) {
             if (verb === method && pattern.test(path.split('?')[0])) {
-                return json(200, answer());
+                return json(200, answer(new URL(path, 'http://demo')));
             }
         }
         if (method !== 'GET') {

@@ -21,6 +21,7 @@ import (
 // global admin service. Failure is deliberately non-fatal: account-server
 // downtime must not interrupt jobs, git work, or peer communication.
 func (s *Server) StartAccountCheckIn(ctx context.Context, every time.Duration) {
+	s.startJobHistorySync(ctx)
 	if every <= 0 {
 		every = time.Minute
 	}
@@ -396,6 +397,8 @@ func (s *Server) watchAccountServer(ctx context.Context) bool {
 // answer goes through exactly the same code the heartbeat uses.
 func (s *Server) handleAccountEvent(ctx context.Context, topic string) {
 	switch topic {
+	case accountserver.TopicJobs:
+		s.hub.Publish("jobs.changed", map[string]string{"reason": "account"})
 	case accountserver.TopicDevices:
 		s.checkInAccountServer(ctx)
 		s.hub.Publish("devices.changed", map[string]string{"reason": "account"})

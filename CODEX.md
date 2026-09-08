@@ -487,3 +487,83 @@ No release/tag/deployment or live network deletion is part of this change.
 Verification completed: full offline `make check` passed after the backend and
 config changes; the web module check also passed after the final UI copy/live
 target updates. Updated smoke expectations were not run in this session.
+
+## September 8 continuation after Claude's session limit — Jobs (unreleased)
+
+Read Claude session `b4b8d1b9-8de4-47b5-a7df-314d1351aedb`, including the final
+requests in history.jsonl that its compacted summary omitted. Latest baseline
+here was `c2838e0` with a clean worktree. Claude completed the Jobs redesign,
+but stopped at inspection before implementing centered spinners, shared job
+history on clusteradmin, and history deletion with a network. Its earlier
+Code/gutter, merge, creation, branches, invitations, downloads, demo, devices,
+fonts and profile changes were preserved.
+
+Implemented:
+
+- `internal/accountserver/jobs.go` and `ray_job_history`: authenticated,
+  network-scoped Ray summaries (ID, status, command, bounded status message,
+  start/end milliseconds). Never code, full output logs, artifacts or datasets.
+  Reports require an owned enrolled node and a contributing network membership;
+  reads require current membership. All members share the same history.
+- Changed observations wake every member account through existing `/api/events`
+  (`jobs` topic), forwarded to the local UI as `jobs.changed`. Identical reports
+  don't rewrite history or generate notification loops. Terminal states cannot
+  regress because a peer reports an older observation. Start timestamps separate
+  reused IDs after a head restart; undated pending entries are promoted.
+- A daemon collector runs with account check-in startup, independent of the
+  window. It observes known network heads roughly every five seconds (plus
+  request time), queues changed summaries locally, and uploads in batches of
+  100. A durable, account/server-scoped `ray_job_outbox` retries failed uploads
+  even after the head or node restarts. Acknowledgments don't erase newer data.
+- Deleting a network cascades to central history and its pending local uploads.
+  Late reports cannot recreate the network/history. No actual networks,
+  accounts, projects or user files were deleted in this session. In particular,
+  do NOT repeat the blanket rm instructions from Claude's old cleanup summary.
+  Existing network tombstones already prevent re-registration; that old claim
+  in its handover was stale.
+- Jobs defaults to the selected network, supports explicit network IDs, overlays
+  current Ray status on paginated account history, and shows unavailable saved
+  running/pending observations as **last known**, not live or failed. History
+  failures are visible instead of pretending there are no jobs. Logs/Stop retain
+  each job's original network. Archived output is explicitly unavailable because
+  the admin is not a log/file relay. Waiting is Ray's PENDING state (including
+  environment setup), not a new FIFO scheduler.
+- Centered button/refresh/job loaders; double-click prevention happens before
+  executing the handler. Jobs has one non-overlapping polling loop with socket
+  wakeups, generation guards, abort/disposal, and no orphaned log-tail timers.
+  Only running rows tick elapsed time; completed durations remain fixed.
+- Demo fixtures cover scoped and archived jobs. `make demo` now preserves old
+  timestamped assets for open tabs, checks the next build before switching HTML,
+  and accepts `DEMO_ROOT` for a preview build without changing the served demo.
+
+Ray contract reference checked against upstream primary source:
+https://github.com/ray-project/ray/blob/master/python/ray/dashboard/modules/job/pydantic_models.py
+and `common.py` in that directory. `start_time` and `end_time` are milliseconds;
+PENDING/RUNNING/SUCCEEDED/FAILED/STOPPED are the execution states. A regression
+asserts timestamps survive parsing unchanged.
+
+Verification so far: affected accountserver/accountclient/api/ray package tests,
+focused history permissions/fanout/pagination/deletion/stale-state/reused-ID
+tests, node outbox restart/isolation/deletion tests, web import checks, and demo
+preview build with 20 fixture checks and simulated interface boot passed.
+Final full check result is recorded below when it finishes. No dependencies
+installed, no new release/tag/push, no system service/proxy change or production
+database migration. Native WebKit rendering and real two-machine Ray/WS behavior
+remain hardware checks, not claims established by the simulated demo.
+
+Rollout requires BOTH new account-server and node builds. The central schema is
+additive and applied at account startup; the node queue is added at node startup.
+An old/unreachable account server leaves summaries queued and shows a history
+warning. The existing account WebSocket route must be proxied for prompt wakeups;
+polling remains the fallback. Summaries never observed before Ray data disappears
+cannot be reconstructed; logs are deliberately not archived. This work does not
+deploy services or publish a release. The published Alpha 0.1.2 is unchanged.
+
+Final verification: full offline `make check` passed (formatting, vet, web,
+installer/Arch syntax and all Go packages). This includes an HTTP fixture proving
+selected-network history loads without a Ray head and an unjoined network is
+refused. No new smoke run or real multi-machine test was performed. The demo
+preview passed; the existing `dist/demo` was rebuilt as `20260908202830`, with
+20 fixture checks and simulated boot passing. The web check passed again after
+the last reconnect/capacity UI adjustment. This is a static demo update, not a
+node/admin service rollout.

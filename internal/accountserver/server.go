@@ -62,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/controllers", s.requireAdmin(http.HandlerFunc(s.controllers)))
 	mux.Handle("GET /api/networks/mine", s.requireAccount(http.HandlerFunc(s.myNetworks)))
 	mux.Handle("GET /api/events", s.requireAccount(http.HandlerFunc(s.serveEvents)))
+	mux.Handle("GET /api/networks/{id}/jobs", s.requireAccount(http.HandlerFunc(s.networkJobs)))
+	mux.Handle("POST /api/networks/{id}/jobs", s.requireAccount(http.HandlerFunc(s.reportNetworkJobs)))
 	mux.Handle("PUT /api/account/profile", s.requireAccount(http.HandlerFunc(s.updateProfile)))
 	mux.Handle("PUT /api/account/password", s.requireAccount(http.HandlerFunc(s.changePassword)))
 	mux.Handle("GET /api/github/token", s.requireAccount(http.HandlerFunc(s.getGitHubToken)))

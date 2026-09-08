@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/ray"
 	"github.com/huggan360/plainshow-cluster/internal/store"
@@ -469,45 +470,94 @@ func (s *Server) clearLocalRayState() error {
 	return err
 }
 
-// getRayJobs lists what Ray is running. These are Ray's jobs, as Ray reports
-// them; Plainshow keeps no parallel job model for work Ray owns.
+// getRayJobs combines live Ray observations with this network's saved history.
+// Execution remains Ray's; an unavailable head is not proof a job has failed.
 func (s *Server) getRayJobs(w http.ResponseWriter, r *http.Request) {
-	type listedJob struct {
-		ray.Job
-		NetworkID   string `json:"network_id"`
-		NetworkName string `json:"network_name"`
-	}
-	wanted := strings.TrimSpace(r.URL.Query().Get("network_id"))
-	items := []listedJob{}
-	running := false
-	detail := ""
+	networkID := s.rayNetworkID(r)
+	name := ""
 	for _, membership := range s.cfg.Memberships {
-		if wanted != "" && membership.ID != wanted {
-			continue
+		if membership.ID == networkID {
+			name = membership.Name
+			break
 		}
-		head := s.rayHead(membership.ID)
-		if head == "" {
-			continue
+	}
+	if networkID == "" {
+		writeJSON(w, 200, map[string]any{"jobs": []listedRayJob{}, "detail": "Choose a network on Networks to see its jobs."})
+		return
+	}
+	if name == "" {
+		fail(w, 403, "This device does not belong to that network.")
+		return
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("history_offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	var live, history []ray.Job
+	detail, historyError := "", ""
+	running, total := false, 0
+	historyReady := false
+	// Read history concurrently with Ray: an unreachable head should not make
+	// the account history wait for two sequential network timeouts.
+	var historyDone = make(chan struct{})
+	go func() {
+		defer close(historyDone)
+		if !s.usesCentralAccounts() {
+			return
 		}
-		jobs, err := ray.Jobs(r.Context(), ray.DashboardURL(hostOf(head), ray.DefaultDashboard))
+		client, err := accountclient.New(s.cfg.Account.Server)
+		token, tokenErr := config.LoadAccountToken(s.layout)
+		if err != nil || tokenErr != nil || token == "" {
+			historyError = "Sign in to load saved job history."
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		result, err := client.JobHistory(ctx, token, networkID, offset)
 		if err != nil {
-			if detail == "" {
-				detail = err.Error()
+			historyError = "Saved job history is unavailable: " + err.Error()
+			return
+		}
+		history, total = result.Jobs, result.Total
+		historyReady = true
+	}()
+	if head := s.rayHead(networkID); head != "" {
+		var err error
+		live, err = ray.Jobs(r.Context(), ray.DashboardURL(hostOf(head), ray.DefaultDashboard))
+		if err != nil {
+			detail = "Cannot reach Ray. Saved entries show the last known status."
+		} else {
+			running = true
+		}
+	} else {
+		detail = "Ray is offline. Saved entries show the last known status."
+	}
+	<-historyDone
+	// Live queued/running jobs stay visible on every history page. Completed
+	// jobs follow the account's page, rather than repeating all Ray results on
+	// every page and making "Older history" meaningless.
+	if historyReady && total > 0 {
+		pageIDs := map[string]bool{}
+		for _, job := range history {
+			pageIDs[rayHistoryKey(job)] = true
+		}
+		filtered := make([]ray.Job, 0, len(live))
+		for _, job := range live {
+			if job.Running() || pageIDs[rayHistoryKey(job)] {
+				filtered = append(filtered, job)
 			}
-			continue
 		}
-		running = true
-		for _, job := range jobs {
-			items = append(items, listedJob{Job: job, NetworkID: membership.ID,
-				NetworkName: membership.Name})
+		live = filtered
+	}
+	items := mergeJobHistory(live, history, networkID, name)
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].StartedAt == items[j].StartedAt {
+			return items[i].ID > items[j].ID
 		}
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt > items[j].StartedAt })
-	response := map[string]any{"jobs": items, "running": running}
-	if detail != "" {
-		response["detail"] = detail
-	}
-	writeJSON(w, http.StatusOK, response)
+		return items[i].StartedAt > items[j].StartedAt
+	})
+	writeJSON(w, 200, map[string]any{"jobs": items, "network_id": networkID, "network_name": name, "running": running,
+		"detail": detail, "history_error": historyError, "history_total": total, "history_offset": offset, "history_more": offset+50 < total})
 }
 
 func (s *Server) submitRayJob(w http.ResponseWriter, r *http.Request) {

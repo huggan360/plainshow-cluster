@@ -5,6 +5,16 @@
 -- only what cannot be recomputed: which machines belong to the cluster, which
 -- projects exist, and what has run.
 
+-- Pending account-history uploads survive node/authority restarts. Never logs.
+CREATE TABLE IF NOT EXISTS ray_job_outbox (
+    scope TEXT NOT NULL,
+    network_id TEXT NOT NULL REFERENCES network(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY(scope,network_id,id,started_at)
+);
+
 CREATE TABLE IF NOT EXISTS machine (
     id          TEXT PRIMARY KEY,
     name        TEXT NOT NULL,

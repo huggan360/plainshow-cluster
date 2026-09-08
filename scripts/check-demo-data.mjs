@@ -38,6 +38,10 @@ const endpoints = [
     ['/api/ray/jobs', (d) => ['RUNNING', 'PENDING', 'SUCCEEDED', 'FAILED']
         .every((state) => d.jobs.some((job) => job.status === state))],
     ['/api/ray/jobs/plainshow_7f31c2/logs', (d) => typeof d.logs === 'string' && d.logs.length > 0],
+    ['/api/ray/jobs?network_id=net-lab', (d) => d.jobs.every((job) => job.network_id === 'net-lab')
+        && d.jobs.some((job) => job.archived)],
+    ['/api/ray/jobs?network_id=net-albin', (d) => d.running === false && d.jobs.length > 0
+        && d.jobs.every((job) => job.archived && job.network_id === 'net-albin')],
     ['/api/accounts/search?q=alb', (d) => d.accounts.length === 1],
 ];
 

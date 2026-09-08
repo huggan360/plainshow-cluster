@@ -257,8 +257,8 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// Jobs lists what Ray is running. These are Ray's jobs, reported as Ray sees
-// them; Plainshow keeps no job table of its own for work Ray owns.
+// Jobs lists Ray observations. Timestamps are Unix milliseconds, as specified
+// by JobDetails. The account service can archive summaries, not execute jobs.
 func Jobs(ctx context.Context, dashboard string) ([]Job, error) {
 	if strings.TrimSpace(dashboard) == "" {
 		return nil, errors.New("no Ray cluster is running for this network")

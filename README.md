@@ -102,6 +102,15 @@ advertised twice. Changing its active network can move its compute contribution.
 Network owners can delete a network directly from its card; local projects,
 files and Git history are preserved. Choose another run network afterwards.
 
+**Jobs** shows the selected network's waiting, running and recent jobs. Ray
+still runs the work; clusteradmin saves small job summaries so history survives
+the Ray head stopping. Older history has page buttons. Network members share
+this history; deleting the network deletes it too, but not project files.
+Logs stay on the Ray head. A saved, unfinished job is labelled **last known**
+when its current state cannot be confirmed, not assumed running or failed.
+Nodes retry unsent summaries after an account-server outage. This needs the
+updated node and account-server builds; older releases do not save job history.
+
 ## Services
 
 - `clusteradmin.plainshow.se` is the global account/key authority. It stores

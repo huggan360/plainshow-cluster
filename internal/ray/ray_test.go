@@ -94,7 +94,7 @@ func TestUnreachableDashboardExplainsItself(t *testing.T) {
 
 func TestJobsReadRayShape(t *testing.T) {
 	stubFetch(t, `[
-	 {"submission_id":"raysubmit_a","status":"RUNNING","entrypoint":"python train.py","start_time":1700000000},
+	 {"submission_id":"raysubmit_a","status":"RUNNING","entrypoint":"python train.py","start_time":1700000000000},
 	 {"submission_id":"raysubmit_b","status":"SUCCEEDED","entrypoint":"python eval.py","start_time":1,"end_time":2}
 	]`, nil)
 
@@ -104,6 +104,9 @@ func TestJobsReadRayShape(t *testing.T) {
 	}
 	if len(jobs) != 2 {
 		t.Fatalf("got %d jobs, want 2", len(jobs))
+	}
+	if jobs[0].StartedAt != 1700000000000 || jobs[1].EndedAt != 2 {
+		t.Fatal("Ray millisecond timestamps were converted or lost")
 	}
 	if !jobs[0].Running() || jobs[1].Running() {
 		t.Errorf("running states wrong: %+v", jobs)

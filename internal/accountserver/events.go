@@ -30,6 +30,7 @@ const (
 	// TopicCredentials wakes a device when the account's GitHub token changes.
 	TopicCredentials = "credentials"
 	TopicNetworks    = "networks"
+	TopicJobs        = "jobs"
 )
 
 // pingEvery keeps the connection alive through the reverse proxy. Cloudflare

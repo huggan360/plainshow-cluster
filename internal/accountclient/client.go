@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -308,6 +309,16 @@ func (c *Client) GrantNetworkMember(ctx context.Context, token, networkID,
 	return c.call(ctx, http.MethodPost, "/api/networks/"+url.PathEscape(networkID)+"/members",
 		token, map[string]string{"management_key": managementKey,
 			"account_id": accountID, "role": role}, nil)
+}
+
+func (c *Client) JobHistory(ctx context.Context, token, networkID string, offset int) (accountserver.JobHistory, error) {
+	var out accountserver.JobHistory
+	err := c.call(ctx, http.MethodGet, "/api/networks/"+url.PathEscape(networkID)+"/jobs?offset="+strconv.Itoa(offset), token, nil, &out)
+	return out, err
+}
+
+func (c *Client) ReportJobs(ctx context.Context, token, networkID string, report accountserver.JobReport) error {
+	return c.call(ctx, http.MethodPost, "/api/networks/"+url.PathEscape(networkID)+"/jobs", token, report, nil)
 }
 
 func (c *Client) call(ctx context.Context, method, path, token string, input, output any) error {

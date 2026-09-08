@@ -4,11 +4,10 @@
 // The old page led with a panel explaining how a job picks a network, which is
 // documentation rather than status, and put everything else behind it.
 //
-// These are Ray's jobs, reported as Ray sees them. Plainshow keeps no parallel
-// job model for work Ray owns.
+// Ray owns execution. The account server retains summaries after a head stops.
 
 import { el, mount, ago } from '../lib/ui.js';
-import { api, on, modal, toast } from '../lib/client.js';
+import { api, on, modal, toast, state } from '../lib/client.js';
 
 // Running work is polled harder than finished work. Two seconds is fast enough
 // that a job appearing feels immediate and slow enough not to hammer a head
@@ -23,21 +22,43 @@ export async function renderJobs(host) {
     const expanded = new Set();
     let timer = null;
     let ticker = null;
+    let disposed = false;
+    let drawing = false;
+    let pending = false;
+    let offset = 0;
+    let network = state.overview?.active_network || '';
+    let generation = 0;
+    const requests = new AbortController();
+    const logRequests = new Set();
 
     const draw = async () => {
+        if (disposed) return;
+        if (drawing) { pending = true; return; }
+        drawing = true;
+        clearTimeout(timer);
+        const current = generation;
+        const query = `network_id=${encodeURIComponent(network)}`;
         const [listing, ray] = await Promise.all([
-            api('/api/ray/jobs').catch((error) => ({ jobs: [], detail: error.message })),
-            api('/api/ray').catch(() => ({})),
+            api(`/api/ray/jobs?${query}&history_offset=${offset}`, { signal: requests.signal })
+                .catch((error) => ({ jobs: [], detail: error.message })),
+            api(`/api/ray?${query}`, { signal: requests.signal }).catch(() => ({})),
         ]);
+        drawing = false;
+        if (disposed) return;
+        if (current !== generation) { pending = false; return draw(); }
         const jobs = listing.jobs || [];
-        const queued = jobs.filter((job) => job.status === 'PENDING');
-        const running = jobs.filter((job) => job.status === 'RUNNING');
-        const done = jobs.filter((job) => !['PENDING', 'RUNNING'].includes(job.status));
+        const queued = jobs.filter((job) => !job.archived && job.status === 'PENDING');
+        const running = jobs.filter((job) => !job.archived && job.status === 'RUNNING');
+        const done = jobs.filter((job) => job.archived || !['PENDING', 'RUNNING'].includes(job.status));
+        for (const controller of logRequests) controller.abort();
+        logRequests.clear();
+        const loadLog = (job) => logPane(job, logRequests);
 
         mount(page,
             el('div', { class: 'jobs-head' },
                 el('div', {},
                     el('h1', { class: 'page__title' }, 'Jobs'),
+                    el('p', { class: 'jobs-head__sub' }, listing.network_name || 'Choose a network on Networks'),
                     el('p', { class: 'jobs-head__sub' },
                         running.length
                             ? `${running.length} running${queued.length ? `, ${queued.length} waiting` : ''}`
@@ -45,12 +66,21 @@ export async function renderJobs(host) {
                                 : 'Nothing is running')),
                 capacity(ray)),
 
+            listing.detail ? el('p', { class: 'jobs-empty', role: 'status' }, listing.detail) : null,
+            listing.history_error ? el('p', { class: 'jobs-warning', role: 'status' }, listing.history_error) : null,
+
             section('Waiting', queued, 'bx-time-five',
-                'Nothing is queued.', expanded, draw),
+                'Nothing is queued.', expanded, draw, loadLog),
             section('Running', running, 'bx-loader-alt',
-                listing.detail || 'Nothing is running right now.', expanded, draw),
-            section('Recent', done.slice(0, 30), 'bx-history',
-                'Ray has not finished anything yet.', expanded, draw));
+                'Nothing is running right now.', expanded, draw, loadLog),
+            section('Recent', done, 'bx-history',
+                'No saved jobs for this network yet.', expanded, draw, loadLog),
+            offset || listing.history_more ? el('div', { class: 'job__actions' },
+                el('button', { class: 'btn btn--sm', disabled: offset === 0,
+                    onclick: () => { offset = Math.max(0, offset - 50); generation++; return draw(); } }, 'Newer history'),
+                el('span', { class: 'muted' }, `History page ${Math.floor(offset / 50) + 1}`),
+                el('button', { class: 'btn btn--sm', disabled: !listing.history_more,
+                    onclick: () => { offset += 50; generation++; return draw(); } }, 'Older history')) : null);
 
         // Elapsed times are counted here rather than fetched: a clock does not
         // need the network, and asking the cluster what time it is once a
@@ -64,13 +94,32 @@ export async function renderJobs(host) {
             }, 1000);
         }
 
-        clearInterval(timer);
-        timer = setInterval(draw, running.length || queued.length ? LIVE_POLL : IDLE_POLL);
+        timer = setTimeout(draw, pending ? 0 : running.length || queued.length ? LIVE_POLL : IDLE_POLL);
+        pending = false;
     };
 
+    const resetNetwork = (data) => {
+        network = data?.id ?? state.overview?.active_network ?? '';
+        generation++;
+        offset = 0;
+        expanded.clear();
+        for (const controller of logRequests) controller.abort();
+        logRequests.clear();
+        mount(page, el('p', { class: 'jobs-empty' }, 'Loading network jobs…'));
+        draw();
+    };
+    const off = ['ray.changed', 'jobs.changed'].map((topic) => on(topic, draw));
+    off.push(on('connection.restored', () => resetNetwork()));
+    off.push(on('network.active', resetNetwork));
+    off.push(on('networks.changed', () => resetNetwork()));
     await draw();
-    const off = on('ray.changed', draw);
-    return () => { off(); clearInterval(timer); clearInterval(ticker); };
+    return () => {
+        disposed = true;
+        for (const unsubscribe of off) unsubscribe();
+        requests.abort();
+        for (const controller of logRequests) controller.abort();
+        clearTimeout(timer); clearInterval(ticker);
+    };
 }
 
 // capacity is the one thing worth saying about the cluster on this page: how
@@ -81,9 +130,9 @@ function capacity(ray) {
             el('i', { class: 'bx bx-broadcast' }),
             el('span', {}, ray && ray.advice ? 'Ray is not running' : 'No cluster'));
     }
-    const machines = Array.isArray(ray.nodes) ? ray.nodes.length : 0;
+    const machines = Array.isArray(ray.nodes) ? ray.nodes.filter((node) => node.alive !== false).length : 0;
     return el('div', { class: 'jobs-capacity' },
-        stat(machines || 1, machines === 1 ? 'machine' : 'machines'),
+        stat(machines, machines === 1 ? 'machine' : 'machines'),
         stat(ray.total_cpu || 0, 'CPU'),
         stat(ray.total_gpu || 0, 'GPU'));
 }
@@ -93,7 +142,7 @@ function stat(value, label) {
         el('strong', {}, String(value)), el('span', {}, label));
 }
 
-function section(title, jobs, icon, emptyText, expanded, redraw) {
+function section(title, jobs, icon, emptyText, expanded, redraw, loadLog) {
     return el('section', { class: 'jobs-section' },
         el('div', { class: 'jobs-section__head' },
             el('i', { class: `bx ${icon}` }),
@@ -101,18 +150,19 @@ function section(title, jobs, icon, emptyText, expanded, redraw) {
             el('span', { class: 'jobs-section__count' }, String(jobs.length))),
         jobs.length
             ? el('div', { class: 'jobs-list' },
-                ...jobs.map((job) => jobRow(job, expanded, redraw)))
+                ...jobs.map((job) => jobRow(job, expanded, redraw, loadLog)))
             : el('p', { class: 'jobs-empty' }, emptyText));
 }
 
-function jobRow(job, expanded, redraw) {
+function jobRow(job, expanded, redraw, loadLog) {
     const status = (job.status || '').toUpperCase();
-    const live = status === 'RUNNING';
-    const waiting = status === 'PENDING';
-    const open = expanded.has(job.id);
+    const live = !job.archived && status === 'RUNNING';
+    const waiting = !job.archived && status === 'PENDING';
+    const key = `${job.network_id}/${job.id}/${job.started_at || 0}`;
+    const open = expanded.has(key);
 
     const toggle = () => {
-        if (open) expanded.delete(job.id); else expanded.add(job.id);
+        if (open) expanded.delete(key); else expanded.add(key);
         redraw();
     };
 
@@ -126,22 +176,23 @@ function jobRow(job, expanded, redraw) {
                 el('span', { class: 'job__meta' },
                     [job.network_name, job.id].filter(Boolean).join(' · '))),
             el('span', {
-                class: 'job__time', dataset: job.started_at ? { since: String(job.started_at) } : {},
+                class: 'job__time', dataset: live && job.started_at ? { since: String(job.started_at) } : {},
             }, timeFor(job)),
             el('span', { class: `job__state job__state--${status.toLowerCase()}` },
-                waiting ? 'waiting' : status.toLowerCase()),
+                job.archived && ['PENDING', 'RUNNING'].includes(status) ? `last known: ${status.toLowerCase()}`
+                    : waiting ? 'waiting' : status.toLowerCase()),
             // Written out rather than built from a fragment: a class assembled
             // at runtime is invisible to the check that verifies every icon
             // this interface asks for actually exists.
             el('i', { class: `bx ${open ? 'bx-chevron-down' : 'bx-chevron-right'} job__chev` })),
-        open ? logPane(job, live) : null,
+        open ? loadLog(job) : null,
         job.message && !open
             ? el('p', { class: 'job__message' }, job.message)
             : null);
 
     if (open) {
         row.append(el('div', { class: 'job__actions' },
-            el('button', { class: 'btn btn--sm', onclick: () => showLogs(job) },
+            el('button', { class: 'btn btn--sm', disabled: job.archived, onclick: () => showLogs(job) },
                 el('i', { class: 'bx bx-file' }), 'Full output'),
             el('span', { class: 'push' }),
             live || waiting
@@ -165,27 +216,32 @@ function jobRow(job, expanded, redraw) {
 // logPane tails the output in place. A running job's last few lines are what
 // somebody actually wants — opening a dialog to read them, and reopening it to
 // see whether anything changed, is the thing this page was worst at.
-function logPane(job, live) {
+function logPane(job, requests) {
     const box = el('pre', { class: 'job__log' }, 'Loading output…');
-    let stopped = false;
+    if (job.archived) {
+        box.textContent = 'Saved summary. Output stays on the Ray head and is not stored on clusteradmin.';
+        return box;
+    }
+    const controller = new AbortController();
+    requests.add(controller);
 
     const load = async () => {
-        if (stopped) return;
         try {
             const response = await api(`/api/ray/jobs/${encodeURIComponent(job.id)}/logs` +
-                `?network_id=${encodeURIComponent(job.network_id || '')}`);
+                `?network_id=${encodeURIComponent(job.network_id || '')}`, { signal: controller.signal });
+            if (controller.signal.aborted) return;
             const text = (response.logs || '').trimEnd();
             const lines = text ? text.split('\n') : [];
             mount(box, document.createTextNode(
                 lines.length ? lines.slice(-14).join('\n') : 'No output yet.'));
             box.scrollTop = box.scrollHeight;
         } catch (error) {
-            mount(box, document.createTextNode(error.message));
+            if (!controller.signal.aborted) mount(box, document.createTextNode(error.message));
+        } finally {
+            requests.delete(controller);
         }
-        if (live && !stopped) setTimeout(load, 2000);
     };
     load();
-    box.addEventListener('plainshow:gone', () => { stopped = true; });
     return box;
 }
 
@@ -208,6 +264,7 @@ async function showLogs(job) {
 // going, or how long it took.
 function timeFor(job) {
     const status = (job.status || '').toUpperCase();
+    if (job.archived && ['PENDING', 'RUNNING'].includes(status)) return 'unconfirmed';
     if (status === 'PENDING') return 'queued';
     if (status === 'RUNNING') return job.started_at ? elapsed(job.started_at) : 'starting';
     if (job.started_at && job.ended_at) return duration(job.ended_at - job.started_at);
