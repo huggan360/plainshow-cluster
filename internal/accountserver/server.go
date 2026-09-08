@@ -509,6 +509,9 @@ func (s *Server) nodeCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	before, discoveryErr := s.store.deviceDiscovery(input.ID)
+	if login := strings.TrimSpace(input.GitHubLogin); login != "" && login != account.GitHubLogin {
+		_ = s.store.SetGitHubLogin(account.ID, login)
+	}
 	instructions, err := s.store.CheckIn(account.ID, input)
 	if err != nil {
 		if errors.Is(err, ErrNodeOwner) {

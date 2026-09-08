@@ -160,3 +160,33 @@ func TestRevokingRemovesAPendingInvitation(t *testing.T) {
 		t.Fatalf("invitations after revoking = %+v, %v", waiting, err)
 	}
 }
+
+// TestGitHubLoginTravelsWithAnAccount is what makes inviting somebody to a
+// project by their Plainshow name reach GitHub at all. Repository collaborators
+// are GitHub logins; an account name is not one, and a node is the only place
+// the two are known together.
+func TestGitHubLoginTravelsWithAnAccount(t *testing.T) {
+	store, _, albin := twoAccounts(t)
+
+	// Before their node reports it, an account has no GitHub name — and that is
+	// a normal state, not an error: access is still granted locally.
+	found, err := store.SearchAccounts("albin", 10)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("search = %+v, %v", found, err)
+	}
+	if found[0].GitHubLogin != "" {
+		t.Errorf("an account nobody has connected reported %q", found[0].GitHubLogin)
+	}
+
+	if err := store.SetGitHubLogin(albin.ID, "albin-gh"); err != nil {
+		t.Fatal(err)
+	}
+	found, err = store.SearchAccounts("albin", 10)
+	if err != nil || len(found) != 1 || found[0].GitHubLogin != "albin-gh" {
+		t.Fatalf("after connecting GitHub, search = %+v, %v", found, err)
+	}
+	// Still no password hash, however many columns the query grows.
+	if found[0].PasswordHash != "" {
+		t.Error("account search returned a password hash")
+	}
+}

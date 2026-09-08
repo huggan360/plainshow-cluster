@@ -60,7 +60,7 @@ func (s *Store) SearchAccounts(query string, limit int) ([]Account, error) {
 		limit = 10
 	}
 	pattern := "%" + strings.ToLower(query) + "%"
-	rows, err := s.db.Query(`SELECT id,username,display_name FROM account
+	rows, err := s.db.Query(`SELECT id,username,display_name,github_login FROM account
         WHERE disabled=0 AND (lower(username) LIKE ? OR lower(display_name) LIKE ?)
         ORDER BY CASE WHEN lower(username)=? THEN 0 ELSE 1 END, lower(username)
         LIMIT ?`, pattern, pattern, strings.ToLower(query), limit)
@@ -71,12 +71,25 @@ func (s *Store) SearchAccounts(query string, limit int) ([]Account, error) {
 	out := []Account{}
 	for rows.Next() {
 		var account Account
-		if err := rows.Scan(&account.ID, &account.Username, &account.DisplayName); err != nil {
+		if err := rows.Scan(&account.ID, &account.Username, &account.DisplayName,
+			&account.GitHubLogin); err != nil {
 			return nil, err
 		}
 		out = append(out, account)
 	}
 	return out, rows.Err()
+}
+
+// SetGitHubLogin records what an account is called on GitHub.
+//
+// A node publishes this when its owner connects GitHub, because that is the
+// only place the two names are known together. It is what lets somebody be
+// invited to a project by the name their collaborators know them by and still
+// end up a collaborator on the repository.
+func (s *Store) SetGitHubLogin(accountID, login string) error {
+	_, err := s.db.Exec(`UPDATE account SET github_login=? WHERE id=?`,
+		strings.TrimSpace(login), accountID)
+	return err
 }
 
 // CreateInvitation offers membership to one account.

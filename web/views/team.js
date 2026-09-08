@@ -49,29 +49,32 @@ export function teamPanel(project, onChange) {
         const linked = Boolean(data.repository);
 
         mount(box,
-            el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:12px' },
-                el('span', { class: 'chip' },
-                    `${data.members.length} ${data.members.length === 1 ? 'person' : 'people'}`),
-                linked ? el('span', { class: 'chip chip--cyan' }, 'synced with GitHub') : null,
-                el('span', { style: 'flex:1' }),
-                linked
-                    ? el('button', {
-                        class: 'btn btn--sm', title: 'Match this list with the repository',
-                        onclick: () => sync(project, load),
-                    }, el('i', { class: 'bx bx-sync' }), 'Sync')
-                    : null,
-                el('button', {
-                    class: 'btn btn--sm btn--primary',
-                    onclick: () => addPerson(project, load),
-                }, el('i', { class: 'bx bx-user-plus' }), 'Add')),
+            el('div', { class: 'team-head' },
+                el('div', { class: 'team-head__copy' },
+                    el('h2', { class: 'team-head__title' }, 'Project access'),
+                    linked
+                        ? el('p', { class: 'team-head__note' },
+                            el('i', { class: 'bx bxl-github' }),
+                            el('a', {
+                                class: 'team-head__repo', target: '_blank', rel: 'noreferrer',
+                                href: `https://github.com/${data.repository}`,
+                            }, data.repository),
+                            el('span', {}, '· adding, removing and permission changes are ' +
+                                'mirrored onto GitHub both ways.'))
+                        : el('p', { class: 'team-head__note' },
+                            'Local-only project. The same capabilities apply, without Git ' +
+                            'push or pull.')),
+                addForm(project, load)),
 
-            el('div', { class: 'rows' },
+            el('div', { class: 'team-list' },
                 ...data.members.map((m) => memberRow(project, m, load))),
 
-            !linked
-                ? el('p', { class: 'muted', style: 'margin:12px 0 0;font-size:12px;line-height:1.55' },
-                    'This project has no repository yet, so people added here exist only on ' +
-                    'this machine. Connect a repository and they are invited to it too.')
+            linked
+                ? el('button', {
+                    class: 'btn btn--sm', style: 'margin-top:12px',
+                    title: 'Match this list with the repository',
+                    onclick: () => sync(project, load),
+                }, el('i', { class: 'bx bx-sync' }), 'Sync with GitHub')
                 : null);
 
         if (onChange) onChange(data);
@@ -81,6 +84,65 @@ export function teamPanel(project, onChange) {
         mount(box, el('p', { class: 'muted', style: 'margin:0;font-size:12.5px' }, err.message));
     });
     return { node: box, reload: load };
+}
+
+// addForm is inline in the header, as the console has it. Adding somebody is
+// the one thing people come to this panel to do, so it should not be behind a
+// button that opens a dialog.
+//
+// You give a Plainshow account name, not a GitHub one. The two are different
+// and only a node knows both, so the account service is asked which GitHub
+// login belongs to the person — and somebody who has not connected GitHub still
+// gets access here, they just cannot join the repository yet.
+function addForm(project, reload) {
+    const options = el('datalist', { id: 'ps-account-options' });
+    const username = el('input', {
+        class: 'input', placeholder: 'Plainshow username', autocomplete: 'off',
+        list: 'ps-account-options',
+    });
+    const access = el('select', { class: 'input' },
+        ...ACCESS_LEVELS.map(([id, label, note]) =>
+            el('option', { value: id, selected: id === 'push' }, `${label} — ${note}`)));
+
+    // Debounced: one lookup per pause in typing, not one per keystroke.
+    let timer = null;
+    username.addEventListener('input', () => {
+        username.value = username.value.toLowerCase();
+        clearTimeout(timer);
+        const query = username.value.trim();
+        if (query.length < 2) { mount(options); return; }
+        timer = setTimeout(async () => {
+            try {
+                const found = await api(`/api/accounts/search?q=${encodeURIComponent(query)}`);
+                mount(options, ...(found.accounts || []).map((account) =>
+                    el('option', { value: account.username },
+                        account.github_login
+                            ? `${account.display_name || account.username} · @${account.github_login}`
+                            : `${account.display_name || account.username} · no GitHub`)));
+            } catch { mount(options); }
+        }, 220);
+    });
+
+    const add = async () => {
+        const name = username.value.trim().replace(/^@/, '');
+        if (!name) return;
+        const chosen = ACCESS_LEVELS.find(([id]) => id === access.value);
+        button.disabled = true;
+        try {
+            const result = await api(`/api/projects/${encodeURIComponent(project)}/members`, {
+                method: 'POST', body: { username: name, capabilities: chosen[3] },
+            });
+            username.value = '';
+            toast(result.github || `Added ${name}.`);
+            await reload();
+        } catch (err) { toast(err.message, 'err'); }
+        button.disabled = false;
+    };
+    const button = el('button', { class: 'btn btn--primary', onclick: add },
+        el('i', { class: 'bx bx-user-plus' }), 'Add');
+    username.addEventListener('keydown', (event) => { if (event.key === 'Enter') add(); });
+
+    return el('div', { class: 'team-add' }, options, username, access, button);
 }
 
 function memberRow(project, member, reload) {
@@ -152,37 +214,6 @@ function removeMember(project, member, reload) {
                 `${encodeURIComponent(member.username)}`, { method: 'DELETE' });
             close();
             toast(result.github || 'Removed.');
-            await reload();
-        },
-    });
-}
-
-function addPerson(project, reload) {
-    const login = el('input', { class: 'input input--mono', placeholder: 'github-username' });
-    const level = el('select', { class: 'input' }, ...ACCESS_LEVELS.map(([id, label, note]) =>
-        el('option', { value: id, selected: id === 'push' }, `${label} — ${note}`)));
-
-    modal({
-        title: 'Add someone to this project',
-        confirmLabel: 'Add',
-        body: () => el('div', {},
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'GitHub username'), login),
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Access'), level),
-            el('p', { class: 'muted', style: 'margin:6px 0 0;font-size:11.5px;line-height:1.55' },
-                'These are GitHub\u2019s repository roles, so the invitation means the ' +
-                'same thing on both sides. Fine-tune each permission on the row ' +
-                'afterwards.')),
-        onConfirm: async (close) => {
-            const value = login.value.trim().replace(/^@/, '');
-            if (!value) throw new Error('Give a GitHub username.');
-            const chosen = ACCESS_LEVELS.find(([id]) => id === level.value);
-            const result = await api(`/api/projects/${encodeURIComponent(project)}/members`, {
-                method: 'POST', body: { login: value, capabilities: chosen[3] },
-            });
-            close();
-            toast(result.github || `Added ${value}.`);
             await reload();
         },
     });

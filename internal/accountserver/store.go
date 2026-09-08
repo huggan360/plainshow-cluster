@@ -46,10 +46,15 @@ type Account struct {
 	Username     string `json:"username"`
 	DisplayName  string `json:"display_name"`
 	PasswordHash string `json:"-"`
-	Admin        bool   `json:"admin"`
-	Disabled     bool   `json:"disabled"`
-	Created      string `json:"created_at"`
-	LastLogin    string `json:"last_login_at"`
+	// GitHubLogin is what this person is called on GitHub, published by a node
+	// when they connect their account there. Without it a project invitation
+	// can grant access here and nowhere else: repository collaborators are
+	// GitHub logins, and an account name is not one.
+	GitHubLogin string `json:"github_login"`
+	Admin       bool   `json:"admin"`
+	Disabled    bool   `json:"disabled"`
+	Created     string `json:"created_at"`
+	LastLogin   string `json:"last_login_at"`
 }
 
 // NetworkRef is the non-sensitive network identity a node reports for global
@@ -110,6 +115,9 @@ type NodeCheckIn struct {
 	// ActiveNetwork is the network this device is working in right now. It is
 	// also the acknowledgement of a move somebody asked for from elsewhere.
 	ActiveNetwork string `json:"active_network"`
+	// GitHubLogin is the owner's GitHub name as this node knows it. Reported
+	// here because a node is where the two identities meet: it holds the token.
+	GitHubLogin string `json:"github_login"`
 }
 
 // NodeInstructions is what the account service asks a device to do next.
@@ -191,6 +199,7 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) migrate() error {
 	columns := []struct{ table, name, definition string }{
+		{"account", "github_login", "TEXT NOT NULL DEFAULT ''"},
 		{"network", "owner_account_id", "TEXT NOT NULL DEFAULT ''"},
 		{"network", "management_key", "TEXT NOT NULL DEFAULT ''"},
 		// A device reports which network it is working in, and is told which

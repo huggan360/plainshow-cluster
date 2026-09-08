@@ -103,6 +103,7 @@ func (s *Server) checkInAccountServer(ctx context.Context) {
 		Address:       advertisedEndpointFor(s.cfg, tailnetStatus),
 		PublicKey:     base64.RawURLEncoding.EncodeToString(s.device.Public),
 		Fingerprint:   s.fingerprint,
+		GitHubLogin:   s.githubLogin(ctx),
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	instructions, err := client.CheckIn(requestCtx, token, checkIn)
@@ -393,4 +394,24 @@ func (s *Server) handleAccountEvent(ctx context.Context, topic string) {
 		s.checkInAccountServer(ctx)
 		s.hub.Publish("networks.changed", map[string]string{"reason": "account"})
 	}
+}
+
+// githubLogin is the GitHub name of whoever connected an account on this node.
+//
+// It is reported to the account service so somebody can be invited to a project
+// by their Plainshow name and still become a collaborator on the repository —
+// GitHub knows logins, not accounts, and this node is the only place the two
+// names are known together.
+func (s *Server) githubLogin(parent context.Context) string {
+	client, err := s.client()
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	account, err := client.Viewer(ctx)
+	if err != nil {
+		return ""
+	}
+	return account.Login
 }

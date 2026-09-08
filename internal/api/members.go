@@ -93,6 +93,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		// Username is the person's Plainshow account. Login is their GitHub
+		// name. Either alone is enough: somebody invited by account may not
+		// have connected GitHub yet, and a headless caller may only know a
+		// GitHub login.
+		Username     string   `json:"username"`
 		Login        string   `json:"login"`
 		Capabilities []string `json:"capabilities"`
 	}
@@ -101,9 +106,20 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	login := strings.TrimSpace(strings.TrimPrefix(body.Login, "@"))
-	if login == "" {
-		fail(w, 400, "Give a GitHub username.")
+	username := strings.TrimSpace(strings.TrimPrefix(body.Username, "@"))
+	if username == "" && login == "" {
+		fail(w, 400, "Give a Plainshow account or a GitHub username.")
 		return
+	}
+	// Inviting by account is the normal path, so look up what GitHub calls
+	// them. Somebody who has not connected GitHub still gets access here; they
+	// simply cannot be made a collaborator on the repository until they do,
+	// and the interface says so rather than failing the invitation.
+	if username != "" && login == "" {
+		login = s.githubLoginForAccount(r.Context(), username)
+	}
+	if username == "" {
+		username = login
 	}
 
 	caps := store.DefaultCapabilities()
@@ -123,7 +139,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Catch a typo before it becomes a member row nobody can use.
-	if clientErr == nil {
+	if clientErr == nil && login != "" {
 		exists, err := client.UserExists(ctx, login)
 		if err == nil && !exists {
 			fail(w, 404, fmt.Sprintf("GitHub has no user called %q.", login))
@@ -132,7 +148,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	member := store.Member{
-		ProjectID: p.ID, Username: login, GitHubLogin: login, Capabilities: caps,
+		ProjectID: p.ID, Username: username, GitHubLogin: login, Capabilities: caps,
 	}
 	if err := s.store.UpsertMember(member); err != nil {
 		fail(w, 500, err.Error())
@@ -140,7 +156,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]any{"member": member, "github": ""}
-	if repo := s.projectRepo(p); repo != "" && clientErr == nil {
+	if login == "" {
+		response["github"] = username + " has access here. They cannot be added to " +
+			"the repository until they connect GitHub to their Plainshow account."
+	}
+	if repo := s.projectRepo(p); repo != "" && clientErr == nil && login != "" {
 		details, err := client.Repository(ctx, repo)
 		if err != nil {
 			response["github"] = "Added here, but GitHub could not be reached: " + github.Friendly(err)
@@ -289,4 +309,28 @@ func (s *Server) syncMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.Publish("members.changed", map[string]string{"project": p.Name})
 	writeJSON(w, 200, result)
+}
+
+// githubLoginForAccount asks the account service what GitHub calls somebody.
+//
+// It answers "" for an account with no GitHub connected, and for a node with no
+// account authority at all. Both are ordinary: access here is recorded either
+// way, and only the repository half waits.
+func (s *Server) githubLoginForAccount(parent context.Context, username string) string {
+	client, token, err := s.authority(parent)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	accounts, err := client.SearchAccounts(ctx, token, username)
+	if err != nil {
+		return ""
+	}
+	for _, account := range accounts {
+		if strings.EqualFold(account.Username, username) {
+			return account.GitHubLogin
+		}
+	}
+	return ""
 }
