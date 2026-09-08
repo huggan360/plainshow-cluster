@@ -383,3 +383,36 @@ permission. The updater uses the locally connected GitHub token for access.
 Release publication and account-service deployment outcomes will be appended
 after the workflow completes. Keep the existing account database intact; no
 network/account deletion was requested in this session.
+
+## September 8 — Alpha 0.1.2 released and deployed
+
+- Release tag `v0.1.2-alpha.1` points to `91e15ae`. Both implementation commits
+  (6942e88 and 91e15ae) are pushed to main. Release URL:
+  https://github.com/huggan360/plainshow-cluster/releases/tag/v0.1.2-alpha.1
+- GitHub check run 34219801746 and release run 34219802096 succeeded. All four
+  release jobs passed: native amd64 desktop, native arm64 desktop, portable
+  binaries/installers, and native Arch package. The published prerelease has
+  all 12 expected assets, including
+  `plainshow-cluster-0.1.2.alpha.1-1-x86_64.pkg.tar.zst` and `arch-checksums.txt`.
+- The Pi's `plainshow-cluster-admin.service` is deployed from the published
+  arm64 asset, SHA-256
+  `cb267f790f320821441f633613be5855bd2c27dc8d351887f3299f620b6d8c4b`.
+  Binary reports `Plainshow Cluster Admin v0.1.2-alpha.1 (91e15ae, linux/arm64)`.
+  Systemd reports active/running and public `/healthz` returns `ok`.
+- Before deployment, SQLite online backup and its quick_check succeeded.
+  Accounts/network/device counts remained 2/1/2. No accounts, networks or
+  project data were deleted. No dependency installs, Apache changes, Headscale
+  changes, or Cowork-controller deployment were made on this production Pi.
+- Rollback binary:
+  `/opt/plainshow-cluster-admin/bin/pscluster-admin.before-alpha012`.
+  Database backup:
+  `/opt/plainshow-cluster-admin/accounts.db.before-alpha012-20260908`.
+  Normally roll back only the binary; restoring the database would discard
+  account changes since the backup and requires a deliberate recovery decision.
+- This documentation update follows the release commit; do not move/re-cut the
+  published tag. Clients still need to install the new package. The built-in
+  updater replaces only the node binary, not the desktop executable. Repository
+  access remains required because the GitHub repository is private.
+
+Physical multi-machine GPU training and native UI interaction remain user-side
+integration checks, not claims established by successful release builds.
