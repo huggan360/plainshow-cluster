@@ -5,6 +5,7 @@ import { api, on, onConnection, send, isLive, toast, modal, navigate, refresh, s
 import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
+import { conflictPane } from './conflicts.js';
 import { rayTools } from '../lib/raytools.js';
 
 export async function renderProjects(host, args) {
@@ -37,7 +38,7 @@ async function renderProjectList(host) {
                             'No projects yet. Create one and you get a folder, starter file and Git history.'),
                     el('button', {
                         class: 'btn btn--primary btn--sm',
-                        onclick: () => newProject(load),
+                        onclick: () => navigate('new'),
                     }, el('i', { class: 'bx bx-plus' }), 'Create a project'))));
     };
     const load = async () => { projects = await api('/api/projects'); drawResults(); };
@@ -50,7 +51,7 @@ async function renderProjectList(host) {
                     'Edit local project folders, run them with Ray, and keep every change in Git.')),
             el('button', { class: 'btn', onclick: () => cloneForm(load) },
                 el('i', { class: 'bx bxl-github' }), 'Clone from GitHub'),
-            el('button', { class: 'btn btn--primary', onclick: () => newProject(load) },
+            el('button', { class: 'btn btn--primary', onclick: () => navigate('new') },
                 el('i', { class: 'bx bx-plus' }), 'New project')),
         el('div', { class: 'panel ps-toolbar' },
             el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search), count),
@@ -77,43 +78,13 @@ function card(p) {
             el('i', { class: 'bx bx-right-arrow-alt' })));
 }
 
-export function newProject(after) {
-    const name = el('input', {
-        class: 'input', placeholder: 'vision-model', autocomplete: 'off',
-    });
-    const desc = el('input', { class: 'input', placeholder: 'What is it for? (optional)' });
-
-    modal({
-        title: 'New project',
-        confirmLabel: 'Create',
-        body: () => el('div', {},
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Name'), name),
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Description'), desc),
-            el('p', { class: 'muted', style: 'margin:0;font-size:12px' },
-                'Letters, numbers, dashes and underscores.')),
-        onConfirm: async (close) => {
-            const project = await api('/api/projects', {
-                method: 'POST',
-                body: { name: name.value.trim(), description: desc.value.trim() },
-            });
-            close();
-            toast(`Created ${project.name}.`);
-            await refresh();
-            if (after) await after();
-            navigate(`projects/${encodeURIComponent(project.id)}`);
-        },
-    });
-}
-
 // --------------------------------------------------------- project view ----
 
 async function renderProject(host, reference, routeParts) {
     const page = el('div', { class: 'page' });
     mount(host, page);
 
-    const projectTabs = new Set(['overview', 'branch', 'test', 'preset', 'run', 'git', 'devices', 'team', 'settings']);
+    const projectTabs = new Set(['overview', 'branch', 'test', 'preset', 'run', 'git', 'conflicts', 'devices', 'team', 'settings']);
     const requested = routeParts[0] || 'overview';
     const activeTab = requested === 'run' ? 'test' : projectTabs.has(requested) ? requested : 'branch';
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
@@ -600,17 +571,26 @@ async function renderProject(host, reference, routeParts) {
 		el('div', { class: 'panel__head' }, 'Project team'), team.node);
 	const settingsPane = projectSettingsPane(projectSummary);
 	const devicesPane = projectDevicesPane(projectSummary, activeTab === 'devices');
+	// Reloading the whole page once a merge is settled is right: the working
+	// tree has been rewritten underneath every open file, so nothing on screen
+	// can be trusted to still match the disk.
+	const conflictsPane = conflictPane(name, () => location.reload()).node;
 	const raySnapshot = activeTab === 'overview'
 		? await api('/api/ray')
 			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const tools = rayTools(projectSummary, activeTab);
 	const panes = { overview: overviewPane, branch: branchPane, test: tools.test, preset: tools.preset,
-		git: gitPane, devices: devicesPane, team: teamPane, settings: settingsPane };
+		git: gitPane, conflicts: conflictsPane, devices: devicesPane,
+		team: teamPane, settings: settingsPane };
 
 	const tabs = [
 		['overview', 'Overview', 'bx-grid-alt'], ['branch', 'Code', 'bx-code-alt'],
 		['test', 'Test', 'bx-check-circle'], ['preset', 'Preset', 'bx-file-blank'], ['git', 'Git', 'bx-git-commit'],
+		// A conflict is the one thing here that must be dealt with before
+		// anything else works, so the tab announces itself rather than waiting
+		// to be found.
+		...(gitSnapshot.in_merge ? [['conflicts', 'Resolve conflicts', 'bx-git-compare']] : []),
 		['devices', 'Devices', 'bx-devices'],
 		['team', 'Team', 'bx-group'], ['settings', 'Settings', 'bx-slider-alt'],
 	];

@@ -167,6 +167,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{name}/push", s.gitPush)
 	mux.HandleFunc("POST /api/projects/{name}/pull", s.gitPull)
 	mux.HandleFunc("POST /api/projects/{name}/merge/abort", s.gitAbortMerge)
+	mux.HandleFunc("POST /api/projects/{name}/merge/finish", s.finishMerge)
+	mux.HandleFunc("GET /api/projects/{name}/conflicts", s.getConflicts)
+	mux.HandleFunc("POST /api/projects/{name}/conflicts/resolve", s.resolveConflict)
+	mux.HandleFunc("POST /api/projects/{name}/conflicts/mark", s.markResolved)
 
 	mux.HandleFunc("GET /api/github", s.githubStatus)
 	mux.HandleFunc("POST /api/github", s.githubConnect)

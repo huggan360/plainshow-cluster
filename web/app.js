@@ -8,7 +8,8 @@ import { api, state, refresh, connect, onConnection, onUnauthorized } from './li
 import { powerButton } from './lib/statusbar.js';
 import { renderHome } from './views/home.js';
 import { renderJobs } from './views/jobs.js';
-import { newProject, renderProjects } from './views/projects.js';
+import { renderProjects } from './views/projects.js';
+import { renderNewProject } from './views/newproject.js';
 import { renderHowTo } from './views/howto.js';
 import { renderSettings, renderDevicesPage } from './views/settings.js';
 import { renderGitHub } from './views/github.js';
@@ -24,6 +25,9 @@ const ROUTES = [
     { id: 'devices', label: 'Devices', icon: 'bx-devices', render: renderDevicesPage },
     { id: 'howto', label: 'How to', icon: 'bx-help-circle', render: renderHowTo },
     { id: 'settings', label: 'Settings', icon: 'bx-cog', render: renderSettings },
+    // Reachable, but not a place in the sidebar: it is a step in making a
+    // project, not somewhere you go.
+    { id: 'new', label: 'New project', icon: 'bx-layer-plus', render: renderNewProject, hidden: true },
 ];
 
 /** parseRoute reads the hash as a route id plus its arguments. */
@@ -89,7 +93,7 @@ function shell(overview) {
 			plainshowLogo('cluster')),
         el('nav', { class: 'nav' },
             el('p', { class: 'nav__label' }, 'Workspace'),
-            ...ROUTES.map((r) => el('a', {
+            ...ROUTES.filter((r) => !r.hidden).map((r) => el('a', {
                 class: 'nav__item', href: `#/${r.id}`, dataset: { route: r.id },
 				onclick: closeRail,
             },
@@ -131,7 +135,7 @@ function shell(overview) {
 			el('span', { class: 'top__title', id: 'top-title' }, 'Home'),
             el('span', { class: 'top__spacer' }),
             powerButton(),
-			el('button', { class: 'btn btn--sm', onclick: () => newProject(), title: 'New project' },
+			el('a', { class: 'btn btn--sm', href: '#/new', title: 'New project' },
 				el('i', { class: 'bx bx-plus' }), el('span', {}, 'New project'))),
         el('div', { id: 'view' }));
 

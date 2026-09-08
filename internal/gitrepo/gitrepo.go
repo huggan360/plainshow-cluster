@@ -385,6 +385,90 @@ func (r Repo) InMerge() bool {
 	return err == nil
 }
 
+// ConflictSide names which version of a conflicted file to take whole.
+const (
+	// KeepMine is the version this machine had before the merge.
+	KeepMine = "mine"
+	// KeepTheirs is the version that arrived with the merge.
+	KeepTheirs = "theirs"
+	// DropFile removes a file both sides disagreed about entirely.
+	DropFile = "drop"
+)
+
+// ResolveConflict takes one side of a conflicted file whole.
+//
+// Git's own words for the two sides invert during a rebase, and "ours" during a
+// merge is the branch you were on. This only ever runs on a merge — Pull merges
+// — so ours is the local version and theirs is the incoming one, which is what
+// the interface says. Anything that starts rebasing has to revisit this.
+//
+// Staging is part of resolving. A file whose content is right but which is
+// still listed as unmerged blocks the commit, and the person would have no way
+// to tell from looking at it.
+func (r Repo) ResolveConflict(path, choice string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("no file was named")
+	}
+	switch choice {
+	case KeepMine:
+		if _, err := r.run("checkout", "--ours", "--", path); err != nil {
+			return err
+		}
+	case KeepTheirs:
+		if _, err := r.run("checkout", "--theirs", "--", path); err != nil {
+			return err
+		}
+	case DropFile:
+		// Already staged for removal by git rm, so it must not be added after.
+		_, err := r.run("rm", "-f", "--", path)
+		return err
+	default:
+		return fmt.Errorf("unknown resolution %q", choice)
+	}
+	_, err := r.run("add", "--", path)
+	return err
+}
+
+// MarkResolved stages a conflicted file somebody edited by hand.
+//
+// It refuses a file that still carries conflict markers. Committing those
+// produces a file that looks merged, builds, and is wrong — the exact failure
+// this whole screen exists to prevent.
+func (r Repo) MarkResolved(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("no file was named")
+	}
+	raw, err := os.ReadFile(filepath.Join(r.Dir, filepath.FromSlash(path)))
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "<<<<<<<") || strings.HasPrefix(line, ">>>>>>>") {
+			return errors.New("this file still contains conflict markers")
+		}
+	}
+	_, err = r.run("add", "--", path)
+	return err
+}
+
+// FinishMerge commits a merge whose conflicts have all been resolved.
+func (r Repo) FinishMerge() error {
+	if !r.InMerge() {
+		return errors.New("there is no merge to complete")
+	}
+	remaining, err := r.Conflicts()
+	if err != nil {
+		return err
+	}
+	if len(remaining) > 0 {
+		return fmt.Errorf("%d file(s) are still unresolved", len(remaining))
+	}
+	// --no-edit keeps git's own merge message rather than opening an editor
+	// that has no terminal to open in.
+	_, err = r.run("commit", "--no-edit")
+	return err
+}
+
 // AbortMerge throws away an in-progress merge and returns to where it started.
 func (r Repo) AbortMerge() error {
 	_, err := r.run("merge", "--abort")
