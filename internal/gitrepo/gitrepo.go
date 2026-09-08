@@ -320,6 +320,78 @@ func (r Repo) Push(token string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// Branches lists the local branches, current one first.
+func (r Repo) Branches() ([]string, error) {
+	out, err := r.run("branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, err
+	}
+	current := r.Branch()
+	names := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" && line != current {
+			names = append(names, line)
+		}
+	}
+	if current != "" {
+		names = append([]string{current}, names...)
+	}
+	return names, nil
+}
+
+// HasBranch reports whether a branch exists locally.
+func (r Repo) HasBranch(name string) bool {
+	_, err := r.run("rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
+// CreateBranch points a new branch at the current commit without moving to it.
+func (r Repo) CreateBranch(name string) error {
+	if r.HasBranch(name) {
+		return nil
+	}
+	_, err := r.run("branch", name)
+	return err
+}
+
+// PushTo sends this working tree's commit to a named branch on origin,
+// creating that branch there if it does not exist.
+//
+// The explicit HEAD:refs/heads/<name> is what makes "push my work to dev" mean
+// the same thing whether or not dev exists yet, locally or on the remote. A
+// plain push would refuse, or push the wrong branch, depending on config this
+// product does not control.
+func (r Repo) PushTo(token, name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", errors.New("no branch was named")
+	}
+	out, err := r.runAuthed(token, "push", "origin", "HEAD:refs/heads/"+name)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// CloneLocal copies an existing working tree into a new directory on a branch.
+//
+// It clones from the local path rather than the remote: the commits are already
+// here, so this needs no token and no network, and a machine that has just
+// pushed cannot fail to make its own branch directory because GitHub is slow.
+// The remote is carried over so the new directory pushes and pulls normally.
+func CloneLocal(source, destination, branch string) error {
+	// Run from the parent: git clone works anywhere, but the Repo helper needs
+	// an existing directory to run in and the destination is not one yet.
+	if _, err := Open(filepath.Dir(destination)).run("clone", "--branch", branch,
+		"--", source, destination); err != nil {
+		return err
+	}
+	repository := Open(source).RemoteRepository()
+	if repository == "" {
+		return nil
+	}
+	return Open(destination).SetRemote(repository)
+}
+
 // PullResult describes what a pull did, including a merge that could not be
 // completed automatically.
 type PullResult struct {

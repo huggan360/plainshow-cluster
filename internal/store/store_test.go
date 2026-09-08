@@ -233,3 +233,52 @@ func TestNodeProjectsSurviveAWriteAndRead(t *testing.T) {
 		}
 	}
 }
+
+// TestOneProjectPerBranchOfARepository is the rule that stops a second push to
+// dev making a second dev project. A repository plus a branch is one working
+// tree; two would drift apart and each would think it was the one.
+func TestOneProjectPerBranchOfARepository(t *testing.T) {
+	st := open(t)
+	main := Project{ID: "p1", NetworkID: "net-a", Name: "vision"}
+	if err := st.CreateProject(&main); err != nil {
+		t.Fatal(err)
+	}
+	dev := Project{ID: "p2", NetworkID: "net-a", Name: "vision@dev"}
+	if err := st.CreateProject(&dev); err != nil {
+		t.Fatal(err)
+	}
+	for id, branch := range map[string]string{"p1": "main", "p2": "dev"} {
+		if err := st.SetProjectRepositoryID(id, "huggan360/vision"); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetProjectBranch(id, branch); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	found, err := st.ProjectOnBranch("net-a", "HUGGAN360/VISION", "dev")
+	if err != nil || found.ID != "p2" {
+		t.Fatalf("lookup for dev = %+v, %v", found, err)
+	}
+	if _, err := st.ProjectOnBranch("net-a", "huggan360/vision", "release"); err == nil {
+		t.Error("a branch nothing holds was reported as held")
+	}
+	// A different network is a different set of people, so it holds nothing.
+	if _, err := st.ProjectOnBranch("net-b", "huggan360/vision", "dev"); err == nil {
+		t.Error("another network's project was found")
+	}
+
+	siblings, err := st.SiblingProjects("net-a", "huggan360/vision")
+	if err != nil || len(siblings) != 2 {
+		t.Fatalf("siblings = %+v, %v", siblings, err)
+	}
+	// main sorts first, because it is the one people mean by default.
+	if siblings[0].Branch != "main" {
+		t.Errorf("siblings led with %q, want main", siblings[0].Branch)
+	}
+	// A project with no repository has no siblings, rather than every other
+	// project that also has none.
+	if empty, err := st.SiblingProjects("net-a", ""); err != nil || len(empty) != 0 {
+		t.Errorf("projects with no repository = %+v, %v", empty, err)
+	}
+}

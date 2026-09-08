@@ -542,6 +542,12 @@ in to PlainShow, which is more useful than a timeout.
 - **SQLite has no `ADD COLUMN IF NOT EXISTS`.** Schema changes go through
   `store.migrate()`, which checks `PRAGMA table_info` rather than a version
   counter, so it is safe to re-run.
+- **`migrateProjectScope` rebuilds the project table from a fixed column list.**
+  Any column the `migrate()` loop adds must also be named in that CREATE and its
+  INSERT ... SELECT, or it is added and then silently dropped on every fresh
+  database — and the query using it fails at runtime, not at startup. The loop
+  cannot simply run afterwards either: the rebuild selects columns the loop
+  adds, so the order is load-bearing in both directions.
 - **SQL is not checked by the compiler.** A query naming a column that does not
   exist builds happily and fails when it runs, which may be at node startup.
   Every new query gets a test that executes it.

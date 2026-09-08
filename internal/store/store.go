@@ -70,6 +70,10 @@ func (s *Store) migrate() error {
 		// still wins when the two disagree.
 		{"project", "repository", "TEXT NOT NULL DEFAULT ''"},
 		{"project", "network_id", "TEXT NOT NULL DEFAULT ''"},
+		// The branch a project's directory is checked out on. Stored as well
+		// as read off the disk, so "is there already a project on dev" can be
+		// answered without opening every repository on the machine.
+		{"project", "branch", "TEXT NOT NULL DEFAULT ''"},
 		{"network_node", "os", "TEXT NOT NULL DEFAULT ''"},
 		{"network_node", "arch", "TEXT NOT NULL DEFAULT ''"},
 		{"network_node", "capacity", "TEXT NOT NULL DEFAULT '{}'"},
@@ -118,11 +122,12 @@ func (s *Store) migrateProjectScope() error {
 		`CREATE TABLE project_scoped (
             id TEXT PRIMARY KEY, network_id TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '', repository TEXT NOT NULL DEFAULT '',
+            branch TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
             UNIQUE(network_id, name))`,
 		`INSERT INTO project_scoped
-            (id,network_id,name,description,repository,created_at,updated_at)
-            SELECT id,network_id,name,description,repository,created_at,updated_at FROM project`,
+            (id,network_id,name,description,repository,branch,created_at,updated_at)
+            SELECT id,network_id,name,description,repository,branch,created_at,updated_at FROM project`,
 		`DROP TABLE project`,
 		`ALTER TABLE project_scoped RENAME TO project`,
 		`INSERT INTO schema_migration(name,applied_at) VALUES ('project-network-scope-v1', datetime('now'))`,
@@ -276,6 +281,59 @@ func (s *Store) MoveProjectToNetwork(id, networkID string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetProjectBranch records which branch a project's directory is on.
+func (s *Store) SetProjectBranch(id, branch string) error {
+	_, err := s.db.Exec(`UPDATE project SET branch=?, updated_at=? WHERE id=?`,
+		branch, Now(), id)
+	return err
+}
+
+// ProjectOnBranch finds the project in a network that holds one branch of one
+// repository.
+//
+// This is what stops a second push to dev making a second dev project. A
+// repository plus a branch is one working tree; two would drift apart and each
+// would think it was the one.
+func (s *Store) ProjectOnBranch(networkID, repository, branch string) (Project, error) {
+	var project Project
+	err := s.db.QueryRow(`SELECT id,network_id,name,description,repository,branch,created_at,updated_at
+        FROM project WHERE network_id=? AND lower(repository)=lower(?) AND branch=?
+        AND repository<>''`, networkID, repository, branch).Scan(&project.ID,
+		&project.NetworkID, &project.Name, &project.Description, &project.Repository,
+		&project.Branch, &project.Created, &project.Updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return project, ErrNotFound
+	}
+	return project, err
+}
+
+// SiblingProjects lists every project in a network holding a branch of the same
+// repository, including the one asked about.
+func (s *Store) SiblingProjects(networkID, repository string) ([]Project, error) {
+	if strings.TrimSpace(repository) == "" {
+		return []Project{}, nil
+	}
+	rows, err := s.db.Query(`SELECT id,network_id,name,description,repository,branch,created_at,updated_at
+        FROM project WHERE network_id=? AND lower(repository)=lower(?)
+        ORDER BY CASE branch WHEN 'main' THEN 0 WHEN 'master' THEN 1 ELSE 2 END, branch`,
+		networkID, repository)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Project{}
+	for rows.Next() {
+		var project Project
+		if err := rows.Scan(&project.ID, &project.NetworkID, &project.Name,
+			&project.Description, &project.Repository, &project.Branch,
+			&project.Created, &project.Updated); err != nil {
+			return nil, err
+		}
+		out = append(out, project)
+	}
+	return out, rows.Err()
 }
 
 // ProjectsWithRepository finds every project pointing at one GitHub repository,

@@ -6,6 +6,7 @@ import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
 import { conflictPane } from './conflicts.js';
+import { branchPane, branchChip } from './branches.js';
 import { rayTools } from '../lib/raytools.js';
 
 export async function renderProjects(host, args) {
@@ -21,11 +22,24 @@ async function renderProjectList(host) {
 
     let query = '';
     let projects = [];
+    // Branch projects are siblings of a main one, not separate work, so the
+    // list opens on the trunk. Everything is one click away, and the Branch tab
+    // inside a project is the other way to reach them.
+    let showAll = false;
     const count = el('span', { class: 'chip' });
     const results = el('div');
     const search = el('input', { class: 'input', placeholder: 'Search projects, branches or repositories…' });
+    const scope = el('div', { class: 'branch-scope' });
+    const drawScope = () => {
+        const extra = projects.filter((project) => !isTrunk(project)).length;
+        mount(scope,
+            scopeButton('Main', !showAll, () => { showAll = false; drawScope(); drawResults(); }),
+            scopeButton(extra ? `All branches · ${extra}` : 'All branches', showAll,
+                () => { showAll = true; drawScope(); drawResults(); }));
+    };
     const drawResults = () => {
         const visible = projects.filter((project) =>
+            (showAll || isTrunk(project)) &&
             `${project.name} ${project.description} ${project.repository} ${project.branch}`
                 .toLowerCase().includes(query));
         count.textContent = `${visible.length} visible`;
@@ -41,7 +55,11 @@ async function renderProjectList(host) {
                         onclick: () => navigate('new'),
                     }, el('i', { class: 'bx bx-plus' }), 'Create a project'))));
     };
-    const load = async () => { projects = await api('/api/projects'); drawResults(); };
+    const load = async () => {
+        projects = await api('/api/projects');
+        drawScope();
+        drawResults();
+    };
     search.addEventListener('input', () => { query = search.value.toLowerCase(); drawResults(); });
     mount(page,
         el('div', { class: 'detail-head' },
@@ -54,10 +72,23 @@ async function renderProjectList(host) {
             el('button', { class: 'btn btn--primary', onclick: () => navigate('new') },
                 el('i', { class: 'bx bx-plus' }), 'New project')),
         el('div', { class: 'panel ps-toolbar' },
-            el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search), count),
+            el('label', { class: 'ps-search' }, el('i', { class: 'bx bx-search' }), search),
+            scope, count),
         results);
     await load();
     return watchRefresh(['project.created', 'project.deleted', 'project.updated', 'project.moved', 'networks.changed', 'connection.restored'], load);
+}
+
+// isTrunk reports whether a project is a repository's main line rather than one
+// of its branches. A project with no repository is always its own trunk.
+function isTrunk(project) {
+    const branch = project.branch || 'main';
+    return branch === 'main' || branch === 'master' || !project.repository;
+}
+
+function scopeButton(label, on, onclick) {
+    return el('button', { class: `branch-scope__btn ${on ? 'branch-scope__btn--on' : ''}`, onclick },
+        label);
 }
 
 function card(p) {
@@ -69,8 +100,7 @@ function card(p) {
             el('span', { class: 'ps-project-card__copy' },
                 el('strong', {}, p.name),
                 el('span', {}, p.description || 'Local project')),
-            el('span', { class: 'ps-project-card__status' },
-                el('i', { class: 'bx bx-git-branch' }), p.branch || 'main')),
+            el('span', { class: 'ps-project-card__status' }, branchChip(p.branch))),
         el('div', { class: 'ps-project-card__foot' },
             el('span', {}, el('i', { class: p.repository ? 'bx bxl-github' : 'bx bx-hdd' }),
                 p.repository ? ' GitHub' : ' Local Git'),
@@ -84,7 +114,7 @@ async function renderProject(host, reference, routeParts) {
     const page = el('div', { class: 'page' });
     mount(host, page);
 
-    const projectTabs = new Set(['overview', 'branch', 'test', 'preset', 'run', 'git', 'conflicts', 'devices', 'team', 'settings']);
+    const projectTabs = new Set(['overview', 'branch', 'test', 'preset', 'run', 'git', 'branch-list', 'conflicts', 'devices', 'team', 'settings']);
     const requested = routeParts[0] || 'overview';
     const activeTab = requested === 'run' ? 'test' : projectTabs.has(requested) ? requested : 'branch';
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
@@ -575,18 +605,19 @@ async function renderProject(host, reference, routeParts) {
 	// tree has been rewritten underneath every open file, so nothing on screen
 	// can be trusted to still match the disk.
 	const conflictsPane = conflictPane(name, () => location.reload()).node;
+	const branchesPane = branchPane(name).node;
 	const raySnapshot = activeTab === 'overview'
 		? await api('/api/ray')
 			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const tools = rayTools(projectSummary, activeTab);
 	const panes = { overview: overviewPane, branch: branchPane, test: tools.test, preset: tools.preset,
-		git: gitPane, conflicts: conflictsPane, devices: devicesPane,
+		git: gitPane, 'branch-list': branchesPane, conflicts: conflictsPane, devices: devicesPane,
 		team: teamPane, settings: settingsPane };
 
 	const tabs = [
 		['overview', 'Overview', 'bx-grid-alt'], ['branch', 'Code', 'bx-code-alt'],
-		['test', 'Test', 'bx-check-circle'], ['preset', 'Preset', 'bx-file-blank'], ['git', 'Git', 'bx-git-commit'],
+		['test', 'Test', 'bx-check-circle'], ['preset', 'Preset', 'bx-file-blank'], ['git', 'Git', 'bx-git-commit'], ['branch-list', 'Branch', 'bx-git-branch'],
 		// A conflict is the one thing here that must be dealt with before
 		// anything else works, so the tab announces itself rather than waiting
 		// to be found.

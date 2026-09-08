@@ -218,7 +218,14 @@ func (s *Server) decorateProjects(projects []store.Project) {
 		projects[index].Path = s.projectDir(projects[index])
 		repo := gitrepo.Open(s.projectDir(projects[index]))
 		if repo.IsRepo() {
-			projects[index].Branch = repo.Branch()
+			// The disk is the truth about what is checked out. Somebody can
+			// switch branches in their own terminal, and the stored value is
+			// only there so a branch can be looked up without opening every
+			// repository on the machine.
+			if live := repo.Branch(); live != "" && live != projects[index].Branch {
+				projects[index].Branch = live
+				_ = s.store.SetProjectBranch(projects[index].ID, live)
+			}
 		}
 		if projects[index].Branch == "" {
 			projects[index].Branch = "main"

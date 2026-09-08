@@ -945,3 +945,48 @@ td:first-child { color: #e2e8f0; }
     .np__namegrid { grid-template-columns: 1fr; align-items: stretch; }
     .np__head { flex-direction: column; align-items: stretch; }
 }
+
+/* ------------------------------------------------------------ branches ---- */
+
+/* One colour per branch, everywhere it appears, so dev is recognisable on a
+ * card without reading it. main is the trunk and says so in cyan. */
+.branch-chip {
+    display: inline-flex; align-items: center; gap: 5px; flex: none;
+    border: 1px solid transparent; border-radius: 999px; padding: 3px 9px;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .02em;
+}
+.branch-chip i { font-size: 11px; }
+.branch-chip--main    { border-color: rgba(103,232,249,.3); background: rgba(103,232,249,.09); color: #67e8f9; }
+.branch-chip--amber   { border-color: rgba(251,191,36,.3);  background: rgba(251,191,36,.09);  color: #fcd34d; }
+.branch-chip--violet  { border-color: rgba(167,139,250,.3); background: rgba(167,139,250,.09); color: #c4b5fd; }
+.branch-chip--emerald { border-color: rgba(52,211,153,.3);  background: rgba(52,211,153,.09);  color: #6ee7b7; }
+.branch-chip--rose    { border-color: rgba(251,113,133,.3); background: rgba(251,113,133,.09); color: #fda4af; }
+.branch-chip--sky     { border-color: rgba(56,189,248,.3);  background: rgba(56,189,248,.09);  color: #7dd3fc; }
+
+.branch-scope { display: flex; gap: 4px; border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.branch-scope__btn {
+    border: 0; border-radius: 7px; background: transparent; padding: 6px 12px;
+    color: var(--tx-3); cursor: pointer; font-family: var(--sans); font-size: 11.5px;
+    white-space: nowrap; transition: background .16s ease, color .16s ease;
+}
+.branch-scope__btn:hover { color: var(--tx-2); }
+.branch-scope__btn--on { background: rgba(103,232,249,.1); color: var(--cyan); }
+
+.branch-head { display: flex; align-items: center; gap: 12px; }
+.branch-head__title { margin: 0; font-size: 13px; font-weight: 600; color: var(--tx-2); }
+.branch-head__meta { margin: 3px 0 0; font-size: 9.5px; color: var(--tx-4); }
+.branch-list { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.branch-row { min-height: 56px; padding: 0 14px; gap: 12px; }
+.branch-row__main { min-width: 0; flex: 1; }
+.branch-row__name {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--tx-2); font-size: 12.5px; font-weight: 600;
+}
+.branch-row__here {
+    border-radius: 999px; background: rgba(255,255,255,.05); padding: 2px 7px;
+    color: var(--tx-4); font-family: var(--mono); font-size: 8.5px;
+    letter-spacing: .1em; text-transform: uppercase; font-weight: 400;
+}
+.branch-row__meta { display: block; margin-top: 3px; color: var(--tx-4); font-family: var(--mono); font-size: 9.5px; }
+
+@media (max-width: 720px) { .branch-scope { width: 100%; } .branch-scope__btn { flex: 1; } }
