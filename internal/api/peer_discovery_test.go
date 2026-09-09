@@ -74,7 +74,7 @@ func TestRayAnnouncementsConvergeAndRespectTombstones(t *testing.T) {
 	srv := &Server{cfg: cfg, layout: l, hub: events.NewHub()}
 
 	started := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha",
-		Updated: "2026-09-04T10:00:00Z"}
+		Updated: "2026-09-04T10:00:00Z", Generation: 1}
 	srv.mergeRayAnnouncement("network", started)
 	if got := srv.rayAnnouncement("network"); got != started {
 		t.Fatalf("announcement = %+v, want %+v", got, started)
@@ -82,7 +82,7 @@ func TestRayAnnouncementsConvergeAndRespectTombstones(t *testing.T) {
 
 	// An older returning peer cannot resurrect an obsolete head after the
 	// machine that owned it has stopped it.
-	stopped := rayAnnouncement{NodeID: "alpha", Updated: "2026-09-04T10:01:00Z"}
+	stopped := rayAnnouncement{NodeID: "alpha", Updated: "2026-09-04T10:01:00Z", Generation: 2}
 	srv.mergeRayAnnouncement("network", stopped)
 	srv.mergeRayAnnouncement("network", started)
 	if got := srv.rayAnnouncement("network"); got != stopped {
@@ -91,11 +91,47 @@ func TestRayAnnouncementsConvergeAndRespectTombstones(t *testing.T) {
 }
 
 func TestRayAnnouncementTieBreakIsDeterministic(t *testing.T) {
-	at := "2026-09-04T10:00:00.123456789Z"
-	a := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha", Updated: at}
-	b := rayAnnouncement{Head: "100.64.0.2:6379", NodeID: "bravo", Updated: at}
+	a := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha",
+		Updated: "2030-09-04T10:00:00Z", Generation: 7}
+	b := rayAnnouncement{Head: "100.64.0.2:6379", NodeID: "bravo",
+		Updated: "2020-09-04T10:00:00Z", Generation: 7}
 	if !rayAnnouncementNewer(b, a) || rayAnnouncementNewer(a, b) {
-		t.Fatal("simultaneous head announcements do not have one stable winner")
+		t.Fatal("same-generation announcements used clock skew instead of one stable winner")
+	}
+}
+
+func TestRayAnnouncementGenerationBeatsClockSkew(t *testing.T) {
+	old := rayAnnouncement{Head: "100.64.0.1:6379", NodeID: "alpha",
+		Updated: "2030-09-04T10:00:00Z", Generation: 4}
+	stop := rayAnnouncement{NodeID: "bravo",
+		Updated: "2020-09-04T10:00:00Z", Generation: 5}
+	if !rayAnnouncementNewer(stop, old) {
+		t.Fatal("a newer network generation was rejected because its wall clock was behind")
+	}
+}
+
+func TestLocalRayAnnouncementsAdvanceGeneration(t *testing.T) {
+	l, err := config.NewLayout(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.Node.ID = "alpha"
+	cfg.Memberships = []config.MembershipConfig{{ID: "network", Enabled: true}}
+	srv := &Server{cfg: cfg, layout: l, hub: events.NewHub()}
+	if err := srv.announceRayHead("network", "100.64.0.1:6379"); err != nil {
+		t.Fatal(err)
+	}
+	first := srv.rayAnnouncement("network")
+	if err := srv.announceRayHead("network", ""); err != nil {
+		t.Fatal(err)
+	}
+	second := srv.rayAnnouncement("network")
+	if first.Generation != 1 || second.Generation != 2 {
+		t.Fatalf("generations = %d then %d, want 1 then 2", first.Generation, second.Generation)
 	}
 }
 

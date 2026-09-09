@@ -63,6 +63,8 @@ type Server struct {
 	downloads     downloads
 	availability  availability
 	rayMu         sync.RWMutex
+	rayHealthMu   sync.RWMutex
+	rayErrors     map[string]string
 	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
 	remoteClients map[string]peerTransport

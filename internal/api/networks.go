@@ -417,7 +417,7 @@ func (s *Server) joinNetwork(w http.ResponseWriter, r *http.Request) {
 		AccountRole: response.Role, ManagementKey: response.ManagementKey,
 		Coordinator: []string{invite.Endpoint}, Policy: s.cfg.Worker,
 		RayHead: response.Ray.Head, RayHeadNode: response.Ray.NodeID,
-		RayHeadUpdated: response.Ray.Updated}
+		RayHeadUpdated: response.Ray.Updated, RayHeadGeneration: response.Ray.Generation}
 	s.cfg.Memberships = append(s.cfg.Memberships, membership)
 	if s.cfg.ActiveNetwork == "" {
 		s.cfg.SetActiveNetwork(membership.ID)

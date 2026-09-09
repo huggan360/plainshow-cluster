@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -24,9 +25,10 @@ import (
 // on. An empty Head is a tombstone: without it, a machine returning after being
 // offline could resurrect an obsolete head.
 type rayAnnouncement struct {
-	Head    string `json:"head"`
-	NodeID  string `json:"node_id"`
-	Updated string `json:"updated"`
+	Head       string `json:"head"`
+	NodeID     string `json:"node_id"`
+	Updated    string `json:"updated"`
+	Generation uint64 `json:"generation,omitempty"`
 }
 
 // localRayState records what the one Ray process on this machine is serving.
@@ -44,7 +46,8 @@ func (s *Server) rayAnnouncement(networkID string) rayAnnouncement {
 	for _, membership := range s.cfg.Memberships {
 		if membership.ID == networkID {
 			return rayAnnouncement{Head: membership.RayHead,
-				NodeID: membership.RayHeadNode, Updated: membership.RayHeadUpdated}
+				NodeID: membership.RayHeadNode, Updated: membership.RayHeadUpdated,
+				Generation: membership.RayHeadGeneration}
 		}
 	}
 	return rayAnnouncement{}
@@ -69,7 +72,8 @@ func (s *Server) storeRayAnnouncement(networkID string, next rayAnnouncement) (b
 			continue
 		}
 		current := rayAnnouncement{Head: membership.RayHead,
-			NodeID: membership.RayHeadNode, Updated: membership.RayHeadUpdated}
+			NodeID: membership.RayHeadNode, Updated: membership.RayHeadUpdated,
+			Generation: membership.RayHeadGeneration}
 		if !rayAnnouncementNewer(next, current) {
 			return false, nil
 		}
@@ -77,6 +81,7 @@ func (s *Server) storeRayAnnouncement(networkID string, next rayAnnouncement) (b
 		membership.RayHead = next.Head
 		membership.RayHeadNode = next.NodeID
 		membership.RayHeadUpdated = next.Updated
+		membership.RayHeadGeneration = next.Generation
 		if err := config.Save(s.layout, s.cfg); err != nil {
 			*membership = old
 			return false, err
@@ -87,9 +92,10 @@ func (s *Server) storeRayAnnouncement(networkID string, next rayAnnouncement) (b
 }
 
 func (s *Server) announceRayHead(networkID, head string) error {
+	current := s.rayAnnouncement(networkID)
 	_, err := s.storeRayAnnouncement(networkID, rayAnnouncement{
 		Head: head, NodeID: s.cfg.Node.ID,
-		Updated: time.Now().UTC().Format(time.RFC3339Nano),
+		Updated: time.Now().UTC().Format(time.RFC3339Nano), Generation: current.Generation + 1,
 	})
 	return err
 }
@@ -100,10 +106,44 @@ func (s *Server) announceRayHead(networkID, head string) error {
 func (s *Server) publishRayChanged(networkID string) {
 	announcement := s.rayAnnouncement(networkID)
 	s.hub.Publish("ray.changed", map[string]any{
-		"network_id": networkID,
-		"head":       announcement.Head,
-		"running":    announcement.Head != "",
+		"network_id":  networkID,
+		"head":        announcement.Head,
+		"running":     announcement.Head != "",
+		"local_error": s.rayReconcileError(networkID),
 	})
+}
+
+func (s *Server) rayReconcileError(networkID string) string {
+	s.rayHealthMu.RLock()
+	defer s.rayHealthMu.RUnlock()
+	return s.rayErrors[networkID]
+}
+
+// setRayReconcileError keeps automatic worker failures visible without writing
+// the same retry error to the journal every fifteen seconds.
+func (s *Server) setRayReconcileError(networkID, message string) {
+	message = strings.TrimSpace(message)
+	if len(message) > 2000 {
+		message = message[len(message)-2000:]
+	}
+	s.rayHealthMu.Lock()
+	if s.rayErrors == nil {
+		s.rayErrors = make(map[string]string)
+	}
+	old := s.rayErrors[networkID]
+	if message == "" {
+		delete(s.rayErrors, networkID)
+	} else {
+		s.rayErrors[networkID] = message
+	}
+	s.rayHealthMu.Unlock()
+	if old == message {
+		return
+	}
+	if message != "" {
+		log.Printf("ray: automatic join for network %s failed: %s", networkID, message)
+	}
+	s.publishRayChanged(networkID)
 }
 
 func validRayAnnouncement(announcement rayAnnouncement) bool {
@@ -125,6 +165,15 @@ func validRayAnnouncement(announcement rayAnnouncement) bool {
 }
 
 func rayAnnouncementNewer(next, current rayAnnouncement) bool {
+	// Generations are Lamport-style network revisions. Unlike wall clocks they
+	// cannot make two machines retain different heads merely because one PC's
+	// clock is ahead. Generation zero is the legacy timestamp-only format.
+	if next.Generation > 0 || current.Generation > 0 {
+		if next.Generation != current.Generation {
+			return next.Generation > current.Generation
+		}
+		return next.NodeID+"\x00"+next.Head > current.NodeID+"\x00"+current.Head
+	}
 	nextTime, err := time.Parse(time.RFC3339Nano, next.Updated)
 	if err != nil {
 		return false
@@ -146,6 +195,7 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 	status := ray.Probe(r.Context(), ray.DashboardURL(hostOf(announcement.Head), ray.DefaultDashboard))
 	policy, eligible := s.rayPolicy(networkID)
 	local, _ := s.readLocalRayState()
+	localError := s.rayReconcileError(networkID)
 	response := map[string]any{
 		"network_id":    networkID,
 		"installed":     status.Installed,
@@ -160,12 +210,15 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 		"eligible":      eligible,
 		"policy":        policy,
 		"local_running": local.NetworkID == networkID && ray.RunningLocal(r.Context()),
+		"local_error":   localError,
 	}
 	switch {
 	case !status.Installed:
 		response["advice"] = "Install Ray on this machine by re-running the Plainshow installer; it adds the managed runtime automatically."
 	case !eligible:
 		response["advice"] = "This machine is not accepting Ray work for this network. Enable the worker and job policy in Settings."
+	case localError != "":
+		response["advice"] = "This machine could not join Ray automatically: " + localError
 	case announcement.Head == "":
 		response["advice"] = "No Ray cluster is running for this network yet. Start it on any machine; the others attach automatically."
 	case !status.Running:
@@ -347,6 +400,7 @@ func (s *Server) reconcileRay(parent context.Context) {
 	state, _ := s.readLocalRayState()
 	policy, eligible := s.rayPolicy(networkID)
 	if networkID == "" || announcement.Head == "" || !eligible {
+		s.setRayReconcileError(networkID, "")
 		if state.NetworkID != "" || ray.RunningLocal(ctx) {
 			_ = stopLocalRay(ctx)
 			_ = s.clearLocalRayState()
@@ -358,7 +412,12 @@ func (s *Server) reconcileRay(parent context.Context) {
 	}
 
 	address := tailnet.Probe(ctx).Self.Address
-	if address == "" || !ray.Installed(ctx) {
+	if address == "" {
+		s.setRayReconcileError(networkID, "private network address is unavailable")
+		return
+	}
+	if !ray.Installed(ctx) {
+		s.setRayReconcileError(networkID, "managed Ray runtime is not installed")
 		return
 	}
 	role := "worker"
@@ -380,8 +439,11 @@ func (s *Server) reconcileRay(parent context.Context) {
 		err = ray.StartWorker(ctx, address, announcement.Head, policy)
 	}
 	if err == nil {
+		s.setRayReconcileError(networkID, "")
 		_ = s.writeLocalRayState(desired)
 		s.publishRayChanged(networkID)
+	} else {
+		s.setRayReconcileError(networkID, err.Error())
 	}
 }
 

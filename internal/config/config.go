@@ -166,10 +166,11 @@ type MembershipConfig struct {
 	// RayHead is "host:port" of the machine running this network's Ray head.
 	// Ray needs one; recording which machine it is lets the others attach and
 	// lets the interface say plainly where it is.
-	RayHead        string       `yaml:"ray_head,omitempty" json:"ray_head"`
-	RayHeadNode    string       `yaml:"ray_head_node,omitempty" json:"ray_head_node"`
-	RayHeadUpdated string       `yaml:"ray_head_updated,omitempty" json:"ray_head_updated"`
-	Policy         WorkerConfig `yaml:"policy" json:"policy"`
+	RayHead           string       `yaml:"ray_head,omitempty" json:"ray_head"`
+	RayHeadNode       string       `yaml:"ray_head_node,omitempty" json:"ray_head_node"`
+	RayHeadUpdated    string       `yaml:"ray_head_updated,omitempty" json:"ray_head_updated"`
+	RayHeadGeneration uint64       `yaml:"ray_head_generation,omitempty" json:"ray_head_generation"`
+	Policy            WorkerConfig `yaml:"policy" json:"policy"`
 }
 
 // UpdateConfig controls how this node keeps itself current.
