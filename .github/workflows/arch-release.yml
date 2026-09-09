@@ -7,6 +7,10 @@ on:
         description: Existing version tag to package and publish
         required: true
         type: string
+      commit:
+        description: Commit SHA recorded in the package
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -27,7 +31,7 @@ jobs:
       - name: Build native pacman package
         run: |
           useradd --create-home builder
-          commit="$(git -C "$GITHUB_WORKSPACE" rev-parse --short=7 HEAD)"
+          commit="$(printf '%.7s' '${{ inputs.commit }}')"
           chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- env HOME=/home/builder \
             make -C "$GITHUB_WORKSPACE" VERSION="${{ inputs.tag }}" COMMIT="$commit" arch-package
