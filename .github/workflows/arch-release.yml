@@ -27,8 +27,8 @@ jobs:
       - name: Build native pacman package
         run: |
           useradd --create-home builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
           commit="$(git rev-parse --short=7 HEAD)"
+          chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- env HOME=/home/builder \
             make VERSION="${{ inputs.tag }}" COMMIT="$commit" arch-package
 
