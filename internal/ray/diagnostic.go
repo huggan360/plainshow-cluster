@@ -74,7 +74,10 @@ func Diagnose(ctx context.Context, dashboard, id string) ([]CheckResult, error) 
 	command := quote(managedPython()) + " -c " + quote(diagnosticCode)
 	err := jobRequest(ctx, dashboard, "POST", "/api/jobs/", map[string]any{
 		"entrypoint": command, "submission_id": id,
-		"runtime_env": map[string]any{"env_vars": map[string]string{"PATH": managedPath()}},
+		"runtime_env": map[string]any{"env_vars": map[string]string{
+			"PATH":                                   managedPath(),
+			"RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL": pythonVersionMatchLevel,
+		}},
 	}, nil)
 	if err != nil {
 		return nil, err

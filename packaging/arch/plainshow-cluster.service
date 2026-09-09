@@ -6,6 +6,7 @@ Wants=network-online.target tailscaled.service
 [Service]
 Type=simple
 Environment=PATH=/opt/plainshow-cluster/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/bin
+Environment=RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor
 ExecStart=/opt/plainshow-cluster/bin/pscluster serve --root /opt/plainshow-cluster
 Restart=on-failure
 RestartSec=3

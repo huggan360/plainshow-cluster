@@ -135,10 +135,25 @@ func TestSubmitUsesManagedRayJobProtocol(t *testing.T) {
 	for _, want := range []string{"job|submit", "--address=http://100.64.0.1:8265",
 		"--submission-id=plainshow_1", "--working-dir=/work/my project", "--no-wait",
 		`--runtime-env-json={"env_vars":{"PATH":"/opt/plainshow-cluster/runtime/bin:`,
+		`"RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL":"minor"`,
 		"/bin/sh|-lc|python main.py"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("ran %q, missing %q", joined, want)
 		}
+	}
+}
+
+func TestManagedEnvironmentAllowsPythonPatchUpdates(t *testing.T) {
+	t.Setenv("RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL", "patch")
+	found := false
+	for _, entry := range managedEnvironment() {
+		if entry == "RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("managed Ray environment did not allow Python patch-version differences")
 	}
 }
 

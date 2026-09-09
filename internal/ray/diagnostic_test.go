@@ -55,6 +55,9 @@ func TestDiagnosticReturnsWorkerProofAndCleansUp(t *testing.T) {
 	if path, _ := envVars["PATH"].(string); !strings.HasPrefix(path, "/opt/plainshow-cluster/runtime/bin:") {
 		t.Fatalf("diagnostic PATH = %q", path)
 	}
+	if level, _ := envVars["RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL"].(string); level != "minor" {
+		t.Fatalf("diagnostic Python version match level = %q", level)
+	}
 	if results[0].CPU == nil || results[0].CPU.Status != "passed" || results[0].GPU == nil || results[0].GPU.Status != "missing" || len(results[0].Software) != 1 {
 		t.Fatalf("lost informational software checks: %+v", results[0])
 	}

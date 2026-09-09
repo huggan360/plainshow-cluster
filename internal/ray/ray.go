@@ -79,6 +79,8 @@ var fetch = func(ctx context.Context, url string) ([]byte, error) {
 // a system Python offers.
 var managed string
 
+const pythonVersionMatchLevel = "minor"
+
 // UseManaged points the driver at a node-managed Ray installation.
 func UseManaged(path string) { managed = path }
 
@@ -111,19 +113,32 @@ func managedPath() string {
 
 func managedEnvironment() []string {
 	environment := os.Environ()
-	path := managedPath()
-	for i, entry := range environment {
-		if strings.HasPrefix(entry, "PATH=") {
-			environment[i] = "PATH=" + path
-			return environment
+	overrides := map[string]string{
+		"PATH":                                   managedPath(),
+		"RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL": pythonVersionMatchLevel,
+	}
+	for name, value := range overrides {
+		replaced := false
+		for i, entry := range environment {
+			if strings.HasPrefix(entry, name+"=") {
+				environment[i] = name + "=" + value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			environment = append(environment, name+"="+value)
 		}
 	}
-	return append(environment, "PATH="+path)
+	return environment
 }
 
 func runtimeEnvironmentJSON() string {
 	raw, _ := json.Marshal(map[string]any{
-		"env_vars": map[string]string{"PATH": managedPath()},
+		"env_vars": map[string]string{
+			"PATH":                                   managedPath(),
+			"RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL": pythonVersionMatchLevel,
+		},
 	})
 	return string(raw)
 }

@@ -408,6 +408,7 @@ if [ "$(id -u)" -eq 0 ] && [ -d /etc/systemd/system ]; then
         echo 'Type=simple'
         if [ "$COMPONENT" = node ]; then
             echo "Environment=PATH=$ROOT/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+            echo 'Environment=RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL=minor'
         fi
         echo "ExecStart=$ROOT/bin/$BINARY_NAME serve --root $ROOT"
         echo 'Restart=on-failure'
