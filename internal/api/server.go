@@ -65,6 +65,8 @@ type Server struct {
 	rayMu         sync.RWMutex
 	rayHealthMu   sync.RWMutex
 	rayErrors     map[string]string
+	rayRepairMu   sync.RWMutex
+	rayRepairs    map[string]rayRepairStatus
 	rayActionMu   sync.Mutex
 	tailnetRetry  time.Time
 	remoteClients map[string]peerTransport
@@ -124,6 +126,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{name}/ray/preset", s.createRayPreset)
 	mux.HandleFunc("POST /api/ray/start", s.startRay)
 	mux.HandleFunc("POST /api/ray/stop", s.stopRay)
+	mux.HandleFunc("GET /api/ray/repair", s.getRayRepair)
+	mux.HandleFunc("POST /api/ray/repair", s.startRayRepair)
 	mux.HandleFunc("GET /api/ray/jobs", s.getRayJobs)
 	mux.HandleFunc("POST /api/ray/jobs", s.submitRayJob)
 	mux.HandleFunc("GET /api/ray/jobs/{id}/logs", s.rayJobLogs)

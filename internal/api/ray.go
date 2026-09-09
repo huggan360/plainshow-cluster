@@ -196,6 +196,7 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 	policy, eligible := s.rayPolicy(networkID)
 	local, _ := s.readLocalRayState()
 	localError := s.rayReconcileError(networkID)
+	repair := s.rayRepair(networkID)
 	response := map[string]any{
 		"network_id":    networkID,
 		"installed":     status.Installed,
@@ -211,6 +212,8 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 		"policy":        policy,
 		"local_running": local.NetworkID == networkID && ray.RunningLocal(r.Context()),
 		"local_error":   localError,
+		"repair_needed": localError != "",
+		"repair":        repair,
 	}
 	switch {
 	case !status.Installed:

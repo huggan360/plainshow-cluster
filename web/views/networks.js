@@ -185,9 +185,11 @@ async function connectedTab(data) {
     const networkID = encodeURIComponent(data.network.id);
     const ray = await api(`/api/ray?network_id=${networkID}`)
         .catch((error) => ({ detail: error.message, network_id: data.network.id }));
+    if (ray.repair_needed) offerRayRepair(data.network, ray);
     return el('div', {},
         el('section', { class: 'ps-metrics', style: 'grid-template-columns:repeat(3,minmax(0,1fr))' },
             signalMetric(data), gpuSummaryMetric(gpus), rayMetric(data, ray)),
+        ray.repair_needed ? rayRepairNotice(data.network, ray) : null,
         el('div', { class: 'detail-grid' },
             el('section', { class: 'panel' },
                 el('div', { class: 'panel__head' },
@@ -208,6 +210,76 @@ async function connectedTab(data) {
             data.projects.length
                 ? el('div', { class: 'ps-card-grid' }, ...data.projects.map((project) => projectCard(project, data)))
                 : emptyBlock('bx-layer', 'Create a local project under Projects.')));
+}
+
+const offeredRayRepairs = new Set();
+
+function offerRayRepair(network, ray) {
+    const key = `${network.id}:${ray.local_error}`;
+    const modalHost = document.getElementById('modal');
+    if (offeredRayRepairs.has(key) || modalHost?.childElementCount) return;
+    offeredRayRepairs.add(key);
+    setTimeout(() => rayRepairDialog(network, ray.local_error), 0);
+}
+
+function rayRepairNotice(network, ray) {
+    return el('section', { class: 'panel ray-repair-notice', role: 'alert' },
+        el('i', { class: 'bx bx-error-circle' }),
+        el('span', { class: 'grow' },
+            el('strong', {}, 'This machine could not join Ray automatically'),
+            el('small', {}, ray.local_error || 'The managed Ray environment needs attention.')),
+        el('button', { class: 'btn btn--primary', onclick: () => rayRepairDialog(network, ray.local_error) },
+            'Repair Ray'));
+}
+
+function rayRepairDialog(network, reason) {
+    const fill = el('span', { class: 'ray-repair-progress__fill', style: 'width:0%' });
+    const percent = el('strong', {}, '0%');
+    const stage = el('strong', {}, 'Ready to repair');
+    const detail = el('p', { class: 'muted' },
+        'Plainshow will check its private Python environment, repair Ray if needed, and retry joining automatically.');
+    const error = el('pre', { class: 'ray-repair-error' }, reason || 'Automatic Ray join failed.');
+    const body = el('div', { class: 'ray-repair' },
+        el('p', { class: 'ray-repair__intro' },
+            `Repair Ray on this machine for ${network.name}. System Python and your project environments are not changed.`),
+        error,
+        el('div', { class: 'ray-repair-progress', role: 'progressbar', 'aria-valuemin': '0',
+            'aria-valuemax': '100', 'aria-valuenow': '0' }, fill),
+        el('div', { class: 'ray-repair-progress__labels' }, stage, percent), detail);
+    const draw = (status) => {
+        const value = Math.max(0, Math.min(100, Number(status.percent) || 0));
+        fill.style.width = `${value}%`;
+        fill.parentElement.setAttribute('aria-valuenow', String(value));
+        percent.textContent = `${value}%`;
+        stage.textContent = status.stage || 'Repairing Ray';
+        detail.textContent = status.detail || '';
+        error.textContent = status.error || '';
+        error.hidden = !status.error;
+    };
+    modal({
+        title: 'Repair Ray connection', confirmLabel: 'Install and repair', body: () => body,
+        onConfirm: async (close) => {
+            let status = await api(`/api/ray/repair?network_id=${encodeURIComponent(network.id)}`,
+                { method: 'POST', body: {} });
+            draw(status);
+            while (!status.done) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+                status = await api(`/api/ray/repair?network_id=${encodeURIComponent(network.id)}`);
+                draw(status);
+            }
+            if (!status.ok) throw new Error(status.error || 'Ray repair failed.');
+            close();
+            await refresh();
+            modal({
+                title: 'Ray is ready', confirmLabel: 'Close',
+                body: () => el('div', { class: 'ray-repair ray-repair--done' },
+                    el('i', { class: 'bx bx-check-circle' }),
+                    el('strong', {}, 'This machine joined the Ray cluster.'),
+                    el('p', { class: 'muted' }, 'Close this message and run the network test again.')),
+                onConfirm: async (finish) => finish(),
+            });
+        },
+    });
 }
 
 function signalMetric(data) {

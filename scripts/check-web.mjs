@@ -169,7 +169,8 @@ for (const root of ROOTS) {
 {
     const networks = readFileSync('web/views/networks.js', 'utf8');
     for (const phrase of ['ray-toggle__surface', 'ray-toggle__label',
-        "networkRunning ? 'Ray on' : 'Ray off'"]) {
+        "networkRunning ? 'Ray on' : 'Ray off'", 'rayRepairDialog',
+        "confirmLabel: 'Install and repair'", "role: 'progressbar'"]) {
         if (!networks.includes(phrase)) {
             problems.push(`web/views/networks.js is missing its Ray button contract: ${phrase}`);
         }
