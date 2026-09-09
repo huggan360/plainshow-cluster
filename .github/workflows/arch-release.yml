@@ -27,14 +27,15 @@ jobs:
       - name: Build native pacman package
         run: |
           useradd --create-home builder
-          commit="$(git rev-parse --short=7 HEAD)"
+          commit="$(git -C "$GITHUB_WORKSPACE" rev-parse --short=7 HEAD)"
           chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- env HOME=/home/builder \
-            make VERSION="${{ inputs.tag }}" COMMIT="$commit" arch-package
+            make -C "$GITHUB_WORKSPACE" VERSION="${{ inputs.tag }}" COMMIT="$commit" arch-package
 
       - name: Verify pacman package metadata
         run: |
           set -eu
+          cd "$GITHUB_WORKSPACE"
           version="$(printf '%s' '${{ inputs.tag }}' | sed 's/^v//; s/[^[:alnum:].+_]/./g')"
           package="dist/plainshow-cluster-$version-1-x86_64.pkg.tar.zst"
           test -s "$package"
