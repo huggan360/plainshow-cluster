@@ -6,7 +6,7 @@ import { vendorMark } from '../lib/vendors.js';
 
 export async function renderHome(host) {
     await refresh();
-    const page = el('div', { class: 'page' });
+    const page = el('div', { class: 'page ps-home-page' });
     mount(host, page);
     let rayJobs = [];
 
@@ -44,16 +44,7 @@ function content(rayJobs) {
             projectMetric(overview), networkMetric(overview), gpuMetric(gpus), systemMetric(system)),
         el('div', { class: 'ps-home-lower' },
             activityPanel(overview, rayJobs),
-            el('section', {},
-                el('div', { class: 'section-heading' },
-                    el('strong', {}, 'Your networks'),
-                    el('a', { href: '#/networks' }, 'View all ',
-                        el('i', { class: 'bx bx-right-arrow-alt', 'aria-hidden': 'true' }))),
-                overview.networks.length
-                    ? el('div', { class: 'ps-card-grid' },
-                        ...overview.networks.slice(0, 9).map(networkPreview))
-                    : emptyPanel('bx-network-chart', 'No networks yet',
-                        'Create or join a network to connect machines for project runs.'))),
+            networksPanel(overview)),
     ];
 }
 
@@ -151,12 +142,75 @@ function activityPanel(overview, rayJobs) {
         })),
     ].sort((a, b) => b.at - a.at).slice(0, 12);
 
-    return el('section', { class: 'ps-server-card', 'aria-label': 'Recent activity' },
-        el('div', { class: 'ps-server-card__surface' }, activity.length
-            ? el('div', { class: 'ps-notice-list' }, ...activity.map(activityRow))
-            : el('div', { class: 'empty', style: 'min-height:176px' },
-                el('i', { class: 'bx bx-broadcast empty__ico' }),
-                el('span', { class: 'empty__text' }, 'Commits and jobs will appear here.'))));
+    return el('section', { class: 'ps-server-card ps-home-panel', 'aria-label': 'Notifications' },
+        el('div', { class: 'ps-server-card__surface ps-home-panel__surface' },
+            activity.length
+                ? notificationList(activity)
+                : [
+                    el('div', { class: 'ps-home-panel__head' },
+                        el('strong', {}, 'Notifications')),
+                    el('div', { class: 'empty ps-home-panel__empty' },
+                        el('i', { class: 'bx bx-broadcast empty__ico' }),
+                        el('span', { class: 'empty__text' }, 'Commits and jobs will appear here.')),
+                ]));
+}
+
+function notificationList(activity) {
+    const rows = activity.map(activityRow);
+    const list = el('div', { class: 'ps-notice-list ps-notice-list--snapping' },
+        el('div', { class: 'ps-home-panel__head' },
+            el('strong', {}, 'Notifications')),
+        ...rows);
+    let wheelLocked = false;
+
+    const rowTop = (row, index) => Number(row.offsetTop) || 62 + index * 74;
+    const firstVisible = () => {
+        const target = list.scrollTop + 8;
+        let nearest = 0;
+        let distance = Infinity;
+        rows.forEach((row, index) => {
+            const candidate = Math.abs(rowTop(row, index) - target);
+            if (candidate < distance) {
+                distance = candidate;
+                nearest = index;
+            }
+        });
+        return nearest;
+    };
+    const updateWindow = () => {
+        if (!rows.length) return;
+        const first = firstVisible();
+        const bottom = list.scrollTop + (list.clientHeight || 280) - 8;
+        let last = first;
+        for (let index = first; index < rows.length; index++) {
+            if (rowTop(rows[index], index) >= bottom) break;
+            last = index;
+        }
+        rows.forEach((row, index) => {
+            row.classList.toggle('ps-notice--first', index === first);
+            row.classList.toggle('ps-notice--last', index === last);
+        });
+    };
+
+    list.addEventListener('scroll', updateWindow, { passive: true });
+    list.addEventListener('wheel', (event) => {
+        if (Math.abs(event.deltaY) < 2 || wheelLocked) {
+            if (wheelLocked) event.preventDefault();
+            return;
+        }
+        const current = firstVisible();
+        const next = Math.max(0, Math.min(rows.length - 1,
+            current + (event.deltaY > 0 ? 1 : -1)));
+        const target = event.deltaY < 0 && current === 0 ? 0 : rowTop(rows[next], next) - 8;
+        if (target === list.scrollTop) return;
+        event.preventDefault();
+        wheelLocked = true;
+        list.scrollTo({ top: target, behavior: 'smooth' });
+        setTimeout(() => { wheelLocked = false; updateWindow(); }, 220);
+    }, { passive: false });
+
+    queueMicrotask(updateWindow);
+    return list;
 }
 
 function activityRow(item) {
@@ -174,20 +228,42 @@ function activityRow(item) {
         el('span', { class: 'ps-notice__action' }, el('i', { class: 'bx bx-right-arrow-alt' })));
 }
 
+function networksPanel(overview) {
+    return el('section', {
+        class: 'ps-server-card ps-server-card--networks ps-home-panel',
+        'aria-label': 'Your networks',
+    }, el('div', { class: 'ps-server-card__surface ps-home-panel__surface' },
+        el('div', { class: 'ps-home-panel__head' },
+            el('strong', {}, 'Your networks')),
+        overview.networks.length
+            ? el('div', { class: 'ps-home-network-list' },
+                ...overview.networks.slice(0, 7).map(networkPreview))
+            : el('div', { class: 'empty ps-home-panel__empty' },
+                el('i', { class: 'bx bx-network-chart empty__ico' }),
+                el('strong', {}, 'No networks yet'),
+                el('span', { class: 'empty__text' },
+                    'Create or join a network to connect machines for project runs.')),
+        el('a', { class: 'ps-home-view-more', href: '#/networks' },
+            el('span', {}, 'View more'),
+            el('i', { class: 'bx bx-right-arrow-alt', 'aria-hidden': 'true' }))));
+}
+
 function networkPreview(network) {
-    return el('a', { class: 'panel ps-project-card', href: `#/networks/${encodeURIComponent(network.id)}` },
-        el('div', { class: 'ps-project-card__top' },
-            el('span', { class: 'ps-project-mark ps-network-mark' }, el('i', { class: 'bx bx-network-chart' })),
-            el('span', { class: 'ps-project-card__copy' },
-                el('strong', {}, network.name), el('span', {}, network.role || 'member')),
-            el('span', { class: 'ps-project-card__status' },
-                el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
-                network.enabled ? 'Ready' : 'Paused')),
-        el('div', { class: 'ps-project-card__foot' },
+    return el('a', {
+        class: 'ps-home-network', href: `#/networks/${encodeURIComponent(network.id)}`,
+    },
+        el('span', { class: 'ps-project-mark ps-network-mark ps-home-network__mark' },
+            el('i', { class: 'bx bx-network-chart' })),
+        el('span', { class: 'ps-home-network__main' },
+            el('strong', {}, network.name),
+            el('span', {}, network.role || 'member')),
+        el('span', { class: 'ps-home-network__stats' },
             el('span', {}, el('i', { class: 'bx bx-devices' }), ` ${network.node_count}`),
-            el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count}`),
-            network.active ? el('span', { class: 'chip chip--good push' }, 'Active for runs') : null,
-            el('i', { class: 'bx bx-right-arrow-alt' })));
+            el('span', {}, el('i', { class: 'bx bx-chip' }), ` ${network.gpu_count}`)),
+        el('span', { class: 'ps-home-network__state' },
+            el('span', { class: `ps-status-dot ${network.enabled ? 'ps-status-dot--online' : 'ps-status-dot--offline'}` }),
+            network.active ? 'Active' : (network.enabled ? 'Ready' : 'Paused')),
+        el('i', { class: 'bx bx-right-arrow-alt ps-home-network__arrow', 'aria-hidden': 'true' }));
 }
 
 function gpuInventory(overview, system) {
@@ -217,9 +293,4 @@ function percent(value, total) {
 function timestamp(value) {
     const numeric = Number(value || 0);
     return numeric > 0 && numeric < 1e12 ? numeric * 1000 : numeric;
-}
-
-function emptyPanel(icon, title, detail) {
-    return el('div', { class: 'panel empty' }, el('i', { class: `bx ${icon} empty__ico` }),
-        el('strong', {}, title), el('span', { class: 'empty__text' }, detail));
 }

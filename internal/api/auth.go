@@ -352,10 +352,9 @@ func (s *Server) usesCentralAccounts() bool {
 
 func (s *Server) centralRegister(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Username       string `json:"username"`
-		DisplayName    string `json:"display_name"`
-		Password       string `json:"password"`
-		BootstrapToken string `json:"bootstrap_token"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
@@ -369,7 +368,7 @@ func (s *Server) centralRegister(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 	response, err := client.Register(ctx, strings.TrimSpace(body.Username),
-		strings.TrimSpace(body.DisplayName), body.Password, strings.TrimSpace(body.BootstrapToken))
+		strings.TrimSpace(body.DisplayName), body.Password)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
@@ -401,7 +400,8 @@ func (s *Server) centralLogin(w http.ResponseWriter, r *http.Request) {
 	s.finishCentralAuth(w, r, response)
 }
 
-func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request, response accountclient.AuthResponse) {
+func (s *Server) finishCentralAuth(w http.ResponseWriter, r *http.Request,
+	response accountclient.AuthResponse) {
 	if response.Account.ID == "" || response.Token == "" {
 		fail(w, http.StatusBadGateway, "The Account Server returned an incomplete identity.")
 		return

@@ -233,8 +233,9 @@ Assessed by running it, not by reading commit messages.
 
 The main enterprise service is deployed on this Pi at
 `https://clusteradmin.plainshow.se`, reverse-proxied by its own Apache vhost to
-`127.0.0.1:10002`. Its systemd unit is enabled. The first administrator still
-needs to register using the protected bootstrap output described in `CODEX.md`.
+`127.0.0.1:10002`. Its systemd unit is enabled. The first account registers
+normally and is promoted automatically; there is no first-account code or
+bootstrap token.
 That same service issues one-time Headscale enrollment to authenticated
 PlainShow accounts. Headscale is deployed separately at
 `https://tailnet.plainshow.se` on loopback port `10004`; it is coordination
@@ -296,10 +297,10 @@ editing is the only data-plane feature it adds; Git works without it.
 
 8. ~~**Plainshow Account Server.**~~ Done. `pscluster-admin` has its own root and
    SQLite database for global accounts, registration, login, device check-ins,
-   and aggregate environment statistics. The first administrator needs a
-   one-time bootstrap token, account sessions are stored as hashes, and admins
-   can disable accounts from the embedded page. Its public URL is deployment
-   config, not compiled into clients. The main deployment is
+   and aggregate environment statistics. The first account becomes the
+   administrator automatically, account sessions are stored as hashes, and
+   admins can disable accounts from the embedded page. Its public URL is
+   deployment config, not compiled into clients. The main deployment is
    `clusteradmin.plainshow.se` on the Plainshow Raspberry Pi.
 9. ~~**Nodes sign in through the Account Server.**~~ Done. Nodes register or sign
    in against the configured authority, migrate legacy local ownership to the
@@ -343,7 +344,7 @@ pscluster-admin init  --root /tmp/acct --port 9988 --registration-open true
 pscluster-admin serve --root /tmp/acct &
 pscluster      init  --root /tmp/node --port 9977
 # point account.server at http://127.0.0.1:9988, then serve, then:
-#   POST /api/auth/setup with the bootstrap token   -> signed in
+#   POST /api/auth/setup with account details       -> signed in
 #   kill the admin process
 #   GET  /api/overview   -> 200
 #   POST /api/projects   -> 201

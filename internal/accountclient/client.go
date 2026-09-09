@@ -84,11 +84,10 @@ func New(endpoint string) (*Client, error) {
 }
 
 // Register creates a global identity.
-func (c *Client) Register(ctx context.Context, username, displayName, password, bootstrap string) (AuthResponse, error) {
+func (c *Client) Register(ctx context.Context, username, displayName, password string) (AuthResponse, error) {
 	var out AuthResponse
 	err := c.call(ctx, http.MethodPost, "/api/auth/register", "", map[string]string{
 		"username": username, "display_name": displayName, "password": password,
-		"bootstrap_token": bootstrap,
 	}, &out)
 	return out, err
 }

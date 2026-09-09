@@ -143,3 +143,22 @@ func TestAdoptGlobalAccountMovesNetworkOwnershipNotDeviceIdentity(t *testing.T) 
 		t.Fatalf("device identity moved with account: %#v, %v", node, nodeErr)
 	}
 }
+
+func TestAdoptGlobalAccountReplacesMatchingLegacyUsername(t *testing.T) {
+	st := open(t)
+	legacy := Account{ID: "device", Username: "AlbInc", DisplayName: "Albin"}
+	if err := st.UpsertAccount(legacy); err != nil {
+		t.Fatal(err)
+	}
+	global := Account{ID: "account", Username: "albinc", DisplayName: "Albin"}
+	if err := st.AdoptGlobalAccount(legacy.ID, global); err != nil {
+		t.Fatalf("adopt account with matching username: %v", err)
+	}
+	got, err := st.Account(global.ID)
+	if err != nil || got.Username != global.Username {
+		t.Fatalf("global account = %#v, %v", got, err)
+	}
+	if _, err := st.Account(legacy.ID); err != ErrNotFound {
+		t.Fatalf("legacy account remains: %v", err)
+	}
+}

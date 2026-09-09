@@ -12,6 +12,8 @@
 (function demoNode() {
     const now = () => new Date().toISOString();
     const ago = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
+    const loginDemo = new URLSearchParams(window.location.search || '').has('login');
+    let authenticated = !loginDemo;
 
     const state = {
         networks: [
@@ -121,7 +123,11 @@
         networks: state.networks,
         networks_error: '',
         active_network: 'net-lab',
-        machines: [], projects: state.projects,
+        machines: [{
+            network_id: 'net-lab', node_id: 'd-stationary', name: 'hugo-stationary',
+            os: 'linux', arch: 'amd64', address: 'https://100.64.0.1:41297',
+            capacity: system, is_self: true, last_seen: now(),
+        }], projects: state.projects,
         active_jobs: state.jobs, recent_jobs: [],
         recent_commits: [
             { project: 'vision', branch: 'main', subject: 'Shorter warmup',
@@ -137,7 +143,11 @@
 
     // routes are matched in order; the first pattern that matches answers.
     const routes = [
-        ['GET', /^\/api\/auth\/status$/, () => ({ enabled: true, authenticated: true, central: true })],
+        ['GET', /^\/api\/auth\/status$/, () => ({ enabled: true, authenticated, central: true })],
+        ['POST', /^\/api\/auth\/(?:login|setup)$/, () => {
+            authenticated = true;
+            return { authenticated: true, networks_adopted: 0 };
+        }],
         ['GET', /^\/api\/overview$/, overview],
         ['GET', /^\/api\/sysinfo$/, () => system],
         ['GET', /^\/api\/networks$/, () => ({ active: 'net-lab', networks: state.networks })],
@@ -271,7 +281,9 @@
     window.addEventListener('DOMContentLoaded', () => {
         const banner = document.createElement('div');
         banner.className = 'demo-banner';
-        banner.textContent = 'Demonstration — sample data, nothing here is a real machine';
+        banner.textContent = loginDemo
+            ? 'Login demonstration — use any username and a 10+ character password; nothing is saved'
+            : 'Demonstration — sample data, nothing here is a real machine';
         document.body.append(banner);
     });
 

@@ -5,7 +5,7 @@ const DEMO = process.env.DEMO_DIR || 'dist/demo';
 const listeners = {};
 globalThis.window = {
     addEventListener: (name, fn) => { listeners[name] = fn; },
-    location: { protocol: 'http:', host: 'demo' },
+    location: { protocol: 'http:', host: 'demo', search: '?login=1' },
 };
 globalThis.document = { createElement: () => ({ classList: {}, append() {} }), body: { append() {} } };
 globalThis.Response = class {
@@ -17,6 +17,22 @@ globalThis.Response = class {
 
 const source = await import('node:fs').then((fs) => fs.readFileSync(`${DEMO}/demo-api.js`, 'utf8'));
 new Function('window', 'document', 'Response', source)(window, document, Response);
+
+// The login-specific entry point starts signed out. Both signing in and
+// creating an account establish the demo session, matching the real gate's
+// automatic entry into the workspace without creating anything durable.
+const signedOut = await window.fetch('/api/auth/status');
+if (signedOut.status !== 200 || (await signedOut.json()).authenticated !== false) {
+    console.log('FAIL: login demo did not start signed out');
+    process.exit(1);
+}
+const setup = await window.fetch('/api/auth/setup', {
+    method: 'POST', body: JSON.stringify({ username: 'demo', password: 'demo-password' }),
+});
+if (setup.status !== 200 || (await setup.json()).authenticated !== true) {
+    console.log('FAIL: login demo account creation did not sign in');
+    process.exit(1);
+}
 
 const endpoints = [
     ['/api/auth/status', (d) => d.authenticated === true],

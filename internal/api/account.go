@@ -9,14 +9,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
+	"github.com/huggan360/plainshow-cluster/internal/accountserver"
 	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/store"
+	"github.com/huggan360/plainshow-cluster/internal/sysinfo"
 )
 
 // errNoAuthority means this node has no account service to ask.
@@ -70,16 +73,36 @@ func (s *Server) getDevices(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		// The node knows one thing the account service does not: which of these
-		// machines is the one you are looking at.
+		// machines is the one you are looking at. It also has the authoritative
+		// live inventory for that machine. This keeps an older account service,
+		// which returned only gpu_count, from turning known cores, memory and the
+		// GPU name into dashes in the local device card.
+		enrichThisDevice(devices, s.cfg.Node.ID, sysinfo.Probe(s.layout.Root))
 		for i := range devices {
-			if devices[i].ID == s.cfg.Node.ID {
-				devices[i].Online = true
-			} else if online, known := s.observedDevice(devices[i].ID); known {
-				devices[i].Online = online
+			if devices[i].ID != s.cfg.Node.ID {
+				if online, known := s.observedDevice(devices[i].ID); known {
+					devices[i].Online = online
+				}
 			}
 		}
 		return map[string]any{"devices": devices, "this_device": s.cfg.Node.ID}, nil
 	})
+}
+
+func enrichThisDevice(devices []accountserver.AccountDevice, nodeID string, info sysinfo.Info) {
+	for i := range devices {
+		if devices[i].ID != nodeID {
+			continue
+		}
+		devices[i].Online = true
+		devices[i].OS = info.OS
+		devices[i].Arch = info.Arch
+		devices[i].CPUCores = info.CPUCores
+		devices[i].RAMTotalMB = info.RAMTotalMB
+		devices[i].GPUCount = len(info.GPUs)
+		devices[i].GPUs = json.RawMessage(marshalGPUs(info.GPUs))
+		return
+	}
 }
 
 func (s *Server) putDeviceNetwork(w http.ResponseWriter, r *http.Request) {

@@ -17,16 +17,10 @@ func openTestStore(t *testing.T) *Store {
 	return store
 }
 
-func TestBootstrapCreatesExactlyOneAdministrator(t *testing.T) {
+func TestFirstAccountBecomesAdministratorWithoutBootstrap(t *testing.T) {
 	store := openTestStore(t)
-	if err := store.InitialiseBootstrap(TokenHash("secret")); err != nil {
-		t.Fatal(err)
-	}
 	first := Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}
-	if err := store.CreateAccount(first, TokenHash("wrong"), true); !errors.Is(err, ErrBootstrapToken) {
-		t.Fatalf("wrong bootstrap error = %v", err)
-	}
-	if err := store.CreateAccount(first, TokenHash("secret"), false); err != nil {
+	if err := store.CreateAccount(first, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.AccountByUsername("HUGO")
@@ -34,15 +28,14 @@ func TestBootstrapCreatesExactlyOneAdministrator(t *testing.T) {
 		t.Fatalf("first account = %#v, %v", got, err)
 	}
 	second := Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "hash"}
-	if err := store.CreateAccount(second, "", false); !errors.Is(err, ErrRegistrationClosed) {
+	if err := store.CreateAccount(second, false); !errors.Is(err, ErrRegistrationClosed) {
 		t.Fatalf("closed registration error = %v", err)
 	}
 }
 
 func TestSessionsAndDisabledAccounts(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("secret"))
-	if err := store.CreateAccount(Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}, TokenHash("secret"), true); err != nil {
+	if err := store.CreateAccount(Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CreateSession("session", "a1", time.Now().Add(time.Hour)); err != nil {
@@ -61,11 +54,10 @@ func TestSessionsAndDisabledAccounts(t *testing.T) {
 
 func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("secret"))
-	if err := store.CreateAccount(Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}, TokenHash("secret"), true); err != nil {
+	if err := store.CreateAccount(Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateAccount(Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "hash"}, "", true); err != nil {
+	if err := store.CreateAccount(Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
 	registered, err := store.RegisterNetwork("a1", NetworkRegistration{ID: "network", Name: "Lab",
@@ -99,9 +91,8 @@ func TestCheckInFeedsGlobalStatsAndPreservesOwnership(t *testing.T) {
 
 func TestNetworkRegistryRequiresKeyAndRecordsMembers(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("secret"))
-	_ = store.CreateAccount(Account{ID: "a1", Username: "one", DisplayName: "One", PasswordHash: "hash"}, TokenHash("secret"), true)
-	_ = store.CreateAccount(Account{ID: "a2", Username: "two", DisplayName: "Two", PasswordHash: "hash"}, "", true)
+	_ = store.CreateAccount(Account{ID: "a1", Username: "one", DisplayName: "One", PasswordHash: "hash"}, true)
+	_ = store.CreateAccount(Account{ID: "a2", Username: "two", DisplayName: "Two", PasswordHash: "hash"}, true)
 	key := "0123456789012345678901234567890123456789"
 	if _, err := store.RegisterNetwork("a1", NetworkRegistration{ID: "n", Name: "Lab", ManagementKey: key, Role: "member"}); err != nil {
 		t.Fatal(err)
@@ -126,8 +117,7 @@ func TestNetworkRegistryRequiresKeyAndRecordsMembers(t *testing.T) {
 
 func TestDeletedNetworkCannotBeRecreatedByAStaleDevice(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("secret"))
-	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("secret"), true)
+	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, true)
 	key := "0123456789012345678901234567890123456789"
 	registration := NetworkRegistration{ID: "old-network", Name: "Old", ManagementKey: key, Role: "owner"}
 	if _, err := store.RegisterNetwork("owner", registration); err != nil {
@@ -148,10 +138,9 @@ func TestDeletedNetworkCannotBeRecreatedByAStaleDevice(t *testing.T) {
 
 func TestNetworkAdministratorsCanChangeAndRemoveMembers(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("secret"))
-	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("secret"), true)
-	_ = store.CreateAccount(Account{ID: "admin", Username: "admin", DisplayName: "Admin", PasswordHash: "hash"}, "", true)
-	_ = store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, "", true)
+	_ = store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, true)
+	_ = store.CreateAccount(Account{ID: "admin", Username: "admin", DisplayName: "Admin", PasswordHash: "hash"}, true)
+	_ = store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, true)
 	key := "0123456789012345678901234567890123456789"
 	if _, err := store.RegisterNetwork("owner", NetworkRegistration{ID: "network", Name: "Lab", ManagementKey: key, Role: "owner"}); err != nil {
 		t.Fatal(err)
@@ -189,15 +178,12 @@ func TestNetworkAdministratorsCanChangeAndRemoveMembers(t *testing.T) {
 // not one row wider.
 func TestNetworksForAccountIsScopedToMembership(t *testing.T) {
 	store := openTestStore(t)
-	if err := store.InitialiseBootstrap(TokenHash("secret")); err != nil {
-		t.Fatal(err)
-	}
 	hugo := Account{ID: "a1", Username: "huggan360", DisplayName: "Hugo", PasswordHash: "h"}
-	if err := store.CreateAccount(hugo, TokenHash("secret"), false); err != nil {
+	if err := store.CreateAccount(hugo, false); err != nil {
 		t.Fatal(err)
 	}
 	albin := Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "h"}
-	if err := store.CreateAccount(albin, "", true); err != nil {
+	if err := store.CreateAccount(albin, true); err != nil {
 		t.Fatal(err)
 	}
 

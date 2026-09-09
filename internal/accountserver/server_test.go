@@ -29,9 +29,6 @@ func (f *fakeTailnetProvisioner) Disable(_ context.Context, accountID string) er
 
 func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 	store := openTestStore(t)
-	if err := store.InitialiseBootstrap(TokenHash("bootstrap")); err != nil {
-		t.Fatal(err)
-	}
 	web := fstest.MapFS{"index.html": {Data: []byte("admin")}}
 	server := NewServer(&Config{RegistrationOpen: true}, store, web).Handler()
 	indexRequest := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -48,7 +45,7 @@ func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 	}
 
 	register := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
-		`{"username":"hugo","display_name":"Hugo","password":"a-long-enough-password","bootstrap_token":"bootstrap"}`))
+		`{"username":"hugo","display_name":"Hugo","password":"a-long-enough-password"}`))
 	register.Header.Set("Content-Type", "application/json")
 	registered := httptest.NewRecorder()
 	server.ServeHTTP(registered, register)
@@ -81,11 +78,10 @@ func TestRegisterLoginAndAdminDashboard(t *testing.T) {
 
 func TestOrdinaryAccountCannotReadGlobalDirectory(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("bootstrap"))
-	if err := store.CreateAccount(Account{ID: "admin", Username: "admin", DisplayName: "Admin", PasswordHash: "hash"}, TokenHash("bootstrap"), true); err != nil {
+	if err := store.CreateAccount(Account{ID: "admin", Username: "admin", DisplayName: "Admin", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, "", true); err != nil {
+	if err := store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CreateSession("member-token", "member", time.Now().Add(time.Hour)); err != nil {
@@ -104,11 +100,10 @@ func TestOrdinaryAccountCannotReadGlobalDirectory(t *testing.T) {
 
 func TestControllerRegistryIsSeparateFromAccountServer(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("bootstrap"))
-	if err := store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, TokenHash("bootstrap"), true); err != nil {
+	if err := store.CreateAccount(Account{ID: "owner", Username: "owner", DisplayName: "Owner", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, "", true); err != nil {
+	if err := store.CreateAccount(Account{ID: "member", Username: "member", DisplayName: "Member", PasswordHash: "hash"}, true); err != nil {
 		t.Fatal(err)
 	}
 	_ = store.CreateSession("owner-token", "owner", time.Now().Add(time.Hour))
@@ -190,9 +185,8 @@ func TestControllerRegistryIsSeparateFromAccountServer(t *testing.T) {
 
 func TestPlainShowSessionMintsOneTimeTailnetEnrollment(t *testing.T) {
 	store := openTestStore(t)
-	_ = store.InitialiseBootstrap(TokenHash("bootstrap"))
 	account := Account{ID: "account-1", Username: "hugo", DisplayName: "Hugo", PasswordHash: "hash"}
-	if err := store.CreateAccount(account, TokenHash("bootstrap"), true); err != nil {
+	if err := store.CreateAccount(account, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CreateSession("plainshow-session", account.ID, time.Now().Add(time.Hour)); err != nil {
@@ -223,7 +217,7 @@ func TestPlainShowSessionMintsOneTimeTailnetEnrollment(t *testing.T) {
 		t.Fatalf("provisioned account = %+v", provisioner.account)
 	}
 	member := Account{ID: "account-2", Username: "friend", DisplayName: "Friend", PasswordHash: "hash"}
-	if err := store.CreateAccount(member, "", true); err != nil {
+	if err := store.CreateAccount(member, true); err != nil {
 		t.Fatal(err)
 	}
 	disable := httptest.NewRequest(http.MethodPatch, "/api/accounts/account-2",

@@ -86,6 +86,26 @@ func (s *Store) AdoptGlobalAccount(legacyID string, account Account) error {
 		return err
 	}
 	defer tx.Rollback()
+	if legacyID != "" && legacyID != account.ID {
+		var usernameOwner string
+		err := tx.QueryRow(`SELECT id FROM account WHERE lower(username)=lower(?)`,
+			account.Username).Scan(&usernameOwner)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && usernameOwner == legacyID {
+			// A locally claimed node often uses the same username as the global
+			// identity that is replacing it. Free that unique value before the
+			// global row is inserted; the placeholder cannot be a valid username
+			// because both local and central validation reject slashes. Everything
+			// happens inside this transaction, so it is never externally visible.
+			placeholder := "/adopting/" + legacyID + "/" + account.ID
+			if _, err := tx.Exec(`UPDATE account SET username=? WHERE id=?`,
+				placeholder, legacyID); err != nil {
+				return err
+			}
+		}
+	}
 	_, err = tx.Exec(`INSERT INTO account
         (id,username,display_name,public_key,password_hash,created_at)
         VALUES(?,?,?,?,?,?)

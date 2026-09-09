@@ -4,8 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -57,7 +55,7 @@ func usage() {
 
   pscluster-admin init [--root DIR] [--bind ADDR] [--port N]
                        [--public-url HTTPS_URL] [--registration-open true|false]
-      Create the account database and print a one-time first-admin token.
+      Create the account database. The first registered account is its admin.
 
   pscluster-admin serve [--root DIR]
       Serve the admin page and identity API for a TLS reverse proxy.
@@ -148,21 +146,12 @@ func initialise(flags flags) error {
 		return err
 	}
 	defer store.Close()
-	rawToken := make([]byte, 32)
-	if _, err := rand.Read(rawToken); err != nil {
-		return err
-	}
-	bootstrap := base64.RawURLEncoding.EncodeToString(rawToken)
-	if err := store.InitialiseBootstrap(accountserver.TokenHash(bootstrap)); err != nil {
-		return err
-	}
 	fmt.Printf("\n  %s Admin\n\n", version.Product)
 	fmt.Printf("  Root        %s\n", layout.Root)
 	fmt.Printf("  Listen      %s:%d\n", value.Listen.Bind, value.Listen.Port)
 	if value.PublicURL != "" {
 		fmt.Printf("  Public URL  %s\n", value.PublicURL)
 	}
-	fmt.Printf("\n  First-admin bootstrap token (shown once):\n\n  %s\n", bootstrap)
 	fmt.Printf("\n  Start it: pscluster-admin serve --root %s\n\n", layout.Root)
 	return nil
 }

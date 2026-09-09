@@ -464,7 +464,11 @@ async function renderDevices(page, tab) {
 // row nothing fits on.
 function deviceCard(device, networks, thisDevice, reload) {
     const isThis = device.id === thisDevice;
-    const gpus = Array.isArray(device.gpus) ? device.gpus : [];
+    const local = isThis ? state.system : null;
+    const gpus = Array.isArray(local?.gpus) ? local.gpus
+        : Array.isArray(device.gpus) ? device.gpus : [];
+    const cpuCores = Number(local?.cpu_cores) || Number(device.cpu_cores) || '—';
+    const ramTotal = Number(local?.ram_total_mb) || Number(device.ram_total_mb) || 0;
     const current = device.desired_network || device.active_network || '';
     const moving = device.desired_network && device.desired_network !== device.active_network;
 
@@ -518,8 +522,8 @@ function deviceCard(device, networks, thisDevice, reload) {
                         el('span', {}, 'No graphics card')))),
 
         el('div', { class: 'device-card__stats' },
-            deviceStat(device.cpu_cores || '—', 'Cores'),
-            deviceStat(device.ram_total_mb ? megabytes(device.ram_total_mb) : '—', 'Memory'),
+            deviceStat(cpuCores, 'Cores'),
+            deviceStat(ramTotal ? megabytes(ramTotal) : '—', 'Memory'),
             deviceStat(gpus.length || device.gpu_count || 0, 'GPUs')),
 
         el('div', { class: 'device-card__foot' },

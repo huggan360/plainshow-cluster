@@ -195,17 +195,23 @@ demo:
 	@cp demo/demo-api.js $(DEMO_ROOT)/$(DEMO_STAMP)/demo-api.js
 	@mkdir -p $(DEMO_ROOT)/$(DEMO_STAMP)/brand
 	@cp demo/brand/plainshow-icon.webp $(DEMO_ROOT)/$(DEMO_STAMP)/brand/
-	@# The bundled stylesheets reference /fonts/... from the site root, so the
-	@# fonts are mirrored there rather than rewritten inside the CSS.
-	@mkdir -p $(DEMO_ROOT)/fonts
-	@cp -r web/fonts/. $(DEMO_ROOT)/fonts/
+	@# Product assets use root-relative URLs because the binary owns its origin.
+	@# Rewrite only the generated demo copy so it also works below /sand/.
+	@mkdir -p $(DEMO_ROOT)/$(DEMO_STAMP)/fonts
+	@cp -r web/fonts/. $(DEMO_ROOT)/$(DEMO_STAMP)/fonts/
+	@sed -i "s|url('/fonts/|url('./fonts/|g" \
+		$(DEMO_ROOT)/$(DEMO_STAMP)/fonts.css $(DEMO_ROOT)/$(DEMO_STAMP)/boxicons.css
+	@sed -i "s|src: '/brand/|src: '../brand/|g" \
+		$(DEMO_ROOT)/$(DEMO_STAMP)/lib/ui.js
 	@sed 's|\./|./$(DEMO_STAMP)/|g' demo/index.html > $(DEMO_ROOT)/index.next.html
 	@DEMO_DIR=$(DEMO_ROOT)/$(DEMO_STAMP) DEMO_INDEX=$(DEMO_ROOT)/index.next.html node scripts/check-demo.mjs
 	@DEMO_DIR=$(DEMO_ROOT)/$(DEMO_STAMP) node scripts/check-demo-data.mjs
 	@DEMO_DIR=$(DEMO_ROOT)/$(DEMO_STAMP) node scripts/check-demo-boot.mjs
+	@DEMO_DIR=$(DEMO_ROOT)/$(DEMO_STAMP) DEMO_LOGIN=1 node scripts/check-demo-boot.mjs
 	@# Keep old versioned assets for open tabs; switch HTML only after checks.
 	@mv $(DEMO_ROOT)/index.next.html $(DEMO_ROOT)/index.html
 	@echo "  $(DEMO_ROOT) is ready — build $(DEMO_STAMP)"
+	@echo "  Add ?login=1 to open the interactive sign-in and account-creation demo."
 
 clean:
 	rm -rf $(BINARY) $(ADMIN_BINARY) $(DESKTOP_BINARY) dist .devnode .smokenode .smokepid

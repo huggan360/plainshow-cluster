@@ -231,7 +231,6 @@ function gpuSummaryMetric(gpus) {
 }
 
 function rayMetric(data, ray) {
-    const running = Boolean(ray?.running);
     const localRunning = Boolean(ray?.local_running);
     const networkID = encodeURIComponent(data.network.id);
     const action = async () => {
@@ -251,16 +250,11 @@ function rayMetric(data, ray) {
     const unavailable = !localRunning && (!ray?.installed || !ray?.eligible);
     const card = el('button', { type: 'button', onclick: action, disabled: unavailable,
         'aria-pressed': String(localRunning),
+        title: unavailable ? (ray?.detail || ray?.advice || 'Ray is unavailable on this device.')
+            : localRunning ? 'Turn Ray off on this device' : 'Turn Ray on on this device',
         class: `ps-metric-card ray-toggle ${localRunning ? 'ps-metric-card--networks' : 'ps-metric-card--system'}` },
-        el('div', { class: 'ps-metric-card__surface' },
-            el('div', { class: 'ps-metric-head' },
-                el('span', { class: 'ps-metric-card__icon' }, el('i', { class: 'bx bx-broadcast' })),
-                el('strong', {}, localRunning ? 'Ray on' : 'Ray off')),
-            el('p', { class: 'ps-status-row__title', style: 'margin:10px 6px 3px' },
-                running ? `${ray.total_gpu || 0} GPU · ${ray.total_cpu || 0} CPU`
-                    : ray?.advice || 'Ray is not running.'),
-            el('small', { class: 'muted' }, unavailable ? (ray?.detail || ray?.advice || 'Enable this machine’s worker policy and install Ray first.')
-                : localRunning ? 'This device · click to turn off' : 'This device · click to start / attach')));
+        el('span', { class: 'ps-metric-card__surface ray-toggle__surface' },
+            el('strong', { class: 'ray-toggle__label' }, localRunning ? 'Ray on' : 'Ray off')));
     return card;
 }
 

@@ -12,15 +12,12 @@ import (
 // owner out of their own account.
 func TestChangingAPasswordProvesTheOldOne(t *testing.T) {
 	store := openTestStore(t)
-	if err := store.InitialiseBootstrap(TokenHash("secret")); err != nil {
-		t.Fatal(err)
-	}
 	hash, err := auth.HashPassword("original-password")
 	if err != nil {
 		t.Fatal(err)
 	}
 	account := Account{ID: "a1", Username: "hugo", DisplayName: "Hugo", PasswordHash: hash}
-	if err := store.CreateAccount(account, TokenHash("secret"), false); err != nil {
+	if err := store.CreateAccount(account, false); err != nil {
 		t.Fatal(err)
 	}
 

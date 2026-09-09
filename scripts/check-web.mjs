@@ -52,6 +52,19 @@ function exportsOf(source) {
 const files = ROOTS.flatMap(walk);
 const exportCache = new Map();
 
+if (!readFileSync('web/app.css', 'utf8').includes("url('./images/login-bg.webp')")) {
+    problems.push('web/app.css does not use the bundled login background');
+}
+if (!readFileSync('web/app.css', 'utf8').includes("url('./images/sidebar-network-bg.webp')")) {
+    problems.push('web/app.css does not use the bundled sidebar network background');
+}
+try {
+    readFileSync('web/images/login-bg.webp');
+    readFileSync('web/images/sidebar-network-bg.webp');
+} catch {
+    problems.push('one or more bundled interface backgrounds are missing');
+}
+
 for (const file of files) {
     const source = readFileSync(file, 'utf8');
     try {
@@ -111,6 +124,86 @@ for (const root of ROOTS) {
         if (!patterns.includes(rel) && !patterns.includes(top)) {
             problems.push(`${file} is not covered by the //go:embed patterns in ${root}/embed.go`);
         }
+    }
+}
+
+// Authentication must stay on the current central-account contract. A stale
+// bootstrap field leaves first-time registration unusable, and the browser
+// must resolve the gate after setup so account creation signs straight in.
+{
+    const signin = readFileSync('web/views/signin.js', 'utf8');
+    const admin = readFileSync('adminweb/app.js', 'utf8');
+    for (const phrase of ['bootstrap_token', 'Bootstrap token',
+        'Use your Pi username and password.']) {
+        if (signin.includes(phrase) || admin.includes(phrase)) {
+            problems.push(`authentication UI still contains removed text: ${phrase}`);
+        }
+    }
+    for (const phrase of ['Welcome to PlainShow', '/api/auth/setup',
+        '/api/auth/login', 'done();']) {
+        if (!signin.includes(phrase)) {
+            problems.push(`web/views/signin.js is missing its authentication contract: ${phrase}`);
+        }
+    }
+}
+
+// Opening a project constructs both the code pane and the imported Branch-tab
+// builder. They must not share a lexical name: JavaScript then treats the DOM
+// element as the function and fails only after somebody opens a project.
+{
+    const projects = readFileSync('web/views/projects.js', 'utf8');
+    if (/\b(?:const|let|var)\s+branchPane\b/.test(projects)) {
+        problems.push('web/views/projects.js shadows the imported branchPane builder');
+    }
+}
+
+// The network Ray control is deliberately a single, centered state action.
+// Status details belong on the Jobs page; adding them here turns the button
+// back into an uneven dashboard card and obscures what clicking it does.
+{
+    const networks = readFileSync('web/views/networks.js', 'utf8');
+    for (const phrase of ['ray-toggle__surface', 'ray-toggle__label',
+        "localRunning ? 'Ray on' : 'Ray off'"]) {
+        if (!networks.includes(phrase)) {
+            problems.push(`web/views/networks.js is missing its Ray button contract: ${phrase}`);
+        }
+    }
+    const rayMetric = networks.slice(networks.indexOf('function rayMetric'),
+        networks.indexOf('function deviceCard'));
+    if (rayMetric.includes('ps-metric-head') || rayMetric.includes('ps-metric-card__icon')) {
+        problems.push('the network Ray button contains dashboard-card decoration');
+    }
+}
+
+// The account service can lag a node version. This machine's card must prefer
+// the live system snapshot so a count-only legacy response cannot show one GPU
+// alongside an empty inventory and unknown cores/memory.
+{
+    const settings = readFileSync('web/views/settings.js', 'utf8');
+    for (const phrase of ['isThis ? state.system', 'local?.gpus',
+        'local?.cpu_cores', 'local?.ram_total_mb']) {
+        if (!settings.includes(phrase)) {
+            problems.push(`web/views/settings.js is missing local device inventory fallback: ${phrase}`);
+        }
+    }
+}
+
+// Home uses two viewport-filling panels. Networks belong to their own list,
+// not the general three-column card grid that made the lower half uneven.
+{
+    const home = readFileSync('web/views/home.js', 'utf8');
+    for (const phrase of ['ps-home-page', 'ps-home-network-list',
+        'Notifications', 'Your networks', 'View more', 'wheelLocked',
+        'ps-notice--first', 'ps-notice--last', '220']) {
+        if (!home.includes(phrase)) {
+            problems.push(`web/views/home.js is missing its lower-panel contract: ${phrase}`);
+        }
+    }
+    if (!/ps-home-lower[^]*?activityPanel\(overview, rayJobs\),\s*networksPanel\(overview\)/.test(home)) {
+        problems.push('web/views/home.js must render Notifications left of Your networks');
+    }
+    if (/ps-card-grid[^\n]*networkPreview/.test(home)) {
+        problems.push('web/views/home.js still renders networks in the general card grid');
     }
 }
 

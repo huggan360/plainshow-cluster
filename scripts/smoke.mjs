@@ -34,6 +34,8 @@ for (const [path, type] of [['/', 'text/html'], ['/app.js', 'javascript'], ['/ap
                             ['/fonts.css', 'css'], ['/boxicons.css', 'css'], ['/lib/client.js', 'javascript'],
                             ['/views/home.js', 'javascript'], ['/fonts/jetbrains-mono.woff2', 'font'],
                             ['/fonts/boxicons.woff2', 'font'],
+                            ['/images/login-bg.webp', 'image/webp'],
+                            ['/images/sidebar-network-bg.webp', 'image/webp'],
                             ['/brand/plainshow-icon.webp', 'image/webp']]) {
   const r = await fetch(B + path);
   ok(`serves ${path}`, r.ok && r.headers.get('content-type').includes(type),

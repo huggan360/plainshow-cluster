@@ -4,7 +4,7 @@
 // runs one way: app -> views -> client.
 
 import { el, mount, initials, plainshowLogo } from './lib/ui.js';
-import { api, state, refresh, connect, onConnection, onUnauthorized } from './lib/client.js';
+import { api, state, refresh, connect, on, onConnection, onUnauthorized } from './lib/client.js';
 import { powerButton } from './lib/statusbar.js';
 import { activityStrip } from './lib/activity.js';
 import { availabilitySwitch } from './lib/availability.js';
@@ -91,6 +91,12 @@ function shell(overview) {
 		const open = rail.classList.toggle('rail--open');
 		railScrim.classList.toggle('rail-scrim--open', open);
 	};
+	const connectionHost = el('div', { class: 'rail-connection-slot' });
+	const drawConnection = () => mount(connectionHost,
+		connectionCard(state.overview || overview, closeRail));
+	drawConnection();
+	on('network.active', drawConnection);
+	on('networks.changed', drawConnection);
 
     const rail = el('aside', { class: 'rail', id: 'rail' },
         el('div', { class: 'brand' },
@@ -104,6 +110,7 @@ function shell(overview) {
                 el('i', { class: `bx ${r.icon} nav__ico`, 'aria-hidden': 'true' }),
                 el('span', {}, r.label),
                 el('span', { class: 'nav__dot hide' })))),
+        connectionHost,
         el('div', { class: 'nodecard' },
             // The whole row opens the account, because a name and a face is
             // where people look for their own settings.
@@ -149,6 +156,42 @@ function shell(overview) {
         el('div', { id: 'view' }));
 
     return [railScrim, rail, main];
+}
+
+/** connectionCard summarises this machine's current compute network. */
+function connectionCard(overview, closeRail) {
+	const networks = overview.networks || [];
+	const active = networks.find((network) => network.id === overview.active_network);
+	const connected = Boolean(active && active.enabled !== false);
+	const self = (overview.machines || []).find((machine) =>
+		machine.is_self || machine.node_id === overview.node?.id);
+	const address = connectionAddress(self?.address);
+	const href = active ? `#/networks/${encodeURIComponent(active.id)}` : '#/networks';
+
+	return el('a', {
+		class: `rail-connection ${connected ? 'rail-connection--on' : ''}`,
+		href, onclick: closeRail,
+	},
+		el('span', { class: 'rail-connection__top' },
+			el('span', { class: `dot ${connected ? 'dot--on' : 'dot--off'}` }),
+			el('span', {}, connected ? 'Connected' : 'Not connected')),
+		el('strong', { class: 'rail-connection__name' },
+			connected ? active.name : 'No active network'),
+		el('span', { class: 'rail-connection__meta' },
+			connected ? (address || 'IP address unavailable') : 'Choose a network for project runs'),
+		el('span', { class: 'rail-connection__foot' },
+			connected ? `${active.node_count || 0} devices · ${active.gpu_count || 0} GPUs` : 'Open networks',
+			el('i', { class: 'bx bx-right-arrow-alt', 'aria-hidden': 'true' })));
+}
+
+function connectionAddress(value) {
+	const raw = String(value || '').trim();
+	if (!raw) return '';
+	try {
+		return new URL(raw.includes('://') ? raw : `https://${raw}`).hostname;
+	} catch {
+		return raw.replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '');
+	}
 }
 
 async function boot() {

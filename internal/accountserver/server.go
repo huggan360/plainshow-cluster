@@ -132,10 +132,9 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Username       string `json:"username"`
-		DisplayName    string `json:"display_name"`
-		Password       string `json:"password"`
-		BootstrapToken string `json:"bootstrap_token"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
 	}
 	if err := decode(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
@@ -161,10 +160,8 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	account := Account{ID: config.NewID(), Username: body.Username,
 		DisplayName: body.DisplayName, PasswordHash: passwordHash}
-	if err := s.store.CreateAccount(account, TokenHash(body.BootstrapToken), s.config.RegistrationOpen); err != nil {
+	if err := s.store.CreateAccount(account, s.config.RegistrationOpen); err != nil {
 		switch {
-		case errors.Is(err, ErrBootstrapToken):
-			fail(w, http.StatusForbidden, "The first account needs the bootstrap token printed by pscluster-admin init.")
 		case errors.Is(err, ErrRegistrationClosed):
 			fail(w, http.StatusForbidden, "Account registration is closed.")
 		default:

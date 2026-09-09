@@ -21,10 +21,8 @@ var schema string
 var (
 	// ErrNotFound is returned when an account or session does not exist.
 	ErrNotFound = errors.New("not found")
-	// ErrRegistrationClosed means only the bootstrap account may be created.
+	// ErrRegistrationClosed means no additional account may be created.
 	ErrRegistrationClosed = errors.New("registration is closed")
-	// ErrBootstrapToken means the first administrator token was wrong.
-	ErrBootstrapToken = errors.New("bootstrap token is invalid")
 	// ErrNodeOwner means another account already registered the same node id.
 	ErrNodeOwner = errors.New("node belongs to another account")
 	// ErrNetworkKey prevents an account from claiming a network by guessing its ID.
@@ -274,30 +272,15 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
-// TokenHash hashes bootstrap and session secrets before durable storage.
+// TokenHash hashes session secrets before durable storage.
 func TokenHash(token string) string {
 	digest := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-// InitialiseBootstrap records the first-admin token hash only while there are
-// no accounts. Re-running init cannot replace a live system's credential.
-func (s *Store) InitialiseBootstrap(hash string) error {
-	var accounts int
-	if err := s.db.QueryRow(`SELECT count(*) FROM account`).Scan(&accounts); err != nil {
-		return err
-	}
-	if accounts != 0 {
-		return nil
-	}
-	_, err := s.db.Exec(`INSERT INTO setting(name,value) VALUES('bootstrap_hash',?)
-        ON CONFLICT(name) DO NOTHING`, hash)
-	return err
-}
-
-// CreateAccount atomically makes the first account an administrator after
-// checking the one-time bootstrap token. Later accounts obey RegistrationOpen.
-func (s *Store) CreateAccount(account Account, bootstrapHash string, registrationOpen bool) error {
+// CreateAccount atomically makes the first account an administrator. Later
+// accounts obey RegistrationOpen.
+func (s *Store) CreateAccount(account Account, registrationOpen bool) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -308,11 +291,6 @@ func (s *Store) CreateAccount(account Account, bootstrapHash string, registratio
 		return err
 	}
 	if count == 0 {
-		var want string
-		if err := tx.QueryRow(`SELECT value FROM setting WHERE name='bootstrap_hash'`).Scan(&want); err != nil ||
-			subtle.ConstantTimeCompare([]byte(want), []byte(bootstrapHash)) != 1 {
-			return ErrBootstrapToken
-		}
 		account.Admin = true
 	} else if !registrationOpen {
 		return ErrRegistrationClosed
@@ -324,11 +302,6 @@ func (s *Store) CreateAccount(account Account, bootstrapHash string, registratio
 		account.PasswordHash, account.Admin, false, account.Created, "")
 	if err != nil {
 		return err
-	}
-	if count == 0 {
-		if _, err := tx.Exec(`DELETE FROM setting WHERE name='bootstrap_hash'`); err != nil {
-			return err
-		}
 	}
 	return tx.Commit()
 }

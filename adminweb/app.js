@@ -63,7 +63,6 @@ function login(status, registration = false) {
     const username = field('Username', 'text', 'your-name');
     const displayName = field('Display name', 'text', 'Your name');
     const password = field('Password', 'password', 'At least 10 characters');
-    const bootstrap = field('First-account bootstrap token', 'password', 'Only needed for the first account');
     const error = node('p', { class: 'error' });
     const submit = node('button', { class: 'btn primary' }, registration ? 'Create account' : 'Sign in');
 	const send = async (event) => {
@@ -75,7 +74,6 @@ function login(status, registration = false) {
             const body = { username: username.input.value, password: password.input.value };
             if (registration) {
                 body.display_name = displayName.input.value;
-                body.bootstrap_token = bootstrap.input.value;
             }
             await api(registration ? '/api/auth/register' : '/api/auth/login', { method: 'POST', body });
             await start();
@@ -91,7 +89,6 @@ function login(status, registration = false) {
 		username.view,
 		registration ? displayName.view : null,
 		password.view,
-		registration ? bootstrap.view : null,
 		error, submit);
     app.replaceChildren(node('main', { class: 'login-wrap' }, node('section', { class: 'panel login' },
 		node('div', { class: 'top top--login' }, brandLogo('cluster')),

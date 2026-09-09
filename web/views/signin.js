@@ -1,118 +1,108 @@
-// The sign-in gate: first-run setup, sign in, and recovering from an expired
-// session.
-//
-// Authentication is opt-in. A node with no owner account serves everything and
-// binds to loopback, which is what makes the first run possible; this screen is
-// how it stops being that.
+// The sign-in gate mirrors plainshow.se while keeping account creation beside
+// sign-in for a fresh machine. Central registration returns a session, so a
+// successful account creation enters the workspace immediately.
 
 import { el, mount, plainshowLogo } from '../lib/ui.js';
 import { api, toast } from '../lib/client.js';
 
 /**
  * renderGate paints the sign-in screen into host and resolves once the browser
- * is authenticated. It never resolves if the person does not sign in, which is
- * the point: the workspace is not built behind it.
+ * is authenticated. A central node always opens on sign-in; creating another
+ * account is an explicit choice, not something inferred from local node state.
  */
 export function renderGate(host, status) {
     return new Promise((resolve) => {
-		let create = !status.enabled;
-		const draw = () => mount(host, card(create, status, resolve, () => {
-			create = !create;
-			draw();
-		}));
-		draw();
+        let create = !status.central && !status.enabled;
+        const draw = () => mount(host, card(create, status, resolve, () => {
+            create = !create;
+            draw();
+        }));
+        draw();
     });
 }
 
-function card(firstRun, status, done, switchMode) {
+function authField(label, icon, input) {
+    return el('label', { class: 'login-field' },
+        el('span', { class: 'login-field__label' }, label),
+        el('span', { class: 'login-input-wrap' },
+            el('i', { class: `bx ${icon} login-input__icon`, 'aria-hidden': 'true' }),
+            input));
+}
+
+function card(create, status, done, switchMode) {
     const username = el('input', {
-        class: 'input', autocomplete: 'username', autocapitalize: 'off',
-        placeholder: firstRun ? 'Pick a username' : 'Username',
+        class: 'login-input', autocomplete: 'username', autocapitalize: 'off',
+        spellcheck: 'false', placeholder: 'username', required: true,
     });
     const displayName = el('input', {
-        class: 'input', autocomplete: 'name', placeholder: 'Your name (optional)',
+        class: 'login-input', autocomplete: 'name', placeholder: 'Your name',
     });
     const password = el('input', {
-        class: 'input', type: 'password',
-        autocomplete: firstRun ? 'new-password' : 'current-password',
-        placeholder: firstRun ? 'At least 10 characters' : 'Password',
+        class: 'login-input', type: 'password', required: true,
+        minlength: create ? 10 : null,
+        autocomplete: create ? 'new-password' : 'current-password',
+        placeholder: create ? 'At least 10 characters' : '••••••••••••',
     });
-	const bootstrap = el('input', {
-		class: 'input input--mono', type: 'password', autocomplete: 'off',
-		placeholder: 'Only for the first global administrator',
-	});
-    const error = el('p', { class: 'bad-text', style: 'min-height:18px;margin:0' });
+    const error = el('p', {
+        class: 'login-error', role: 'alert', 'aria-live': 'polite',
+    });
+    const buttonLabel = el('span', {}, create ? 'Create account' : 'Continue');
     const button = el('button', {
-        class: 'btn btn--primary', style: 'width:100%',
-    }, firstRun ? 'Create owner account' : 'Sign in');
+        class: 'login-submit', type: 'submit',
+    }, buttonLabel, el('i', {
+        class: `bx ${create ? 'bx-user-plus' : 'bx-right-arrow-alt'}`,
+        'aria-hidden': 'true',
+    }));
 
-    const submit = async () => {
+    const submit = async (event) => {
+        event?.preventDefault();
+        if (button.disabled) return;
         error.textContent = '';
         button.disabled = true;
+        buttonLabel.textContent = create ? 'Creating account…' : 'Signing in…';
         try {
-            const body = firstRun
+            const body = create
                 ? {
                     username: username.value.trim(),
                     display_name: displayName.value.trim(),
                     password: password.value,
-					bootstrap_token: bootstrap.value.trim(),
                 }
                 : { username: username.value.trim(), password: password.value };
-            const result = await api(firstRun ? '/api/auth/setup' : '/api/auth/login',
+            const result = await api(create ? '/api/auth/setup' : '/api/auth/login',
                 { method: 'POST', body });
-            // Signing in on a machine that has never seen this account pulls
-            // the networks the account already belongs to. Say so, or a
-            // workspace that filled itself in looks like a glitch.
             if (result && result.networks_adopted > 0) {
                 toast(`Found ${result.networks_adopted} network${
                     result.networks_adopted === 1 ? '' : 's'} on your account.`);
             }
             done();
-        } catch (err) {
-            error.textContent = err.message;
+        } catch (cause) {
+            error.textContent = cause.message;
             button.disabled = false;
+            buttonLabel.textContent = create ? 'Create account' : 'Continue';
             password.focus();
             password.select();
         }
     };
 
-    button.addEventListener('click', submit);
-    for (const field of [username, displayName, password]) {
-        field.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-    }
+    const form = el('form', { class: 'login-form', onsubmit: submit },
+        authField('Username', 'bx-user', username),
+        create ? authField('Display name', 'bx-user', displayName) : null,
+        authField('Password', 'bx-lock-alt', password),
+        error,
+        button);
+
     queueMicrotask(() => username.focus());
 
     return el('main', { class: 'login-page' },
-        el('div', { class: 'frame login-card' }, el('div', { class: 'frame__in' },
-            el('div', { class: 'brand', style: 'padding:0 0 26px' },
-				plainshowLogo('cluster')),
-
-            el('p', { class: 'page__eyebrow' },
-				status.central ? 'Plainshow account' : (firstRun ? 'First run' : 'Secure node')),
-            el('h1', { class: 'page__title' },
-				firstRun ? (status.central ? 'Create an account' : 'Claim this node') : 'Sign in'),
-            el('p', { class: 'page__sub', style: 'margin-bottom:20px' },
-				status.central
-					? 'One account works across every Plainshow device and network.'
-					: firstRun
-                    ? 'This node has no owner yet, so anyone who can reach it can use it. ' +
-                      'Create an account and it will ask for a password from now on.'
-                    : 'This node belongs to someone. Sign in to continue.'),
-
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Username'), username),
-            firstRun
-                ? el('div', { class: 'field' },
-                    el('label', { class: 'field__label' }, 'Display name'), displayName)
-                : null,
-			firstRun && status.central
-				? el('div', { class: 'field' },
-					el('label', { class: 'field__label' }, 'Bootstrap token (first account only)'), bootstrap)
-				: null,
-            el('div', { class: 'field' },
-                el('label', { class: 'field__label' }, 'Password'), password),
-            error,
-			el('div', { style: 'margin-top:12px' }, button),
-			status.central ? el('button', { class: 'btn', style: 'width:100%;margin-top:8px', onclick: switchMode },
-				firstRun ? 'Use an existing account' : 'Create a new account') : null)));
+        el('section', { class: 'login-shell' },
+            el('header', { class: 'login-heading' },
+                plainshowLogo(),
+                el('h1', {}, 'Welcome to PlainShow')),
+            el('div', { class: 'login-panel' },
+                el('h2', {}, create ? 'Create account' : 'Sign in'),
+                form,
+                status.central ? el('p', { class: 'login-switch' },
+                    create ? 'Already have an account? ' : 'New to PlainShow? ',
+                    el('button', { type: 'button', onclick: switchMode },
+                        create ? 'Sign in' : 'Create an account')) : null)));
 }

@@ -15,6 +15,8 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
+const LOGIN_DEMO = process.env.DEMO_LOGIN === '1';
+
 const element = (tag) => {
     const node = {
         tagName: tag, children: [], dataset: {}, style: {}, attributes: {},
@@ -74,7 +76,10 @@ const handlers = {};
 globalThis.window = {
     addEventListener(name, fn) { (handlers[name] ||= []).push(fn); },
     removeEventListener() {},
-    location: { hash: '', protocol: 'https:', host: 'demo', reload() {} },
+    location: {
+        hash: '', protocol: 'https:', host: 'demo',
+        search: LOGIN_DEMO ? '?login=1' : '', reload() {},
+    },
 };
 globalThis.location = globalThis.window.location;
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -127,6 +132,40 @@ try {
 }
 realClear(watchdog);
 
+if (LOGIN_DEMO && !failure) {
+    for (const phrase of ['Welcome to PlainShow', 'Sign in',
+        'New to PlainShow?', 'Create an account']) {
+        if (!rendered.some((text) => text.includes(phrase))) {
+            failure = new Error(`the login demo did not render ${JSON.stringify(phrase)}`);
+            break;
+        }
+    }
+    for (const phrase of ['Use your Pi username and password.', 'Bootstrap token']) {
+        if (rendered.some((text) => text.includes(phrase))) {
+            failure = new Error(`the login demo rendered removed text ${JSON.stringify(phrase)}`);
+            break;
+        }
+    }
+}
+
+if (!LOGIN_DEMO && !failure) {
+    for (const phrase of ['Connected', 'Research lab', '100.64.0.1']) {
+        if (!rendered.some((text) => text.includes(phrase))) {
+            failure = new Error(`the sidebar connection card did not render ${JSON.stringify(phrase)}`);
+            break;
+        }
+    }
+}
+
+if (LOGIN_DEMO) {
+    if (failure) {
+        console.error('login demo boot failed:\n  ' + (failure.message || failure));
+        process.exit(1);
+    }
+    console.log('login demo boot passed — sign-in and account creation render');
+    process.exit(0);
+}
+
 // Every page, not just the one it lands on.
 //
 // renderRoute catches whatever a view throws and renders "Could not load this
@@ -150,7 +189,7 @@ if (!failure) {
 if (failure) {
     console.error('demo boot failed:\n  ' + (failure.message || failure));
     if (failure.stack) {
-        console.error(failure.stack.split('\n').slice(1, 4).join('\n'));
+        console.error(failure.stack.split('\n').slice(1).join('\n'));
     }
     process.exit(1);
 }

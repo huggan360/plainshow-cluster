@@ -6,7 +6,7 @@ import { highlight, languageOf } from '../lib/highlight.js';
 import { teamPanel, repositoryPanel } from './team.js';
 import { cloneForm } from './github.js';
 import { conflictPane } from './conflicts.js';
-import { branchPane, branchChip } from './branches.js';
+import { branchPane as buildBranchPane, branchChip } from './branches.js';
 import { downloadPane } from './download.js';
 import { rayTools } from '../lib/raytools.js';
 
@@ -663,7 +663,7 @@ async function renderProject(host, reference, routeParts) {
 		uploadFiles([...event.dataTransfer.files]);
 	});
 
-	const branchPane = el('div', { class: 'ws' },
+	const codePane = el('div', { class: 'ws' },
 		el('div', { class: 'ws__side' }, filePanel), editorBox);
 	editorBox.append(el('div', { class: 'ray-tool-actions' }, runBtn, stopBtn, runNetworkLink), outputBox);
 	const gitPane = el('div', { class: 'panel' },
@@ -676,13 +676,13 @@ async function renderProject(host, reference, routeParts) {
 	// tree has been rewritten underneath every open file, so nothing on screen
 	// can be trusted to still match the disk.
 	const conflictsPane = conflictPane(name, () => location.reload()).node;
-	const branchesPane = branchPane(name).node;
+	const branchesPane = buildBranchPane(name).node;
 	const raySnapshot = activeTab === 'overview'
 		? await api('/api/ray')
 			.catch((error) => ({ running: false, detail: error.message })) : null;
 	const overviewPane = projectOverview(projectSummary, gitSnapshot, raySnapshot);
 	const tools = rayTools(projectSummary, activeTab);
-	const panes = { overview: overviewPane, branch: branchPane, test: tools.test, preset: tools.preset,
+	const panes = { overview: overviewPane, branch: codePane, test: tools.test, preset: tools.preset,
 		git: gitPane, 'branch-list': branchesPane, conflicts: conflictsPane, devices: devicesPane,
 		team: teamPane, settings: settingsPane };
 

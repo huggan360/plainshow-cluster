@@ -5,20 +5,16 @@ import (
 	"testing"
 )
 
-// twoAccounts sets up a bootstrapped store with two people and one network
-// owned by the first.
+// twoAccounts sets up a store with two people and one network owned by the first.
 func twoAccounts(t *testing.T) (*Store, Account, Account) {
 	t.Helper()
 	store := openTestStore(t)
-	if err := store.InitialiseBootstrap(TokenHash("secret")); err != nil {
-		t.Fatal(err)
-	}
 	hugo := Account{ID: "a1", Username: "huggan360", DisplayName: "Hugo", PasswordHash: "h"}
-	if err := store.CreateAccount(hugo, TokenHash("secret"), false); err != nil {
+	if err := store.CreateAccount(hugo, false); err != nil {
 		t.Fatal(err)
 	}
 	albin := Account{ID: "a2", Username: "albin", DisplayName: "Albin", PasswordHash: "h"}
-	if err := store.CreateAccount(albin, "", true); err != nil {
+	if err := store.CreateAccount(albin, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.RegisterNetwork(hugo.ID, NetworkRegistration{
