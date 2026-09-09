@@ -172,7 +172,7 @@ if (LOGIN_DEMO) {
 // page", so a broken view is not an unhandled rejection — it is a quiet panel
 // that this check has to go looking for. Missing that is how a page shipped
 // with an undefined function while the check reported success.
-const pages = ['home', 'networks', 'projects', 'jobs', 'github',
+const pages = ['home', 'networks', 'projects', 'projects/p-speech', 'jobs', 'github',
     'devices', 'howto', 'settings', 'new', 'profile'];
 if (!failure) {
     for (const page of pages) {
@@ -184,6 +184,9 @@ if (!failure) {
             break;
         }
     }
+}
+if (!failure && !rendered.some((text) => text.includes('Download project'))) {
+    failure = new Error('an account-adopted project did not open its download screen');
 }
 
 if (failure) {

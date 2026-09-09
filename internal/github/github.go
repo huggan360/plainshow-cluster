@@ -236,6 +236,16 @@ type Collaborator struct {
 	} `json:"permissions"`
 }
 
+// RepositoryInvitation is an open collaborator invitation. GitHub does not
+// include these people in Collaborators until they accept, so sync must read
+// both lists before deciding that somebody was removed.
+type RepositoryInvitation struct {
+	Invitee struct {
+		Login string `json:"login"`
+	} `json:"invitee"`
+	Permissions string `json:"permissions"`
+}
+
 // Role reads a collaborator's effective role, preferring the permission flags
 // because role_name is absent on some responses.
 func (c Collaborator) Role() string {
@@ -315,6 +325,24 @@ func (c *Client) Collaborators(ctx context.Context, repo string) ([]Collaborator
 		var batch []Collaborator
 		path := fmt.Sprintf("/repos/%s/collaborators?affiliation=direct&per_page=100&page=%d",
 			repo, page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return all, nil
+}
+
+// RepositoryInvitations lists currently open invitations for a repository.
+// GitHub requires repository administration permission for this endpoint.
+func (c *Client) RepositoryInvitations(ctx context.Context, repo string) ([]RepositoryInvitation, error) {
+	all := []RepositoryInvitation{}
+	for page := 1; page <= 10; page++ {
+		var batch []RepositoryInvitation
+		path := fmt.Sprintf("/repos/%s/invitations?per_page=100&page=%d", repo, page)
 		if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
 			return nil, err
 		}

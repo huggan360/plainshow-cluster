@@ -151,6 +151,23 @@ func Sync(ctx context.Context, c *Client, st *store.Store,
 	if err != nil {
 		return result, err
 	}
+	// GitHub omits pending invitees from the collaborator list. Treating that
+	// omission as removal made a Sync immediately delete the person that Add
+	// had just invited. If invitations cannot be read, syncing roles remains
+	// safe but pruning is disabled because absence is no longer proof.
+	pending := map[string]bool{}
+	invitations, invitationErr := c.RepositoryInvitations(ctx, repo)
+	if invitationErr != nil {
+		result.Warnings = append(result.Warnings,
+			"Could not check pending GitHub invitations, so nobody was removed here: "+
+				Friendly(invitationErr))
+	} else {
+		for _, invitation := range invitations {
+			if login := strings.ToLower(strings.TrimSpace(invitation.Invitee.Login)); login != "" {
+				pending[login] = true
+			}
+		}
+	}
 
 	local, err := st.Members(project.ID)
 	if err != nil {
@@ -165,6 +182,9 @@ func Sync(ctx context.Context, c *Client, st *store.Store,
 
 	// GitHub -> here.
 	seen := map[string]bool{}
+	for login := range pending {
+		seen[login] = true
+	}
 	for _, entry := range remote {
 		login := strings.ToLower(entry.Login)
 		seen[login] = true
@@ -214,6 +234,12 @@ func Sync(ctx context.Context, c *Client, st *store.Store,
 		result.Changes = append(result.Changes,
 			fmt.Sprintf("matched %s to GitHub %s", entry.Login, role))
 	}
+	for _, m := range local {
+		if pending[strings.ToLower(m.GitHubLogin)] {
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("%s still has a pending GitHub invitation.", m.Username))
+		}
+	}
 
 	// Here -> GitHub, for anyone GitHub has not heard of.
 	for _, m := range local {
@@ -238,7 +264,7 @@ func Sync(ctx context.Context, c *Client, st *store.Store,
 
 	// Anyone removed on GitHub loses access here — but only people who are
 	// linked to a GitHub account, since GitHub cannot speak for anyone else.
-	if prune {
+	if prune && invitationErr == nil {
 		for _, m := range local {
 			if m.Owner || m.GitHubLogin == "" || seen[strings.ToLower(m.GitHubLogin)] {
 				continue

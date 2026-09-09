@@ -155,6 +155,12 @@ for (const root of ROOTS) {
     if (/\b(?:const|let|var)\s+branchPane\b/.test(projects)) {
         problems.push('web/views/projects.js shadows the imported branchPane builder');
     }
+    if (!projects.includes("const projects = await api('/api/projects')")) {
+        problems.push('web/views/projects.js opens projects from a stale overview snapshot');
+    }
+    if (projects.includes("throw new Error('No such local project.')")) {
+        problems.push('web/views/projects.js still exposes the stale project lookup error');
+    }
 }
 
 // The network Ray control is deliberately a single, centered state action.

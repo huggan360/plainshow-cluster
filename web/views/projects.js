@@ -178,9 +178,15 @@ async function renderProject(host, reference, routeParts) {
     const requested = routeParts[0] || 'overview';
     const activeTab = requested === 'run' ? 'test' : projectTabs.has(requested) ? requested : 'branch';
     const initialPath = projectTabs.has(requested) ? routeParts.slice(1).join('/') : routeParts.join('/');
-    const projectSummary = state.overview.projects.find((project) =>
+    // The list and the overview are separate requests. An invitation can add
+    // a project after the overview snapshot while the list is already showing
+    // its fresh account-adopted row; looking only in that old snapshot made
+    // the card open into "No such local project." Resolve the stable id from
+    // the current project list instead.
+    const projects = await api('/api/projects');
+    const projectSummary = projects.find((project) =>
         project.id === reference || project.name === reference);
-    if (!projectSummary) throw new Error('No such local project.');
+    if (!projectSummary) throw new Error('This project is no longer available on this machine.');
 
     // A project can be here as a row long before its files are: adopted from
     // the account, or joined through somebody's invitation. Showing the usual
