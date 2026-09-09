@@ -59,6 +59,7 @@ type Server struct {
 	remoteMu      sync.RWMutex
 	tailnetMu     sync.Mutex
 	membershipMu  sync.Mutex
+	projectSyncMu sync.Mutex
 	downloads     downloads
 	availability  availability
 	rayMu         sync.RWMutex
@@ -507,10 +508,16 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	s.projectSyncMu.Lock()
+	defer s.projectSyncMu.Unlock()
 	name := r.PathValue("name")
 	p, _, err := s.project(name)
 	if err != nil {
 		fail(w, 404, "No such project.")
+		return
+	}
+	if err := s.forgetAccountProject(r.Context(), p.ID); err != nil {
+		fail(w, http.StatusBadGateway, "Could not remove the project from your account: "+err.Error())
 		return
 	}
 	// Remove files first: if that fails the row survives, so the project is

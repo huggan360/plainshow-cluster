@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +44,9 @@ var runner = func(ctx context.Context, args ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
+	command := exec.CommandContext(ctx, path, args...)
+	command.Env = managedEnvironment()
+	out, err := command.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(out))
 		if message == "" {
@@ -78,6 +81,52 @@ var managed string
 
 // UseManaged points the driver at a node-managed Ray installation.
 func UseManaged(path string) { managed = path }
+
+// managedPython is the interpreter belonging to the same virtual environment
+// as the managed Ray command. Ray jobs must use it rather than whichever
+// unrelated system `python` happens to be first on the dashboard's PATH.
+func managedPython() string {
+	if managed == "" {
+		return "python"
+	}
+	return filepath.Join(filepath.Dir(managed), "python")
+}
+
+func managedPath() string {
+	current := os.Getenv("PATH")
+	if managed == "" {
+		return current
+	}
+	bin := filepath.Dir(managed)
+	for _, entry := range filepath.SplitList(current) {
+		if entry == bin {
+			return current
+		}
+	}
+	if current == "" {
+		return bin
+	}
+	return bin + string(os.PathListSeparator) + current
+}
+
+func managedEnvironment() []string {
+	environment := os.Environ()
+	path := managedPath()
+	for i, entry := range environment {
+		if strings.HasPrefix(entry, "PATH=") {
+			environment[i] = "PATH=" + path
+			return environment
+		}
+	}
+	return append(environment, "PATH="+path)
+}
+
+func runtimeEnvironmentJSON() string {
+	raw, _ := json.Marshal(map[string]any{
+		"env_vars": map[string]string{"PATH": managedPath()},
+	})
+	return string(raw)
+}
 
 // resolve finds the ray command, preferring the managed one.
 func resolve() (string, error) {
@@ -149,6 +198,12 @@ type ResourcePolicy struct {
 
 // Installed reports whether the ray command exists.
 func Installed(ctx context.Context) bool {
+	if managed != "" {
+		command := exec.CommandContext(ctx, managedPython(), "-c",
+			`import importlib.util; raise SystemExit(0 if importlib.util.find_spec("ray") else 1)`)
+		command.Env = managedEnvironment()
+		return command.Run() == nil
+	}
 	_, err := runner(ctx, "--version")
 	return !errors.Is(err, ErrNotInstalled)
 }
@@ -311,6 +366,7 @@ func Submit(ctx context.Context, dashboard, workdir, command, id string) (string
 	defer cancel()
 	out, err := runner(ctx, "job", "submit", "--address="+strings.TrimRight(dashboard, "/"),
 		"--submission-id="+id, "--working-dir="+workdir, "--no-wait",
+		"--runtime-env-json="+runtimeEnvironmentJSON(),
 		"--", "/bin/sh", "-lc", command)
 	return strings.TrimSpace(string(out)), err
 }

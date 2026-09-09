@@ -94,6 +94,18 @@ func (s *Server) announceRayHead(networkID, head string) error {
 	return err
 }
 
+// publishRayChanged is the browser-facing half of Ray gossip. The network id
+// and global running state let every open client render the same switch as soon
+// as the peer socket carries an announcement across the network.
+func (s *Server) publishRayChanged(networkID string) {
+	announcement := s.rayAnnouncement(networkID)
+	s.hub.Publish("ray.changed", map[string]any{
+		"network_id": networkID,
+		"head":       announcement.Head,
+		"running":    announcement.Head != "",
+	})
+}
+
 func validRayAnnouncement(announcement rayAnnouncement) bool {
 	if announcement.NodeID == "" || announcement.Updated == "" {
 		return false
@@ -252,7 +264,7 @@ func (s *Server) startRay(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.hub.Publish("ray.changed", map[string]any{"head": head})
+		s.publishRayChanged(networkID)
 		writeJSON(w, http.StatusOK, map[string]any{"head": head, "role": "head"})
 		return
 	}
@@ -266,37 +278,39 @@ func (s *Server) startRay(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.hub.Publish("ray.changed", map[string]any{"head": announcement.Head})
+	s.publishRayChanged(networkID)
 	writeJSON(w, http.StatusOK, map[string]any{"head": announcement.Head, "role": "worker"})
 }
 
-// stopRay takes this machine out of Ray. Stopping the head publishes a
-// tombstone so peers do not keep trying to attach to it.
+// stopRay switches Ray off for the network. Any participating machine can
+// publish the tombstone; peer sockets carry it to every node, whose reconciler
+// then stops its local worker.
 func (s *Server) stopRay(w http.ResponseWriter, r *http.Request) {
 	s.rayActionMu.Lock()
 	defer s.rayActionMu.Unlock()
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	networkID := s.rayNetworkID(r)
+	if networkID == "" || !hasMembership(s.cfg, networkID) {
+		fail(w, http.StatusForbidden, "This device does not belong to that network.")
+		return
+	}
 	local, _ := s.readLocalRayState()
-	if local.NetworkID != networkID {
-		fail(w, http.StatusConflict, "This machine is not attached to that network's Ray cluster.")
-		return
+	if local.NetworkID == networkID {
+		if err := ray.Stop(ctx); err != nil && !errors.Is(err, ray.ErrNotInstalled) {
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		_ = s.clearLocalRayState()
 	}
-	if err := ray.Stop(ctx); err != nil && !errors.Is(err, ray.ErrNotInstalled) {
-		fail(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	_ = s.clearLocalRayState()
 	announcement := s.rayAnnouncement(networkID)
-	if announcement.NodeID == s.cfg.Node.ID {
+	if announcement.Head != "" {
 		if err := s.announceRayHead(networkID, ""); err != nil {
 			fail(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		announcement = s.rayAnnouncement(networkID)
 	}
-	s.hub.Publish("ray.changed", map[string]any{"head": announcement.Head})
+	s.publishRayChanged(networkID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
@@ -367,7 +381,7 @@ func (s *Server) reconcileRay(parent context.Context) {
 	}
 	if err == nil {
 		_ = s.writeLocalRayState(desired)
-		s.hub.Publish("ray.changed", map[string]any{"head": announcement.Head})
+		s.publishRayChanged(networkID)
 	}
 }
 
@@ -603,7 +617,7 @@ func (s *Server) submitRayJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.hub.Publish("ray.changed", map[string]any{"head": head})
+	s.publishRayChanged(networkID)
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"id": jobID, "status": "submitted", "detail": output,
 		"network_id": networkID,
@@ -628,6 +642,6 @@ func (s *Server) stopRayJob(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	s.hub.Publish("ray.changed", map[string]any{"head": head})
+	s.publishRayChanged(s.rayNetworkID(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }

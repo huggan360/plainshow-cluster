@@ -207,11 +207,14 @@ func (s *Server) syncProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) forgetProject(w http.ResponseWriter, r *http.Request) {
 	account, _ := s.currentAccount(r)
-	if err := s.store.ForgetProject(account.ID, r.PathValue("id")); err != nil {
-		fail(w, http.StatusNotFound, "No such project on this account.")
+	affected, err := s.store.ForgetProject(account.ID, r.PathValue("id"))
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.watchers.notify(account.ID, TopicProjects)
+	for _, accountID := range affected {
+		s.watchers.notify(accountID, TopicProjects)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "forgotten"})
 }
 

@@ -124,6 +124,9 @@ func TestJobsWithoutAClusterSaysSo(t *testing.T) {
 
 func TestSubmitUsesManagedRayJobProtocol(t *testing.T) {
 	args := stubRunner(t, "Job submission server address: ok", nil)
+	previousManaged := managed
+	UseManaged("/opt/plainshow-cluster/runtime/bin/ray")
+	t.Cleanup(func() { UseManaged(previousManaged) })
 	if _, err := Submit(context.Background(), "http://100.64.0.1:8265/",
 		"/work/my project", "python main.py", "plainshow_1"); err != nil {
 		t.Fatal(err)
@@ -131,6 +134,7 @@ func TestSubmitUsesManagedRayJobProtocol(t *testing.T) {
 	joined := strings.Join(*args, "|")
 	for _, want := range []string{"job|submit", "--address=http://100.64.0.1:8265",
 		"--submission-id=plainshow_1", "--working-dir=/work/my project", "--no-wait",
+		`--runtime-env-json={"env_vars":{"PATH":"/opt/plainshow-cluster/runtime/bin:`,
 		"/bin/sh|-lc|python main.py"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("ran %q, missing %q", joined, want)

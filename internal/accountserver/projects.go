@@ -143,19 +143,58 @@ func (s *Store) projectFor(accountID, id string) (AccountProject, error) {
 	return item, err
 }
 
-// ForgetProject removes a project the account owns.
-func (s *Store) ForgetProject(accountID, id string) error {
-	result, err := s.db.Exec(`DELETE FROM project WHERE id=? AND owner_account_id=?`,
-		id, accountID)
+// ForgetProject removes an owner's project, or removes only the caller's
+// membership when they do not own it. DELETE is idempotent so a node can finish
+// removing local files after a retry without central metadata reappearing.
+func (s *Store) ForgetProject(accountID, id string) ([]string, error) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	changed, err := result.RowsAffected()
+	defer tx.Rollback()
+
+	var owner string
+	err = tx.QueryRow(`SELECT owner_account_id FROM project WHERE id=?`, id).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return []string{accountID}, tx.Commit()
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if changed == 0 {
-		return ErrNotFound
+
+	affected := []string{accountID}
+	if owner == accountID {
+		rows, queryErr := tx.Query(`SELECT account_id FROM project_member WHERE project_id=?`, id)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		affected = affected[:0]
+		for rows.Next() {
+			var member string
+			if scanErr := rows.Scan(&member); scanErr != nil {
+				rows.Close()
+				return nil, scanErr
+			}
+			affected = append(affected, member)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return nil, rowsErr
+		}
+		if rowsErr := rows.Close(); rowsErr != nil {
+			return nil, rowsErr
+		}
+		if len(affected) == 0 {
+			affected = append(affected, accountID)
+		}
+		if _, err = tx.Exec(`DELETE FROM project WHERE id=?`, id); err != nil {
+			return nil, err
+		}
+	} else if _, err = tx.Exec(`DELETE FROM project_member WHERE project_id=? AND account_id=?`, id, accountID); err != nil {
+		return nil, err
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return affected, nil
 }

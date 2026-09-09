@@ -169,7 +169,7 @@ for (const root of ROOTS) {
 {
     const networks = readFileSync('web/views/networks.js', 'utf8');
     for (const phrase of ['ray-toggle__surface', 'ray-toggle__label',
-        "localRunning ? 'Ray on' : 'Ray off'"]) {
+        "networkRunning ? 'Ray on' : 'Ray off'"]) {
         if (!networks.includes(phrase)) {
             problems.push(`web/views/networks.js is missing its Ray button contract: ${phrase}`);
         }
@@ -178,6 +178,22 @@ for (const root of ROOTS) {
         networks.indexOf('function deviceCard'));
     if (rayMetric.includes('ps-metric-head') || rayMetric.includes('ps-metric-card__icon')) {
         problems.push('the network Ray button contains dashboard-card decoration');
+    }
+}
+
+// Presets use the same restrained, centered control language as the Ray toggle.
+// Loud per-vendor dashboard gradients and decoration make these choices look
+// like status cards instead of one selected action.
+{
+    const rayTools = readFileSync('web/lib/raytools.js', 'utf8');
+    for (const phrase of ['ray-preset-choice', 'ray-toggle__surface',
+        'ray-preset-choice__label']) {
+        if (!rayTools.includes(phrase)) {
+            problems.push(`web/lib/raytools.js is missing its preset button contract: ${phrase}`);
+        }
+    }
+    if (/ps-metric-card--\$\{color\}/.test(rayTools) || /class: `bx \$\{icon\}`/.test(rayTools)) {
+        problems.push('Ray preset choices still contain per-mode card decoration');
     }
 }
 

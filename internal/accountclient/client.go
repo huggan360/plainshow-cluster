@@ -301,6 +301,12 @@ func (c *Client) SyncProject(ctx context.Context, token string,
 	return out, err
 }
 
+// ForgetProject removes an owned project from the account catalogue, or leaves
+// it when the authenticated account is only a member.
+func (c *Client) ForgetProject(ctx context.Context, token, id string) error {
+	return c.call(ctx, http.MethodDelete, "/api/projects/"+url.PathEscape(id), token, nil, nil)
+}
+
 // GrantNetworkMember records the account authenticated by a consumed peer
 // invitation in the enterprise registry.
 func (c *Client) GrantNetworkMember(ctx context.Context, token, networkID,

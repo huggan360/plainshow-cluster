@@ -977,7 +977,7 @@ function projectSettingsPane(project) {
 			el('section', { class: 'panel', style: 'margin-top:14px' },
 				el('div', { class: 'panel__head' }, 'Delete project'),
 				el('p', { class: 'muted', style: 'font-size:12px;line-height:1.6' },
-					'Deleting removes the local folder and its complete Git history from this machine.'),
+					'Deleting removes the project from your account and erases its local folder and complete Git history.'),
 				el('button', { class: 'btn btn--danger', onclick: () => removeProject(project) },
 					el('i', { class: 'bx bx-trash' }), 'Delete permanently'))));
 }
@@ -1079,8 +1079,8 @@ function removeProject(project) {
         danger: true,
         body: () => el('div', {},
             el('p', { style: 'margin:0 0 14px;font-size:13px;color:#cbd5e1' },
-                'This removes the project directory and everything in it, including ' +
-                'its git history. It cannot be undone.'),
+                'This removes the project from your account and erases this machine’s ' +
+                'project directory, including its git history. It cannot be undone.'),
             el('div', { class: 'field' },
                 el('label', { class: 'field__label' }, `Type ${name} to confirm`),
                 confirmName)),

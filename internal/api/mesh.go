@@ -439,7 +439,10 @@ func (s *Server) acceptPeerCheckIn(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mergeRayAnnouncement(networkID string, announcement rayAnnouncement) {
 	changed, err := s.storeRayAnnouncement(networkID, announcement)
 	if err == nil && changed {
-		s.hub.Publish("ray.changed", map[string]any{"head": announcement.Head})
+		s.publishRayChanged(networkID)
+		if s.peerContext != nil {
+			go s.reconcileRay(s.peerContext)
+		}
 	}
 }
 

@@ -1,4 +1,6 @@
-# Publish a release when a version tag is pushed.
+# Publish the full multi-platform release only when it is explicitly dispatched
+# on a version tag. Normal version tags are handled by the focused package
+# workflows, so creating an Arch-only release does not also start desktop jobs.
 #
 # The asset names here are a contract with internal/updater: it looks for
 # pscluster-<os>-<arch> and reads checksums.txt in sha256sum format. A release
@@ -6,9 +8,7 @@
 # renaming these silently stops those machines updating.
 name: release
 
-on:
-  push:
-    tags: ['v*']
+on: workflow_dispatch
 
 permissions:
   contents: write

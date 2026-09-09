@@ -1,9 +1,6 @@
 package accountserver
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 // TestProjectsFollowTheAccountButFilesDoNot is the whole point of this table.
 // A second machine has to learn that a project exists in order to offer to
@@ -64,21 +61,30 @@ func TestAProjectBelongsToWhoeverMadeIt(t *testing.T) {
 	}
 }
 
-func TestForgettingAProjectIsTheOwnersToDo(t *testing.T) {
+func TestForgettingAProjectDeletesForOwnerAndLeavesForMember(t *testing.T) {
 	store, hugo, albin := twoAccounts(t)
 	if _, err := store.RegisterProject(hugo.ID, ProjectRegistration{
 		ID: "p1", Name: "vision", Members: []string{"albin"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ForgetProject(albin.ID, "p1"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("a member deleted the owner's project: %v", err)
+	if _, err := store.ForgetProject(albin.ID, "p1"); err != nil {
+		t.Fatalf("member could not leave project: %v", err)
 	}
-	if err := store.ForgetProject(hugo.ID, "p1"); err != nil {
+	if theirs, _ := store.ProjectsForAccount(albin.ID); len(theirs) != 0 {
+		t.Fatalf("member still sees project after leaving: %+v", theirs)
+	}
+	if mine, _ := store.ProjectsForAccount(hugo.ID); len(mine) != 1 {
+		t.Fatal("member leaving deleted the owner's project")
+	}
+	if _, err := store.ForgetProject(hugo.ID, "p1"); err != nil {
 		t.Fatal(err)
 	}
 	if mine, _ := store.ProjectsForAccount(hugo.ID); len(mine) != 0 {
 		t.Error("the project survived being forgotten")
+	}
+	if _, err := store.ForgetProject(hugo.ID, "p1"); err != nil {
+		t.Fatalf("repeated delete was not idempotent: %v", err)
 	}
 }
 

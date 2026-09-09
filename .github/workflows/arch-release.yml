@@ -52,7 +52,7 @@ jobs:
           tag_name: ${{ inputs.tag }}
           name: Plainshow Cluster ${{ inputs.tag }}
           body_path: RELEASE_NOTES.md
-          prerelease: true
+          prerelease: ${{ contains(inputs.tag, '-') }}
           fail_on_unmatched_files: true
           files: |
             dist/*.pkg.tar.zst

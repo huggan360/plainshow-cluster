@@ -10,6 +10,7 @@ import (
 	"github.com/huggan360/plainshow-cluster/internal/identity"
 	"github.com/huggan360/plainshow-cluster/internal/mesh"
 	"github.com/huggan360/plainshow-cluster/internal/store"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -72,6 +73,38 @@ func TestPeerSocketPushesRayAndClosesOnShutdown(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("shutdown left socket open")
+	}
+}
+
+func TestAnyMemberCanPushRayOffAcrossTheNetwork(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.cfg.Memberships = []config.MembershipConfig{{ID: "net", Name: "Lab", Enabled: true}}
+	if err := s.announceRayHead("net", "100.64.0.2:6379"); err != nil {
+		t.Fatal(err)
+	}
+	sub := s.hub.Subscribe()
+	defer sub.Close()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/ray/stop?network_id=net", nil)
+	s.stopRay(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("stop returned %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if announcement := s.rayAnnouncement("net"); announcement.Head != "" {
+		t.Fatalf("Ray head survived network stop: %+v", announcement)
+	}
+	select {
+	case event := <-sub.C:
+		if event.Topic != "ray.changed" {
+			t.Fatalf("event = %q", event.Topic)
+		}
+		data, _ := event.Data.(map[string]any)
+		if data["network_id"] != "net" || data["running"] != false {
+			t.Fatalf("Ray socket event = %+v", data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Ray off was not sent to browser sockets")
 	}
 }
 

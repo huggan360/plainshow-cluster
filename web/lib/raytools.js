@@ -2,12 +2,12 @@ import { el, mount } from './ui.js';
 import { api, toast, navigate, watchRefresh, state, on } from './client.js';
 
 const modes = [
-    ['cpu', 'All CPUs', 'bx-chip', 'projects'],
-    ['gpu', 'All GPUs', 'bx-chip', 'gpus'],
-    ['mixed', 'GPU + CPU', 'bx-network-chart', 'networks'],
-    ['nvidia', 'NVIDIA', 'bx-chip', 'networks'],
-    ['amd', 'AMD', 'bx-chip', 'system'],
-    ['intel', 'Intel GPU', 'bx-chip', 'projects'],
+    ['cpu', 'All CPUs'],
+    ['gpu', 'All GPUs'],
+    ['mixed', 'GPU + CPU'],
+    ['nvidia', 'NVIDIA'],
+    ['amd', 'AMD'],
+    ['intel', 'Intel GPU'],
 ];
 
 function softwareCheck(check) {
@@ -86,16 +86,17 @@ export function rayTools(project, activeTab) {
     const inventory = el('div', { class: 'ray-inventory muted', 'aria-live': 'polite' }, 'Reading network hardware…');
     const filename = el('input', { class: 'input input--mono', value: 'ray_cpu.py', 'aria-label': 'Preset filename' });
     const limit = el('input', { class: 'input', type: 'number', min: '0', max: '1024', value: '0' });
-    const options = el('div', { class: 'ray-preset-grid' }, ...modes.map(([key, title, icon, color]) => {
+    const options = el('div', { class: 'ray-preset-grid' }, ...modes.map(([key, title]) => {
         const choice = el('button', {
-            class: `ps-metric-card ps-metric-card--${color} ray-preset-choice`,
+            class: 'ps-metric-card ray-preset-choice',
             'aria-pressed': String(key === mode),
             onclick: () => {
                 mode = key;
                 options.querySelectorAll('button').forEach((node) => node.setAttribute('aria-pressed', String(node === choice)));
                 filename.value = `ray_${key}.py`;
             },
-        }, el('span', { class: 'ps-metric-card__surface' }, el('i', { class: `bx ${icon}` }), el('strong', {}, title)));
+        }, el('span', { class: 'ps-metric-card__surface ray-toggle__surface' },
+            el('strong', { class: 'ray-preset-choice__label' }, title)));
         return choice;
     }));
     const create = el('button', { class: 'btn btn--primary', onclick: async () => {

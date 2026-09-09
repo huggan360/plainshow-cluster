@@ -110,8 +110,8 @@ configure_tailscale_apt_repository() {
 # rule and leaves the machine's Python untouched.
 install_ray() {
     root="$1"
-    if [ -x "$root/runtime/bin/ray" ] &&
-       "$root/runtime/bin/ray" --version 2>/dev/null | grep -Fq "$PSCLUSTER_RAY_VERSION"; then
+    if [ -x "$root/runtime/bin/python" ] &&
+       "$root/runtime/bin/python" -c "import ray; raise SystemExit(0 if ray.__version__ == '$PSCLUSTER_RAY_VERSION' else 1)" 2>/dev/null; then
         note "Ray is already installed for this node"
         return 0
     fi
@@ -122,7 +122,8 @@ install_ray() {
         exit 1
     fi
     if ! "$root/runtime/bin/pip" install --quiet --upgrade pip 2>/dev/null ||
-       ! "$root/runtime/bin/pip" install --quiet --upgrade "ray[default]==$PSCLUSTER_RAY_VERSION"; then
+       ! "$root/runtime/bin/pip" install --quiet --upgrade "ray[default]==$PSCLUSTER_RAY_VERSION" ||
+       ! "$root/runtime/bin/python" -c "import ray; raise SystemExit(0 if ray.__version__ == '$PSCLUSTER_RAY_VERSION' else 1)"; then
         echo "install: Ray could not be installed automatically" >&2
         echo "install: run  $root/runtime/bin/pip install 'ray[default]==$PSCLUSTER_RAY_VERSION'" >&2
         exit 1
@@ -405,6 +406,9 @@ if [ "$(id -u)" -eq 0 ] && [ -d /etc/systemd/system ]; then
         echo
         echo '[Service]'
         echo 'Type=simple'
+        if [ "$COMPONENT" = node ]; then
+            echo "Environment=PATH=$ROOT/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+        fi
         echo "ExecStart=$ROOT/bin/$BINARY_NAME serve --root $ROOT"
         echo 'Restart=on-failure'
         echo 'RestartSec=3'

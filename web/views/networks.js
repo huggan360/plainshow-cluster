@@ -231,30 +231,30 @@ function gpuSummaryMetric(gpus) {
 }
 
 function rayMetric(data, ray) {
-    const localRunning = Boolean(ray?.local_running);
+    const networkRunning = Boolean(ray?.running || ray?.head);
     const networkID = encodeURIComponent(data.network.id);
     const action = async () => {
-        const actionName = localRunning ? 'stop' : 'start';
-        if (localRunning && !window.confirm('Stop Ray on this device? Running work here may be interrupted.')) return;
+        const actionName = networkRunning ? 'stop' : 'start';
+        if (networkRunning && !window.confirm('Turn Ray off for this network? Running work on every connected device may be interrupted.')) return;
         card.disabled = true;
         try {
             await api(`/api/ray/${actionName}?network_id=${networkID}`, {
                 method: 'POST', body: { network_id: data.network.id },
             });
-            toast(actionName === 'stop' ? 'Ray stopped on this machine.' : 'Ray is starting.');
+            toast(actionName === 'stop' ? 'Ray is stopping across this network.' : 'Ray is starting.');
             await refresh();
             navigate(`networks/${networkID}`);
         } catch (error) { toast(error.message, 'err'); }
         finally { card.disabled = false; }
     };
-    const unavailable = !localRunning && (!ray?.installed || !ray?.eligible);
+    const unavailable = !networkRunning && (!ray?.installed || !ray?.eligible);
     const card = el('button', { type: 'button', onclick: action, disabled: unavailable,
-        'aria-pressed': String(localRunning),
+        'aria-pressed': String(networkRunning),
         title: unavailable ? (ray?.detail || ray?.advice || 'Ray is unavailable on this device.')
-            : localRunning ? 'Turn Ray off on this device' : 'Turn Ray on on this device',
-        class: `ps-metric-card ray-toggle ${localRunning ? 'ps-metric-card--networks' : 'ps-metric-card--system'}` },
+            : networkRunning ? 'Turn Ray off for this network' : 'Turn Ray on for this network',
+        class: `ps-metric-card ray-toggle ${networkRunning ? 'ps-metric-card--networks' : 'ps-metric-card--system'}` },
         el('span', { class: 'ps-metric-card__surface ray-toggle__surface' },
-            el('strong', { class: 'ray-toggle__label' }, localRunning ? 'Ray on' : 'Ray off')));
+            el('strong', { class: 'ray-toggle__label' }, networkRunning ? 'Ray on' : 'Ray off')));
     return card;
 }
 

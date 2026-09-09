@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,10 +13,17 @@ import (
 
 func TestDiagnosticReturnsWorkerProofAndCleansUp(t *testing.T) {
 	var stopped atomic.Bool
+	var submitted map[string]any
+	previousManaged := managed
+	UseManaged("/opt/plainshow-cluster/runtime/bin/ray")
+	t.Cleanup(func() { UseManaged(previousManaged) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/jobs/":
+			if err := json.NewDecoder(r.Body).Decode(&submitted); err != nil {
+				t.Fatal(err)
+			}
 			w.Write([]byte(`{"submission_id":"test"}`))
 		case "/api/jobs/test":
 			w.Write([]byte(`{"status":"SUCCEEDED"}`))
@@ -37,6 +45,15 @@ func TestDiagnosticReturnsWorkerProofAndCleansUp(t *testing.T) {
 	}
 	if !stopped.Load() {
 		t.Fatal("job was not cleaned up")
+	}
+	entrypoint, _ := submitted["entrypoint"].(string)
+	if !strings.HasPrefix(entrypoint, "'/opt/plainshow-cluster/runtime/bin/python' -c ") {
+		t.Fatalf("diagnostic used the wrong Python: %q", entrypoint)
+	}
+	runtimeEnv, _ := submitted["runtime_env"].(map[string]any)
+	envVars, _ := runtimeEnv["env_vars"].(map[string]any)
+	if path, _ := envVars["PATH"].(string); !strings.HasPrefix(path, "/opt/plainshow-cluster/runtime/bin:") {
+		t.Fatalf("diagnostic PATH = %q", path)
 	}
 	if results[0].CPU == nil || results[0].CPU.Status != "passed" || results[0].GPU == nil || results[0].GPU.Status != "missing" || len(results[0].Software) != 1 {
 		t.Fatalf("lost informational software checks: %+v", results[0])

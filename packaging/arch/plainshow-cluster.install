@@ -4,15 +4,20 @@
 # anybody runs anything.
 _install_ray() {
     local ray_version=2.58.0
-    if [[ -x /opt/plainshow-cluster/runtime/bin/ray ]] &&
-       /opt/plainshow-cluster/runtime/bin/ray --version 2>/dev/null | grep -Fq "$ray_version"; then
+    if [[ -x /opt/plainshow-cluster/runtime/bin/python ]] &&
+       /opt/plainshow-cluster/runtime/bin/python -c \
+           "import ray; raise SystemExit(0 if ray.__version__ == '$ray_version' else 1)" 2>/dev/null; then
         return 0
     fi
     echo 'Installing Ray for Plainshow Cluster...'
     if ! python3 -m venv /opt/plainshow-cluster/runtime 2>/dev/null ||
-       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet --upgrade "ray[default]==$ray_version"; then
-        echo 'Ray could not be installed automatically. Run:'
-        echo "  sudo /opt/plainshow-cluster/runtime/bin/pip install 'ray[default]==$ray_version'"
+       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet --upgrade pip ||
+       ! /opt/plainshow-cluster/runtime/bin/pip install --quiet --upgrade "ray[default]==$ray_version" ||
+       ! /opt/plainshow-cluster/runtime/bin/python -c \
+           "import ray; raise SystemExit(0 if ray.__version__ == '$ray_version' else 1)"; then
+        echo 'Ray could not be installed in /opt/plainshow-cluster/runtime. Run:' >&2
+        echo "  sudo /opt/plainshow-cluster/runtime/bin/pip install 'ray[default]==$ray_version'" >&2
+        return 1
     fi
 }
 
@@ -27,6 +32,7 @@ _prepare_workspace() {
 }
 
 post_install() {
+    local ray_status=0
     install -d -m 0755 /opt/plainshow-cluster/bin
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
@@ -36,7 +42,7 @@ post_install() {
     fi
 
     _prepare_workspace
-    _install_ray
+    _install_ray || ray_status=$?
 
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
@@ -46,12 +52,14 @@ post_install() {
 
 	if ! tailscale status >/dev/null 2>&1; then
 		echo 'Plainshow Cluster installed. Open it from the application menu and sign in; private networking connects automatically.'
-    else
+	else
         echo 'Plainshow Cluster installed and started.'
     fi
+    return "$ray_status"
 }
 
 post_upgrade() {
+    local ray_status=0
     if [[ -d /run/systemd/system ]]; then
         systemctl stop plainshow-cluster.service || true
     fi
@@ -59,11 +67,12 @@ post_upgrade() {
     install -m 0755 /usr/lib/plainshow-cluster/pscluster \
         /opt/plainshow-cluster/bin/pscluster
     _prepare_workspace
-    _install_ray
+    _install_ray || ray_status=$?
     if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
         systemctl start plainshow-cluster.service || true
     fi
+    return "$ray_status"
 }
 
 pre_remove() {

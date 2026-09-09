@@ -68,8 +68,14 @@ func Diagnose(ctx context.Context, dashboard, id string) ([]CheckResult, error) 
 	if dashboard == "" {
 		return nil, errors.New("Start Ray from this network before testing")
 	}
-	command := "python -c '" + strings.ReplaceAll(diagnosticCode, "'", "'\"'\"'") + "'"
-	err := jobRequest(ctx, dashboard, "POST", "/api/jobs/", map[string]any{"entrypoint": command, "submission_id": id}, nil)
+	quote := func(value string) string {
+		return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	}
+	command := quote(managedPython()) + " -c " + quote(diagnosticCode)
+	err := jobRequest(ctx, dashboard, "POST", "/api/jobs/", map[string]any{
+		"entrypoint": command, "submission_id": id,
+		"runtime_env": map[string]any{"env_vars": map[string]string{"PATH": managedPath()}},
+	}, nil)
 	if err != nil {
 		return nil, err
 	}

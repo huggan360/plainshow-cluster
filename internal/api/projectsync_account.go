@@ -18,6 +18,7 @@ import (
 
 	"github.com/huggan360/plainshow-cluster/internal/accountclient"
 	"github.com/huggan360/plainshow-cluster/internal/accountserver"
+	"github.com/huggan360/plainshow-cluster/internal/config"
 	"github.com/huggan360/plainshow-cluster/internal/store"
 )
 
@@ -27,6 +28,8 @@ import (
 // else's report, and echoing it back would let an empty placeholder overwrite
 // the real project's size and description.
 func (s *Server) publishProjects(ctx context.Context, client *accountclient.Client, token string) {
+	s.projectSyncMu.Lock()
+	defer s.projectSyncMu.Unlock()
 	projects, err := s.store.Projects()
 	if err != nil {
 		return
@@ -57,6 +60,8 @@ func (s *Server) publishProjects(ctx context.Context, client *accountclient.Clie
 // The row carries no files, and that is the state the interface has to render:
 // a project you own, on a machine that cannot open it yet.
 func (s *Server) adoptAccountProjects(ctx context.Context, client *accountclient.Client, token string) int {
+	s.projectSyncMu.Lock()
+	defer s.projectSyncMu.Unlock()
 	remote, err := client.Projects(ctx, token)
 	if err != nil {
 		return 0
@@ -93,6 +98,24 @@ func (s *Server) adoptAccountProjects(ctx context.Context, client *accountclient
 		s.hub.Publish("project.created", map[string]any{"adopted": adopted})
 	}
 	return adopted
+}
+
+// forgetAccountProject removes the catalogue entry before local files go. If
+// this step failed and local deletion continued, the next account sync would
+// faithfully adopt the same metadata again and produce a ghost project card.
+func (s *Server) forgetAccountProject(ctx context.Context, id string) error {
+	if !s.usesCentralAccounts() || s.cfg.Account.ID == "" {
+		return nil
+	}
+	token, err := config.LoadAccountToken(s.layout)
+	if err != nil {
+		return err
+	}
+	client, err := accountclient.New(s.cfg.Account.Server)
+	if err != nil {
+		return err
+	}
+	return client.ForgetProject(ctx, token, id)
 }
 
 // directorySizeKB is what a person is told before they agree to a download.
