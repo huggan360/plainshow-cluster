@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func stubRunner(t *testing.T, out string, err error) *[]string {
@@ -69,13 +70,33 @@ func TestNotInstalledAndNotRunningAreStates(t *testing.T) {
 	}
 }
 
-func TestRunningLocalUsesRayStatus(t *testing.T) {
-	args := stubRunner(t, "cluster healthy", nil)
-	if !RunningLocal(context.Background()) {
-		t.Fatal("a successful ray status was reported as stopped")
+func TestNodeAliveRequiresThisMachinesRaylet(t *testing.T) {
+	stubFetch(t, nodesSample, nil)
+	if !NodeAlive(context.Background(), "http://100.64.0.1:8265", "100.64.0.2") {
+		t.Fatal("an alive local raylet was reported missing")
 	}
-	if strings.Join(*args, " ") != "status" {
-		t.Fatalf("ran ray %q, want status", strings.Join(*args, " "))
+	if NodeAlive(context.Background(), "http://100.64.0.1:8265", "100.64.0.3") {
+		t.Fatal("a dead local raylet was hidden by the reachable head")
+	}
+	if NodeAlive(context.Background(), "http://100.64.0.1:8265", "100.64.0.99") {
+		t.Fatal("a machine absent from Ray was reported attached")
+	}
+}
+
+func TestWaitForNodeRequiresStableDashboardSightings(t *testing.T) {
+	calls := 0
+	original := fetch
+	fetch = func(_ context.Context, _ string) ([]byte, error) {
+		calls++
+		return []byte(nodesSample), nil
+	}
+	t.Cleanup(func() { fetch = original })
+	if err := WaitForNode(context.Background(), "http://100.64.0.1:8265",
+		"100.64.0.2", 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if calls < 3 {
+		t.Fatalf("join was accepted after %d dashboard sighting(s), want at least 3", calls)
 	}
 }
 

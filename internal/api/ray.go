@@ -197,6 +197,7 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 	local, _ := s.readLocalRayState()
 	localError := s.rayReconcileError(networkID)
 	repair := s.rayRepair(networkID)
+	localAddress := tailnet.Probe(r.Context()).Self.Address
 	response := map[string]any{
 		"network_id":    networkID,
 		"installed":     status.Installed,
@@ -210,7 +211,7 @@ func (s *Server) getRay(w http.ResponseWriter, r *http.Request) {
 		"detail":        status.Detail,
 		"eligible":      eligible,
 		"policy":        policy,
-		"local_running": local.NetworkID == networkID && ray.RunningLocal(r.Context()),
+		"local_running": local.NetworkID == networkID && status.HasAliveNode(localAddress),
 		"local_error":   localError,
 		"repair_needed": localError != "",
 		"repair":        repair,
@@ -310,6 +311,11 @@ func (s *Server) startRay(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		head := net.JoinHostPort(address, strconv.Itoa(ray.DefaultPort))
+		if err := ray.WaitForNode(ctx, ray.DashboardURL(address, ray.DefaultDashboard), address, 45*time.Second); err != nil {
+			_ = stopLocalRay(ctx)
+			fail(w, http.StatusBadGateway, err.Error())
+			return
+		}
 		if err := s.announceRayHead(networkID, head); err != nil {
 			_ = stopLocalRay(ctx)
 			fail(w, http.StatusInternalServerError, err.Error())
@@ -326,6 +332,11 @@ func (s *Server) startRay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ray.StartWorker(ctx, address, announcement.Head, policy); err != nil {
+		fail(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := ray.WaitForNode(ctx, ray.DashboardURL(hostOf(announcement.Head), ray.DefaultDashboard), address, 45*time.Second); err != nil {
+		_ = stopLocalRay(ctx)
 		fail(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -404,7 +415,7 @@ func (s *Server) reconcileRay(parent context.Context) {
 	policy, eligible := s.rayPolicy(networkID)
 	if networkID == "" || announcement.Head == "" || !eligible {
 		s.setRayReconcileError(networkID, "")
-		if state.NetworkID != "" || ray.RunningLocal(ctx) {
+		if state.NetworkID != "" {
 			_ = stopLocalRay(ctx)
 			_ = s.clearLocalRayState()
 		}
@@ -428,13 +439,23 @@ func (s *Server) reconcileRay(parent context.Context) {
 		role = "head"
 	}
 	desired := localRayState{NetworkID: networkID, Head: announcement.Head, Role: role, Policy: policy}
-	if state == desired && ray.RunningLocal(ctx) {
+	dashboard := ray.DashboardURL(hostOf(announcement.Head), ray.DefaultDashboard)
+	if state == desired {
+		// Do not tear down a healthy worker for one missed dashboard request.
+		// Confirm the absence briefly; a dead raylet still recovers promptly.
+		if ray.NodeAlive(ctx, dashboard, address) ||
+			ray.WaitForNode(ctx, dashboard, address, 6*time.Second) == nil {
+			s.setRayReconcileError(networkID, "")
+			return
+		}
+	}
+	// A failed `ray start` can leave processes without a state file. Always
+	// clear the local runtime before retrying a missing raylet.
+	if err := stopLocalRay(ctx); err != nil {
+		s.setRayReconcileError(networkID, err.Error())
 		return
 	}
-	if state.NetworkID != "" || ray.RunningLocal(ctx) {
-		_ = stopLocalRay(ctx)
-		_ = s.clearLocalRayState()
-	}
+	_ = s.clearLocalRayState()
 	var err error
 	if role == "head" {
 		err = ray.StartHead(ctx, address, ray.DefaultPort, ray.DefaultDashboard, policy)
@@ -442,10 +463,15 @@ func (s *Server) reconcileRay(parent context.Context) {
 		err = ray.StartWorker(ctx, address, announcement.Head, policy)
 	}
 	if err == nil {
+		err = ray.WaitForNode(ctx, dashboard, address, 45*time.Second)
+	}
+	if err == nil {
 		s.setRayReconcileError(networkID, "")
 		_ = s.writeLocalRayState(desired)
 		s.publishRayChanged(networkID)
 	} else {
+		_ = stopLocalRay(ctx)
+		_ = s.clearLocalRayState()
 		s.setRayReconcileError(networkID, err.Error())
 	}
 }

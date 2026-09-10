@@ -196,6 +196,9 @@ for (const root of ROOTS) {
     if (/ps-metric-card--\$\{color\}/.test(rayTools) || /class: `bx \$\{icon\}`/.test(rayTools)) {
         problems.push('Ray preset choices still contain per-mode card decoration');
     }
+    if (rayTools.includes('Start / attach this device')) {
+        problems.push('Ray tools still exposes the manual attach workaround');
+    }
 }
 
 // The account service can lag a node version. This machine's card must prefer

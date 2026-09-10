@@ -78,6 +78,9 @@ func (s *Server) testProjectRay(w http.ResponseWriter, r *http.Request) {
 		}
 		if check.OK {
 			check.Detail = "Executed a task on this device"
+		} else if strings.Contains(check.Detail, "NodeAffinitySchedulingStrategy") ||
+			strings.Contains(check.Detail, "doesn't exist any more or is infeasible") {
+			check.Detail = "This Ray worker disconnected during the test. Plainshow is reconnecting it automatically."
 		} else if check.Detail == "" {
 			check.Detail = "Not attached to this Ray cluster. Check its compute network and worker policy."
 		}

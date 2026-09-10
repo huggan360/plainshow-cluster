@@ -223,12 +223,59 @@ func Installed(ctx context.Context) bool {
 	return !errors.Is(err, ErrNotInstalled)
 }
 
-// RunningLocal reports whether this machine currently has a live Ray process.
-// It is intentionally separate from Probe: a worker has no local dashboard,
-// but still needs to be recognised after the Plainshow daemon restarts.
-func RunningLocal(ctx context.Context) bool {
-	_, err := runner(ctx, "status")
-	return err == nil
+// NodeAlive verifies the local fact that matters: the Ray dashboard currently
+// contains an alive raylet at this machine's private address. `ray status`
+// cannot answer this; on a worker it can successfully describe the remote head
+// even after the local raylet has died.
+func NodeAlive(ctx context.Context, dashboard, address string) bool {
+	nodes, _, err := dashboardNodes(ctx, dashboard)
+	if err != nil {
+		return false
+	}
+	return hasAliveNode(nodes, address)
+}
+
+// HasAliveNode checks a status snapshot without another dashboard request.
+func (s Status) HasAliveNode(address string) bool { return hasAliveNode(s.Nodes, address) }
+
+func hasAliveNode(nodes []Node, address string) bool {
+	for _, node := range nodes {
+		if node.Alive && sameAddress(node.Address, address) {
+			return true
+		}
+	}
+	return false
+}
+
+// WaitForNode gives a newly started raylet time to register and remain visible
+// before Plainshow records the automatic join as successful.
+func WaitForNode(ctx context.Context, dashboard, address string, wait time.Duration) error {
+	if strings.TrimSpace(dashboard) == "" || strings.TrimSpace(address) == "" {
+		return errors.New("Ray head and local private address are required")
+	}
+	if wait <= 0 {
+		wait = 30 * time.Second
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	ticker := time.NewTicker(750 * time.Millisecond)
+	defer ticker.Stop()
+	consecutive := 0
+	for {
+		if NodeAlive(waitCtx, dashboard, address) {
+			consecutive++
+			if consecutive >= 3 {
+				return nil
+			}
+		} else {
+			consecutive = 0
+		}
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("this machine (%s) did not appear as an alive Ray node within %s", address, wait)
+		case <-ticker.C:
+		}
+	}
 }
 
 // Probe asks the dashboard what the cluster looks like.
@@ -250,10 +297,33 @@ func Probe(ctx context.Context, dashboard string) Status {
 		return status
 	}
 
-	raw, err := fetch(ctx, status.Dashboard+"/nodes?view=summary")
+	nodes, head, err := dashboardNodes(ctx, status.Dashboard)
 	if err != nil {
 		status.Detail = "ray is installed but its cluster is not reachable"
 		return status
+	}
+	status.Nodes, status.Head = nodes, head
+	for _, node := range status.Nodes {
+		if node.Alive {
+			status.TotalCPU += node.CPU
+			status.TotalGPU += node.GPU
+			status.Running = true
+		}
+	}
+	if !status.Running {
+		status.Detail = "the Ray cluster reported no machines"
+	}
+	return status
+}
+
+func dashboardNodes(ctx context.Context, dashboard string) ([]Node, bool, error) {
+	dashboard = strings.TrimRight(strings.TrimSpace(dashboard), "/")
+	if dashboard == "" {
+		return nil, false, errors.New("Ray dashboard address is required")
+	}
+	raw, err := fetch(ctx, dashboard+"/nodes?view=summary")
+	if err != nil {
+		return nil, false, err
 	}
 
 	var payload struct {
@@ -270,10 +340,11 @@ func Probe(ctx context.Context, dashboard string) Status {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		status.Detail = "could not read what the Ray dashboard reported"
-		return status
+		return nil, false, errors.New("could not read what the Ray dashboard reported")
 	}
 
+	nodes := make([]Node, 0, len(payload.Data.Summary))
+	head := false
 	for _, entry := range payload.Data.Summary {
 		node := Node{
 			Address: firstNonEmpty(entry.Raylet.NodeManagerAddress, entry.IP),
@@ -282,24 +353,26 @@ func Probe(ctx context.Context, dashboard string) Status {
 			GPU:     resourceCount(entry.Raylet.Resources, "GPU"),
 		}
 		if entry.Raylet.IsHeadNode {
-			status.Head = true
+			head = true
 		}
-		if node.Alive {
-			status.TotalCPU += node.CPU
-			status.TotalGPU += node.GPU
-		}
-		status.Nodes = append(status.Nodes, node)
+		nodes = append(nodes, node)
 	}
-	for _, node := range status.Nodes {
-		if node.Alive {
-			status.Running = true
-			break
-		}
+	return nodes, head, nil
+}
+
+func sameAddress(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if host, _, err := net.SplitHostPort(a); err == nil {
+		a = host
 	}
-	if !status.Running {
-		status.Detail = "the Ray cluster reported no machines"
+	if host, _, err := net.SplitHostPort(b); err == nil {
+		b = host
 	}
-	return status
+	left, right := net.ParseIP(a), net.ParseIP(b)
+	if left != nil && right != nil {
+		return left.Equal(right)
+	}
+	return strings.EqualFold(a, b)
 }
 
 // resourceCount reads an integer resource, which Ray reports as a float.

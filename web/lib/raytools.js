@@ -68,19 +68,10 @@ export function rayTools(project, activeTab) {
                 el('a', { class: 'btn', href: '#/networks' }, 'Choose network'));
         } finally { button.disabled = false; }
     } }, el('i', { class: 'bx bx-check-circle' }), 'Test cluster');
-    const start = el('button', { class: 'btn', onclick: async () => {
-        start.disabled = true;
-        try {
-            await api('/api/ray/start', { method: 'POST', body: {} });
-            if (disposed) return;
-            toast('Ray started. Other devices attach when assigned to this network.');
-        } catch (error) { if (!disposed) toast(error.message, 'err'); }
-        finally { start.disabled = false; }
-    } }, el('i', { class: 'bx bx-play' }), 'Start / attach this device');
     mount(test, el('div', { class: 'panel__head' }, 'Test your cluster'), result,
-        el('div', { class: 'ray-tool-actions' }, button, start),
+        el('div', { class: 'ray-tool-actions' }, button),
         testTarget,
-        el('p', { class: 'muted' }, 'Test and presets use the active network selected on Networks. Starting Ray contributes this machine’s compute there. Nothing is installed automatically.'));
+        el('p', { class: 'muted' }, 'Test and presets use the active network selected on Networks. Every eligible machine joins automatically when Ray is on.'));
 
     let mode = 'cpu';
     const inventory = el('div', { class: 'ray-inventory muted', 'aria-live': 'polite' }, 'Reading network hardware…');

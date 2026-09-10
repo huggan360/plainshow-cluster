@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/huggan360/plainshow-cluster/internal/ray"
+	"github.com/huggan360/plainshow-cluster/internal/tailnet"
 )
 
 type rayRepairStatus struct {
@@ -113,7 +114,10 @@ func (s *Server) runRayRepair(networkID string) {
 		return
 	}
 	local, _ := s.readLocalRayState()
-	if local.NetworkID != networkID || !ray.RunningLocal(ctx) {
+	announcement := s.rayAnnouncement(networkID)
+	address := tailnet.Probe(ctx).Self.Address
+	if local.NetworkID != networkID ||
+		!ray.NodeAlive(ctx, ray.DashboardURL(hostOf(announcement.Head), ray.DefaultDashboard), address) {
 		failRepair(fmt.Errorf("Ray did not report a running local node after repair"))
 		return
 	}
